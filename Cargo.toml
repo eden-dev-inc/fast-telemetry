@@ -1,0 +1,54 @@
+[workspace]
+members = ["crates/*", "examples/*"]
+resolver = "3"
+
+[workspace.package]
+authors = [
+    "Ryan Daum <ryan.daum@gmail.com>",
+    "Devon Tietjen <devon@eden.dev>",
+    "Mitul Dhawan <mitul@eden.dev>",
+]
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Local crates
+ophanim = { path = "crates/ophanim" }
+ophanim-macros = { path = "crates/ophanim-macros" }
+ophanim-export = { path = "crates/ophanim-export" }
+
+# --- Core: ophanim runtime dependencies ---
+crossbeam-utils = "0.8"
+parking_lot = "0.12"
+uuid = { version = "1", features = ["v4"] }
+
+# --- Macros: ophanim-macros proc-macro dependencies ---
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["extra-traits", "full", "parsing"] }
+
+# --- Export: ophanim-export runtime dependencies ---
+log = "0.4"
+memchr = "2"                                                              # dogstatsd feature
+tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time", "macros"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# --- OTLP: ophanim + ophanim-export otlp feature ---
+flate2 = "1"
+prost = "0.13"                                                            # pinned by opentelemetry-proto 0.30
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+
+# --- Dev/test/bench only ---
+criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+shuttle = "0.8"
+statsd-parser = "0.3"
+
+[profile.release]
+strip = true
+
+[profile.bench]
+inherits = "release"
+lto = true
+codegen-units = 1
+strip = false

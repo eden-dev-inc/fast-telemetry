@@ -1,0 +1,38 @@
+[package]
+name = "ophanim"
+version = "0.1.0"
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "L1-cache friendly thread-sharded counters for high-performance telemetry"
+
+[features]
+default = ["macros"]
+macros = ["dep:ophanim-macros"]
+otlp = ["dep:opentelemetry-proto", "dep:prost"]
+shuttle-tests = ["dep:shuttle"]
+bench-tools = ["dep:libc", "dep:opentelemetry", "dep:opentelemetry_sdk"]
+
+[dependencies]
+crossbeam-utils = { workspace = true }
+ophanim-macros = { workspace = true, optional = true }
+libc = { version = "0.2", optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-proto = { version = "0.30", default-features = false, features = ["gen-tonic", "gen-tonic-messages", "metrics", "trace"], optional = true }
+opentelemetry_sdk = { workspace = true, optional = true, features = ["testing"] }
+parking_lot = { workspace = true }
+prost = { version = "0.13", optional = true }
+shuttle = { workspace = true, optional = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+log = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+statsd-parser = { workspace = true }
+
+[[bench]]
+name = "fast_vs_otel"
+harness = false
+required-features = ["otlp"]

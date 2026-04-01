@@ -1,0 +1,21 @@
+/target
+Cargo.lock
+**/*.rs.bk
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Benchmark artifacts
+crates/ophanim/bench/results/
+perf.data
+perf.data.old
+flamegraph.svg

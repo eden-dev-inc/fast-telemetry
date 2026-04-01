@@ -1,0 +1,12 @@
+services:
+  statsd-exporter:
+    image: prom/statsd-exporter:v0.28.0
+    container_name: ophanim-statsd-exporter
+    command:
+      - "--web.listen-address=:9102"
+      - "--statsd.listen-udp=:8125"
+      - "--statsd.parse-dogstatsd-tags"
+      - "--log.level=warn"
+    ports:
+      - "8125:8125/udp"
+      - "9102:9102"
