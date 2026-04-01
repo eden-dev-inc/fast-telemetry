@@ -19,3 +19,4 @@ crates/ophanim/bench/results/
 perf.data
 perf.data.old
 flamegraph.svg
+orphanim-2.png
