@@ -23,16 +23,17 @@ pub use gauge_i64::{DynamicGaugeI64, DynamicGaugeI64Series};
 pub use histogram::{DynamicHistogram, DynamicHistogramSeries, DynamicHistogramSeriesView};
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+#[cfg(feature = "eviction")]
+use std::sync::atomic::{AtomicU32, Ordering};
 
 pub(crate) use crate::thread_id::thread_id;
 
-// Global eviction cycle counter.
-// Incremented by the exporter task (typically every 10 seconds).
-// Each series tracks when it was last accessed using this cycle.
+#[cfg(feature = "eviction")]
 static EVICTION_CYCLE: AtomicU32 = AtomicU32::new(0);
 
 /// Get the current eviction cycle.
+#[cfg(feature = "eviction")]
 #[inline]
 pub fn current_cycle() -> u32 {
     EVICTION_CYCLE.load(Ordering::Relaxed)
@@ -41,6 +42,7 @@ pub fn current_cycle() -> u32 {
 /// Advance the eviction cycle by 1 and return the new value.
 ///
 /// Call this from your exporter task before calling `evict_stale()` on metrics.
+#[cfg(feature = "eviction")]
 #[inline]
 pub fn advance_cycle() -> u32 {
     EVICTION_CYCLE.fetch_add(1, Ordering::Relaxed) + 1

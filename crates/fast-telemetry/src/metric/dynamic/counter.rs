@@ -1,12 +1,16 @@
 //! Runtime-labeled counter for dynamic dimensions.
 
-use super::{COUNTER_IDS, DynamicLabelSet, current_cycle, thread_id};
+#[cfg(feature = "eviction")]
+use super::current_cycle;
+use super::{COUNTER_IDS, DynamicLabelSet, thread_id};
 use crossbeam_utils::CachePadded;
 use parking_lot::RwLock;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+#[cfg(feature = "eviction")]
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 
 const DEFAULT_MAX_SERIES: usize = 2000;
@@ -20,12 +24,14 @@ struct CounterSeries {
     evicted: AtomicBool,
     /// Last export cycle when this series was accessed.
     /// Used for staleness-based eviction.
+    #[cfg(feature = "eviction")]
     last_accessed_cycle: AtomicU32,
 }
 
 type CounterIndexShard = CachePadded<RwLock<HashMap<DynamicLabelSet, Arc<CounterSeries>>>>;
 
 impl CounterSeries {
+    #[cfg(feature = "eviction")]
     fn new(shard_count: usize, current_cycle: u32) -> Self {
         Self {
             cells: (0..shard_count)
@@ -33,6 +39,16 @@ impl CounterSeries {
                 .collect(),
             evicted: AtomicBool::new(false),
             last_accessed_cycle: AtomicU32::new(current_cycle),
+        }
+    }
+
+    #[cfg(not(feature = "eviction"))]
+    fn new(shard_count: usize) -> Self {
+        Self {
+            cells: (0..shard_count)
+                .map(|_| CachePadded::new(AtomicIsize::new(0)))
+                .collect(),
+            evicted: AtomicBool::new(false),
         }
     }
 
@@ -44,6 +60,7 @@ impl CounterSeries {
     }
 
     /// Touch the series timestamp. Called on slow path only.
+    #[cfg(feature = "eviction")]
     #[inline]
     fn touch(&self, cycle: u32) {
         self.last_accessed_cycle.store(cycle, Ordering::Relaxed);
@@ -62,6 +79,7 @@ impl CounterSeries {
         self.evicted.load(Ordering::Relaxed)
     }
 
+    #[cfg(feature = "eviction")]
     fn mark_evicted(&self) {
         self.evicted.store(true, Ordering::Relaxed);
     }
@@ -271,6 +289,7 @@ impl DynamicCounter {
     /// holds a DynamicCounterSeries handle to them.
     ///
     /// Returns the number of series evicted.
+    #[cfg(feature = "eviction")]
     pub fn evict_stale(&self, max_staleness: u32) -> usize {
         let cycle = current_cycle();
         let mut removed = 0;
@@ -301,6 +320,7 @@ impl DynamicCounter {
     fn lookup_or_create(&self, labels: &[(&str, &str)]) -> Arc<CounterSeries> {
         let requested_key = DynamicLabelSet::from_pairs(labels);
         let requested_shard = self.index_shard_for(&requested_key);
+        #[cfg(feature = "eviction")]
         let cycle = current_cycle();
 
         // Fast path: read lock only.
@@ -308,6 +328,7 @@ impl DynamicCounter {
             .read()
             .get(&requested_key)
         {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
@@ -328,16 +349,21 @@ impl DynamicCounter {
 
         // Check read lock on the (possibly redirected) shard.
         if let Some(series) = self.index_shards[shard].read().get(&key) {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
 
         let mut guard = self.index_shards[shard].write();
         if let Some(series) = guard.get(&key) {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
+        #[cfg(feature = "eviction")]
         let series = Arc::new(CounterSeries::new(self.shard_count, cycle));
+        #[cfg(not(feature = "eviction"))]
+        let series = Arc::new(CounterSeries::new(self.shard_count));
         guard.insert(key, Arc::clone(&series));
         self.series_count.fetch_add(1, Ordering::Relaxed);
         series
@@ -369,6 +395,7 @@ impl DynamicCounter {
             if series.is_evicted() {
                 return None;
             }
+            #[cfg(feature = "eviction")]
             series.touch(current_cycle());
             Some(series)
         })
@@ -391,8 +418,9 @@ impl DynamicCounter {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "eviction")]
+    use super::super::advance_cycle;
     use super::*;
-    use crate::advance_cycle;
 
     #[test]
     fn test_basic_operations() {
@@ -454,6 +482,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "eviction")]
     #[test]
     fn test_evict_stale() {
         let counter = DynamicCounter::new(4);
@@ -485,6 +514,7 @@ mod tests {
         assert_eq!(counter.get(labels), 1);
     }
 
+    #[cfg(feature = "eviction")]
     #[test]
     fn test_evict_stale_keeps_active() {
         let counter = DynamicCounter::new(4);
@@ -513,6 +543,7 @@ mod tests {
         assert_eq!(counter.get(stale), 0);
     }
 
+    #[cfg(feature = "eviction")]
     #[test]
     fn test_eviction_tombstone_invalidates_cache() {
         let counter = DynamicCounter::new(4);
@@ -537,6 +568,7 @@ mod tests {
         assert_eq!(counter.get(labels), 1); // Fresh series starts at 1, not 3
     }
 
+    #[cfg(feature = "eviction")]
     #[test]
     fn test_series_handle_protects_from_eviction() {
         let counter = DynamicCounter::new(4);
@@ -563,6 +595,7 @@ mod tests {
         assert_eq!(counter.get(labels), 2);
     }
 
+    #[cfg(feature = "eviction")]
     #[test]
     fn test_series_evicted_after_handle_dropped() {
         let counter = DynamicCounter::new(4);
@@ -649,47 +682,40 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "eviction")]
     #[test]
     fn test_eviction_and_reinsertion_bookkeeping() {
         let counter = DynamicCounter::with_max_series(4, 3);
 
-        // Fill to cap
         counter.inc(&[("k", "a")]);
         counter.inc(&[("k", "b")]);
         counter.inc(&[("k", "c")]);
         assert_eq!(counter.cardinality(), 3);
 
-        // Next one should overflow
         counter.inc(&[("k", "d")]);
         assert!(counter.overflow_count() > 0);
         let card_after_overflow = counter.cardinality();
-        assert!(card_after_overflow <= 4); // 3 + overflow bucket
+        assert!(card_after_overflow <= 4);
 
-        // Evict all — advance cycles, flush caches, evict
         advance_cycle();
         advance_cycle();
         advance_cycle();
-        counter.inc(&[("flush", "cache")]); // flush thread-local cache
+        counter.inc(&[("flush", "cache")]);
         let evicted = counter.evict_stale(1);
         assert!(evicted > 0);
 
-        // After eviction, cardinality should drop
         let card_after_evict = counter.cardinality();
         assert!(
             card_after_evict < card_after_overflow,
             "cardinality should decrease after eviction: before={card_after_overflow} after={card_after_evict}"
         );
 
-        // Re-insert — should work without overflow since we're below cap again
         let overflow_before = counter.overflow_count();
         counter.inc(&[("k", "new1")]);
         counter.inc(&[("k", "new2")]);
 
-        // Cardinality should grow but stay reasonable
         assert!(counter.cardinality() <= 5);
 
-        // Should not have overflowed again (we're below cap after eviction)
-        // Note: can't assert exactly because the flush/cache series also count
         let overflow_after = counter.overflow_count();
         assert!(
             overflow_after - overflow_before <= 1,

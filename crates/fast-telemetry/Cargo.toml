@@ -12,6 +12,7 @@ macros = ["dep:fast-telemetry-macros"]
 otlp = ["dep:opentelemetry-proto", "dep:prost"]
 shuttle-tests = ["dep:shuttle"]
 bench-tools = ["dep:libc", "dep:opentelemetry", "dep:opentelemetry_sdk"]
+eviction = []
 
 [dependencies]
 crossbeam-utils = { workspace = true }
@@ -37,3 +38,7 @@ statsd-parser = { workspace = true }
 name = "fast_vs_otel"
 harness = false
 required-features = ["otlp"]
+
+[[bin]]
+name = "bench_dynamic_series"
+required-features = ["eviction"]
