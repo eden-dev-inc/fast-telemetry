@@ -51,8 +51,10 @@ pub use metric::{
     DynamicDistributionSeries, DynamicGauge, DynamicGaugeI64, DynamicGaugeI64Series,
     DynamicGaugeSeries, DynamicHistogram, DynamicHistogramSeries, DynamicHistogramSeriesView,
     DynamicLabelSet, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledGauge,
-    LabeledHistogram, advance_cycle, current_cycle,
+    LabeledHistogram,
 };
+#[cfg(feature = "eviction")]
+pub use metric::{advance_cycle, current_cycle};
 pub use span::{
     CompletedSpan, Span, SpanAttribute, SpanCollector, SpanEvent, SpanId, SpanKind, SpanStatus,
     SpanValue, TraceId, current_span_id, current_trace_id,

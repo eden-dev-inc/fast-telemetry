@@ -1,10 +1,11 @@
 # fast-telemetry
+
 High-performance, cache-friendly telemetry for Rust.
 
 ## Crates
 
-| Crate                                     | Description                                                                                                        |
-|-------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| Crate                                                   | Description                                                                                                        |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | [`fast-telemetry`](crates/fast-telemetry)               | Sharded counters, gauges, histograms, distributions, spans, and format serialization (Prometheus, DogStatsD, OTLP) |
 | [`fast-telemetry-macros`](crates/fast-telemetry-macros) | Derive macros: `ExportMetrics` and `LabelEnum`                                                                     |
 | [`fast-telemetry-export`](crates/fast-telemetry-export) | I/O adapters: DogStatsD over UDP, OTLP over HTTP/protobuf, span export, stale-series sweeping                      |
@@ -39,14 +40,14 @@ path and decided to open-source the result.
 
 We shard counting events across cache-line-padded atomic cells per
 thread. The common write path is effectively thread-local, minimizing cross-core
-contention. *Reads* aggregate all shards, but this is fine because export is
+contention. _Reads_ aggregate all shards, but this is fine because export is
 infrequent relative to increments.
 
-| Operation                        | Latency       |
-|----------------------------------|---------------|
+| Operation                               | Latency       |
+| --------------------------------------- | ------------- |
 | Thread-local increment (fast-telemetry) | ~2 ns         |
-| Uncontended atomic               | ~10 ns        |
-| **Contended atomic (16 cores)**  | **40-400 ns** |
+| Uncontended atomic                      | ~10 ns        |
+| **Contended atomic (16 cores)**         | **40-400 ns** |
 
 The difference is important when you're incrementing counters millions of times per
 second and don't want your telemetry to be the thing that slows you down or pollutes your numbers.
@@ -80,6 +81,17 @@ broader OpenTelemetry ecosystem.
 For detailed benchmark results and methodology, see
 [BENCHMARK_REPORT.md](crates/fast-telemetry/bench/BENCHMARK_REPORT.md) and the
 [bench harness README](crates/fast-telemetry/bench/README.md).
+
+## Feature Flags
+
+| Feature    | Default | Description                                      |
+| ---------- | ------- | ------------------------------------------------ |
+| `macros`   | ✓       | `ExportMetrics` and `LabelEnum` derive macros    |
+| `otlp`     |         | OTLP protobuf export support                     |
+| `eviction` |         | Enable stale-series eviction for dynamic metrics |
+
+The `eviction` feature enables `evict_stale()`, `advance_cycle()`, and `current_cycle()` on
+dynamic metric types. Without it, these APIs are not available.
 
 ## Quick Start
 
@@ -169,6 +181,7 @@ counter.inc(& [("endpoint_id", "ep-1"), ("org_id", "org-a")]);
 let series = counter.series(& [("endpoint_id", "ep-1"), ("org_id", "org-a")]);
 series.inc();
 
+// With the `eviction` feature enabled:
 // Long-lived handles can outlive a stale-series sweep.
 if series.is_evicted() {
   let fresh = counter.series(& [("endpoint_id", "ep-1"), ("org_id", "org-a")]);
@@ -176,7 +189,7 @@ if series.is_evicted() {
 }
 
 advance_cycle();
-let _evicted = counter.evict_stale(30);
+let _evicted = counter.evict_stale(30);  // requires `eviction` feature
 let _overflow = counter.overflow_count();
 ```
 
@@ -188,7 +201,7 @@ but they come with a lifecycle worth planning for:
 - `DynamicHistogram::with_limits(..., max_series)` provides the same cap for histograms
 - once the cap is hit, new label sets are redirected into a single overflow series
   and `overflow_count()` tells you how often that happened
-- stale series are evicted with `evict_stale(...)` after `advance_cycle()`
+- with the `eviction` feature, stale series are evicted with `evict_stale(...)` after `advance_cycle()`
 - long-lived handles can check `is_evicted()` and re-resolve with `series(...)`
 
 ## Spans
@@ -362,7 +375,7 @@ let request = otlp::build_export_request( & resource, "fast-telemetry", metrics)
 ### Metric Types
 
 | Type                 | Use Case                                 | Hot Path Cost             |
-|----------------------|------------------------------------------|---------------------------|
+| -------------------- | ---------------------------------------- | ------------------------- |
 | `Counter`            | Totals that only go up                   | ~2ns (thread-local write) |
 | `Histogram`          | Latency distributions with fixed buckets | ~2ns + bucket lookup      |
 | `Distribution`       | Exponential-bucket distributions         | ~2ns + bucket lookup      |
@@ -371,7 +384,7 @@ let request = otlp::build_export_request( & resource, "fast-telemetry", metrics)
 ### Labeled Variants
 
 | Type                               | Label Resolution                    |
-|------------------------------------|-------------------------------------|
+| ---------------------------------- | ----------------------------------- |
 | `LabeledCounter<L>`                | Compile-time enum, O(1) array index |
 | `LabeledHistogram<L>`              | Compile-time enum, O(1) array index |
 | `LabeledGauge<L>`                  | Compile-time enum, O(1) array index |
@@ -382,18 +395,18 @@ let request = otlp::build_export_request( & resource, "fast-telemetry", metrics)
 
 ### Derive Macros
 
-| Macro                                      | Purpose                                                                                   |
-|--------------------------------------------|-------------------------------------------------------------------------------------------|
+| Macro                                      | Purpose                                                                                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `#[derive(ExportMetrics)]`                 | Generate `export_prometheus`, `export_dogstatsd`, `export_dogstatsd_delta`, `export_dogstatsd_with_temporality`, and optional `export_otlp` |
-| `#[derive(LabelEnum)]` (via `DeriveLabel`) | Generate `LabelEnum` trait impl for enum labels                                           |
+| `#[derive(LabelEnum)]` (via `DeriveLabel`) | Generate `LabelEnum` trait impl for enum labels                                                                                             |
 
 ### Export Formats
 
-| Format          | Method                                            | Transport                 |
-|-----------------|---------------------------------------------------|---------------------------|
-| Prometheus text | `export_prometheus()`                             | Serve at `/metrics`       |
+| Format          | Method                                                                                                          | Transport                        |
+| --------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| Prometheus text | `export_prometheus()`                                                                                           | Serve at `/metrics`              |
 | DogStatsD       | `export_dogstatsd()`, `export_dogstatsd_delta()`, or `export_dogstatsd_with_temporality(..., Temporality, ...)` | UDP via `fast-telemetry-export`  |
-| OTLP protobuf   | `export_otlp()` (requires `#[otlp]` on struct)    | HTTP via `fast-telemetry-export` |
+| OTLP protobuf   | `export_otlp()` (requires `#[otlp]` on struct)                                                                  | HTTP via `fast-telemetry-export` |
 
 ## Shard Count
 

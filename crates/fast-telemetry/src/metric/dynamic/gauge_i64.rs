@@ -4,13 +4,17 @@
 //! that need atomic add/sub semantics but should export as absolute gauge values
 //! (not counter deltas).
 
-use super::{DynamicLabelSet, current_cycle, thread_id};
+#[cfg(feature = "eviction")]
+use super::current_cycle;
+use super::{DynamicLabelSet, thread_id};
 use crossbeam_utils::CachePadded;
 use parking_lot::RwLock;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+#[cfg(feature = "eviction")]
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 
 static GAUGE_I64_IDS: AtomicUsize = AtomicUsize::new(1);
@@ -24,10 +28,12 @@ struct GaugeI64Series {
     /// Tombstone flag set by exporter before removing from map.
     evicted: AtomicBool,
     /// Last export cycle when this series was accessed.
+    #[cfg(feature = "eviction")]
     last_accessed_cycle: AtomicU32,
 }
 
 impl GaugeI64Series {
+    #[cfg(feature = "eviction")]
     fn new(shard_count: usize, cycle: u32) -> Self {
         Self {
             cells: (0..shard_count)
@@ -35,6 +41,16 @@ impl GaugeI64Series {
                 .collect(),
             evicted: AtomicBool::new(false),
             last_accessed_cycle: AtomicU32::new(cycle),
+        }
+    }
+
+    #[cfg(not(feature = "eviction"))]
+    fn new(shard_count: usize) -> Self {
+        Self {
+            cells: (0..shard_count)
+                .map(|_| CachePadded::new(AtomicI64::new(0)))
+                .collect(),
+            evicted: AtomicBool::new(false),
         }
     }
 
@@ -61,6 +77,7 @@ impl GaugeI64Series {
     }
 
     /// Touch the series timestamp. Called on slow path only.
+    #[cfg(feature = "eviction")]
     #[inline]
     fn touch(&self, cycle: u32) {
         self.last_accessed_cycle.store(cycle, Ordering::Relaxed);
@@ -79,6 +96,7 @@ impl GaugeI64Series {
         self.evicted.load(Ordering::Relaxed)
     }
 
+    #[cfg(feature = "eviction")]
     fn mark_evicted(&self) {
         self.evicted.store(true, Ordering::Relaxed);
     }
@@ -317,6 +335,7 @@ impl DynamicGaugeI64 {
     /// holds a DynamicGaugeI64Series handle to them.
     ///
     /// Returns the number of series evicted.
+    #[cfg(feature = "eviction")]
     pub fn evict_stale(&self, max_staleness: u32) -> usize {
         let cycle = current_cycle();
         let mut removed = 0;
@@ -347,6 +366,7 @@ impl DynamicGaugeI64 {
     fn lookup_or_create(&self, labels: &[(&str, &str)]) -> Arc<GaugeI64Series> {
         let requested_key = DynamicLabelSet::from_pairs(labels);
         let requested_shard = self.index_shard_for(&requested_key);
+        #[cfg(feature = "eviction")]
         let cycle = current_cycle();
 
         // Fast path: read lock only.
@@ -354,6 +374,7 @@ impl DynamicGaugeI64 {
             .read()
             .get(&requested_key)
         {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
@@ -370,16 +391,21 @@ impl DynamicGaugeI64 {
         let shard = self.index_shard_for(&key);
 
         if let Some(series) = self.index_shards[shard].read().get(&key) {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
 
         let mut guard = self.index_shards[shard].write();
         if let Some(series) = guard.get(&key) {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
+        #[cfg(feature = "eviction")]
         let series = Arc::new(GaugeI64Series::new(self.shard_count, cycle));
+        #[cfg(not(feature = "eviction"))]
+        let series = Arc::new(GaugeI64Series::new(self.shard_count));
         guard.insert(key, Arc::clone(&series));
         self.series_count.fetch_add(1, Ordering::Relaxed);
         series
@@ -411,6 +437,7 @@ impl DynamicGaugeI64 {
             if series.is_evicted() {
                 return None;
             }
+            #[cfg(feature = "eviction")]
             series.touch(current_cycle());
             Some(series)
         })
@@ -433,8 +460,9 @@ impl DynamicGaugeI64 {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "eviction")]
+    use super::super::advance_cycle;
     use super::*;
-    use crate::advance_cycle;
 
     #[test]
     fn test_basic_operations() {
@@ -476,6 +504,7 @@ mod tests {
         assert_eq!(total, 30);
     }
 
+    #[cfg(feature = "eviction")]
     #[test]
     fn test_evict_stale() {
         let gauge = DynamicGaugeI64::new(4);
@@ -497,6 +526,7 @@ mod tests {
         assert_eq!(gauge.get(labels), 0);
     }
 
+    #[cfg(feature = "eviction")]
     #[test]
     fn test_series_handle_protects_from_eviction() {
         let gauge = DynamicGaugeI64::new(4);
