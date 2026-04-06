@@ -4,7 +4,9 @@
 //! `Distribution` implementation.  Each label set × thread gets its own
 //! fixed-size bucket array.
 
-use super::{DISTRIBUTION_IDS, DynamicLabelSet, current_cycle};
+#[cfg(feature = "eviction")]
+use super::current_cycle;
+use super::{DISTRIBUTION_IDS, DynamicLabelSet};
 use crate::exp_buckets::{ExpBuckets, ExpBucketsSnapshot};
 use crossbeam_utils::CachePadded;
 use parking_lot::{Mutex, RwLock};
@@ -13,7 +15,9 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::Weak;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+#[cfg(feature = "eviction")]
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 const DEFAULT_MAX_SERIES: usize = 2000;
 const OVERFLOW_LABEL_KEY: &str = "__ft_overflow";
@@ -29,10 +33,12 @@ struct DistributionSeries {
     /// Tombstone flag set by exporter before removing from map.
     evicted: AtomicBool,
     /// Last export cycle when this series was accessed.
+    #[cfg(feature = "eviction")]
     last_accessed_cycle: AtomicU32,
 }
 
 impl DistributionSeries {
+    #[cfg(feature = "eviction")]
     fn new(cycle: u32) -> Self {
         Self {
             id: SERIES_IDS.fetch_add(1, Ordering::Relaxed),
@@ -42,7 +48,17 @@ impl DistributionSeries {
         }
     }
 
+    #[cfg(not(feature = "eviction"))]
+    fn new() -> Self {
+        Self {
+            id: SERIES_IDS.fetch_add(1, Ordering::Relaxed),
+            registry: Mutex::new(Vec::new()),
+            evicted: AtomicBool::new(false),
+        }
+    }
+
     /// Touch the series timestamp. Called on slow path only.
+    #[cfg(feature = "eviction")]
     #[inline]
     fn touch(&self, cycle: u32) {
         self.last_accessed_cycle.store(cycle, Ordering::Relaxed);
@@ -53,6 +69,7 @@ impl DistributionSeries {
         self.evicted.load(Ordering::Relaxed)
     }
 
+    #[cfg(feature = "eviction")]
     fn mark_evicted(&self) {
         self.evicted.store(true, Ordering::Relaxed);
     }
@@ -286,6 +303,7 @@ impl DynamicDistribution {
     /// holds a DynamicDistributionSeries handle to them.
     ///
     /// Returns the number of series evicted.
+    #[cfg(feature = "eviction")]
     pub fn evict_stale(&self, max_staleness: u32) -> usize {
         let cycle = current_cycle();
         let mut removed = 0;
@@ -293,9 +311,12 @@ impl DynamicDistribution {
         for shard in &self.index_shards {
             let mut guard = shard.write();
             guard.retain(|_labels, series| {
+                // Protected if someone holds a handle (strong_count > 1 means
+                // both the map and at least one DynamicDistributionSeries hold refs)
                 if Arc::strong_count(series) > 1 {
                     return true;
                 }
+                // Otherwise check timestamp staleness
                 let last = series.last_accessed_cycle.load(Ordering::Relaxed);
                 let stale = cycle.saturating_sub(last) > max_staleness;
                 if stale {
@@ -313,6 +334,7 @@ impl DynamicDistribution {
     fn lookup_or_create(&self, labels: &[(&str, &str)]) -> Arc<DistributionSeries> {
         let requested_key = DynamicLabelSet::from_pairs(labels);
         let requested_shard = self.index_shard_for(&requested_key);
+        #[cfg(feature = "eviction")]
         let cycle = current_cycle();
 
         // Fast path: read lock only.
@@ -320,6 +342,7 @@ impl DynamicDistribution {
             .read()
             .get(&requested_key)
         {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
@@ -336,16 +359,21 @@ impl DynamicDistribution {
         let shard = self.index_shard_for(&key);
 
         if let Some(series) = self.index_shards[shard].read().get(&key) {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
 
         let mut guard = self.index_shards[shard].write();
         if let Some(series) = guard.get(&key) {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
+        #[cfg(feature = "eviction")]
         let series = Arc::new(DistributionSeries::new(cycle));
+        #[cfg(not(feature = "eviction"))]
+        let series = Arc::new(DistributionSeries::new());
         guard.insert(key, Arc::clone(&series));
         self.series_count.fetch_add(1, Ordering::Relaxed);
         series
@@ -381,6 +409,7 @@ impl DynamicDistribution {
             if series.is_evicted() {
                 return None;
             }
+            #[cfg(feature = "eviction")]
             series.touch(current_cycle());
             Some((series, Arc::clone(&entry.buf)))
         })
