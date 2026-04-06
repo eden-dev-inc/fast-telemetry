@@ -3,7 +3,14 @@ name = "fast-telemetry-macros"
 version = "0.1.0"
 edition = "2024"
 authors.workspace = true
+homepage.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Derive macros for fast-telemetry metric export and enum labels"
+documentation = "https://docs.rs/fast-telemetry-macros"
+keywords = ["telemetry", "metrics", "proc-macro", "prometheus", "dogstatsd"]
+readme = "README.md"
 
 [lib]
 proc-macro = true

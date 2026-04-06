@@ -3,8 +3,17 @@ name = "fast-telemetry-export"
 version = "0.1.0"
 edition = "2024"
 authors.workspace = true
+homepage.workspace = true
 license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 description = "Export adapters for fast-telemetry metrics: DogStatsD, OTLP, span export, and stale-series sweeping"
+documentation = "https://docs.rs/fast-telemetry-export"
+keywords = ["telemetry", "metrics", "dogstatsd", "otlp", "tracing"]
+readme = "README.md"
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["dogstatsd", "otlp"]

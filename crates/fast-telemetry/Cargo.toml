@@ -3,8 +3,17 @@ name = "fast-telemetry"
 version = "0.1.0"
 edition = "2024"
 authors.workspace = true
+homepage.workspace = true
 license.workspace = true
-description = "L1-cache friendly thread-sharded counters for high-performance telemetry"
+repository.workspace = true
+rust-version.workspace = true
+description = "High-performance, cache-friendly telemetry primitives and export formats for Rust"
+documentation = "https://docs.rs/fast-telemetry"
+keywords = ["telemetry", "metrics", "tracing", "otlp", "performance"]
+readme = "README.md"
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["macros"]
