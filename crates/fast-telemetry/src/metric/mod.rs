@@ -14,9 +14,10 @@ pub use distribution::Distribution;
 pub use dynamic::{
     DynamicCounter, DynamicCounterSeries, DynamicDistribution, DynamicDistributionSeries,
     DynamicGauge, DynamicGaugeI64, DynamicGaugeI64Series, DynamicGaugeSeries, DynamicHistogram,
-    DynamicHistogramSeries, DynamicHistogramSeriesView, DynamicLabelSet, advance_cycle,
-    current_cycle,
+    DynamicHistogramSeries, DynamicHistogramSeriesView, DynamicLabelSet,
 };
+#[cfg(feature = "eviction")]
+pub use dynamic::{advance_cycle, current_cycle};
 pub use gauge::Gauge;
 pub use gauge_f64::GaugeF64;
 pub use histogram::Histogram;

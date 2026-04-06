@@ -1,12 +1,16 @@
 //! Runtime-labeled gauge for dynamic dimensions.
 
-use super::{DynamicLabelSet, GAUGE_IDS, current_cycle};
+#[cfg(feature = "eviction")]
+use super::current_cycle;
+use super::{DynamicLabelSet, GAUGE_IDS};
 use crossbeam_utils::CachePadded;
 use parking_lot::RwLock;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+#[cfg(feature = "eviction")]
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 
 const DEFAULT_MAX_SERIES: usize = 2000;
@@ -20,15 +24,25 @@ struct GaugeSeries {
     /// Tombstone flag set by exporter before removing from map.
     evicted: AtomicBool,
     /// Last export cycle when this series was accessed.
+    #[cfg(feature = "eviction")]
     last_accessed_cycle: AtomicU32,
 }
 
 impl GaugeSeries {
+    #[cfg(feature = "eviction")]
     fn new(cycle: u32) -> Self {
         Self {
             bits: CachePadded::new(AtomicU64::new(0.0_f64.to_bits())),
             evicted: AtomicBool::new(false),
             last_accessed_cycle: AtomicU32::new(cycle),
+        }
+    }
+
+    #[cfg(not(feature = "eviction"))]
+    fn new() -> Self {
+        Self {
+            bits: CachePadded::new(AtomicU64::new(0.0_f64.to_bits())),
+            evicted: AtomicBool::new(false),
         }
     }
 
@@ -40,6 +54,7 @@ impl GaugeSeries {
     }
 
     /// Touch the series timestamp. Called on slow path only.
+    #[cfg(feature = "eviction")]
     #[inline]
     fn touch(&self, cycle: u32) {
         self.last_accessed_cycle.store(cycle, Ordering::Relaxed);
@@ -55,6 +70,7 @@ impl GaugeSeries {
         self.evicted.load(Ordering::Relaxed)
     }
 
+    #[cfg(feature = "eviction")]
     fn mark_evicted(&self) {
         self.evicted.store(true, Ordering::Relaxed);
     }
@@ -229,6 +245,7 @@ impl DynamicGauge {
     /// holds a DynamicGaugeSeries handle to them.
     ///
     /// Returns the number of series evicted.
+    #[cfg(feature = "eviction")]
     pub fn evict_stale(&self, max_staleness: u32) -> usize {
         let cycle = current_cycle();
         let mut removed = 0;
@@ -259,6 +276,7 @@ impl DynamicGauge {
     fn lookup_or_create(&self, labels: &[(&str, &str)]) -> Arc<GaugeSeries> {
         let requested_key = DynamicLabelSet::from_pairs(labels);
         let requested_shard = self.index_shard_for(&requested_key);
+        #[cfg(feature = "eviction")]
         let cycle = current_cycle();
 
         // Fast path: read lock only.
@@ -266,6 +284,7 @@ impl DynamicGauge {
             .read()
             .get(&requested_key)
         {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
@@ -282,16 +301,21 @@ impl DynamicGauge {
         let shard = self.index_shard_for(&key);
 
         if let Some(series) = self.index_shards[shard].read().get(&key) {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
 
         let mut guard = self.index_shards[shard].write();
         if let Some(series) = guard.get(&key) {
+            #[cfg(feature = "eviction")]
             series.touch(cycle);
             return Arc::clone(series);
         }
+        #[cfg(feature = "eviction")]
         let series = Arc::new(GaugeSeries::new(cycle));
+        #[cfg(not(feature = "eviction"))]
+        let series = Arc::new(GaugeSeries::new());
         guard.insert(key, Arc::clone(&series));
         self.series_count.fetch_add(1, Ordering::Relaxed);
         series
@@ -323,6 +347,7 @@ impl DynamicGauge {
             if series.is_evicted() {
                 return None;
             }
+            #[cfg(feature = "eviction")]
             series.touch(current_cycle());
             Some(series)
         })
