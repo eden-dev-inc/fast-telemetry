@@ -15,8 +15,9 @@ Cargo.lock
 Thumbs.db
 
 # Benchmark artifacts
-crates/ophanim/bench/results/
+**/bench/results/
+**/target/criterion/
 perf.data
 perf.data.old
 flamegraph.svg
-orphanim-2.png
+fast-telemetry-2.png

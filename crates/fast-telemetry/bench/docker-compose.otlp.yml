@@ -1,0 +1,11 @@
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.0
+    container_name: fast-telemetry-otel-collector
+    command:
+      - "--config=/etc/otel-collector-config.yml"
+    volumes:
+      - "./otel-collector-config.yml:/etc/otel-collector-config.yml:ro"
+    ports:
+      - "4318:4318"     # OTLP HTTP receiver
+      - "8889:8889"     # Prometheus exporter (for verification)

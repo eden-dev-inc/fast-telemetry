@@ -12,27 +12,27 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 # Local crates
-ophanim = { path = "crates/ophanim" }
-ophanim-macros = { path = "crates/ophanim-macros" }
-ophanim-export = { path = "crates/ophanim-export" }
+fast-telemetry = { path = "crates/fast-telemetry" }
+fast-telemetry-macros = { path = "crates/fast-telemetry-macros" }
+fast-telemetry-export = { path = "crates/fast-telemetry-export" }
 
-# --- Core: ophanim runtime dependencies ---
+# --- Core: fast-telemetry runtime dependencies ---
 crossbeam-utils = "0.8"
 parking_lot = "0.12"
 uuid = { version = "1", features = ["v4"] }
 
-# --- Macros: ophanim-macros proc-macro dependencies ---
+# --- Macros: fast-telemetry-macros proc-macro dependencies ---
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["extra-traits", "full", "parsing"] }
 
-# --- Export: ophanim-export runtime dependencies ---
+# --- Export: fast-telemetry-export runtime dependencies ---
 log = "0.4"
 memchr = "2"                                                              # dogstatsd feature
 tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time", "macros"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 
-# --- OTLP: ophanim + ophanim-export otlp feature ---
+# --- OTLP: fast-telemetry + fast-telemetry-export otlp feature ---
 flate2 = "1"
 prost = "0.13"                                                            # pinned by opentelemetry-proto 0.30
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }

@@ -1,13 +1,13 @@
 [package]
-name = "ophanim-demo"
+name = "fast-telemetry-demo"
 version = "0.0.0"
 edition = "2024"
 publish = false
 
 
 [dependencies]
-ophanim = { workspace = true, features = ["macros", "otlp"] }
-ophanim-export = { workspace = true }
+fast-telemetry = { workspace = true, features = ["macros", "otlp"] }
+fast-telemetry-export = { workspace = true }
 log = { workspace = true }
 env_logger = "0.11"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }

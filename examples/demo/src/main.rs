@@ -1,15 +1,15 @@
-//! Demo application showing ophanim metrics collection and export.
+//! Demo application showing fast-telemetry metrics collection and export.
 //!
 //! Run with:
-//!   cargo run -p ophanim-demo
+//!   cargo run -p fast-telemetry-demo
 //!
 //! To see log output:
-//!   RUST_LOG=info cargo run -p ophanim-demo
+//!   RUST_LOG=info cargo run -p fast-telemetry-demo
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use ophanim::{
+use fast_telemetry::{
     Counter, DeriveLabel, Distribution, DynamicCounter, ExportMetrics, Gauge, Histogram, LabelEnum,
     LabeledCounter, LabeledHistogram, SpanCollector, SpanKind, SpanStatus,
 };
@@ -187,7 +187,7 @@ async fn main() {
     let mut statsd_output = String::new();
     metrics.export_dogstatsd(
         &mut statsd_output,
-        &[("env", "demo"), ("service", "ophanim-demo")],
+        &[("env", "demo"), ("service", "fast-telemetry-demo")],
     );
     println!("=== DogStatsD Output ===\n{statsd_output}");
 
@@ -216,8 +216,8 @@ async fn main() {
     // let mut state = AppMetricsExportState::new();
     // let tags: Vec<(&str, &str)> = vec![("service", "demo")];
     // let c = cancel.clone();
-    // tokio::spawn(ophanim_export::dogstatsd::run(
-    //     ophanim_export::dogstatsd::DogStatsDConfig::new("127.0.0.1:8125")
+    // tokio::spawn(fast_telemetry_export::dogstatsd::run(
+    //     fast_telemetry_export::dogstatsd::DogStatsDConfig::new("127.0.0.1:8125")
     //         .with_interval(Duration::from_secs(10)),
     //     c,
     //     move |output| {
@@ -228,9 +228,9 @@ async fn main() {
     // OTLP metrics exporter
     // let m = metrics.clone();
     // let c = cancel.clone();
-    // tokio::spawn(ophanim_export::otlp::run(
-    //     ophanim_export::otlp::OtlpConfig::new("http://localhost:4318")
-    //         .with_service_name("ophanim-demo")
+    // tokio::spawn(fast_telemetry_export::otlp::run(
+    //     fast_telemetry_export::otlp::OtlpConfig::new("http://localhost:4318")
+    //         .with_service_name("fast-telemetry-demo")
     //         .with_interval(Duration::from_secs(60)),
     //     c,
     //     move |out| {
@@ -239,18 +239,18 @@ async fn main() {
     // ));
 
     // OTLP span exporter
-    // ophanim_export::spans::spawn(
+    // fast_telemetry_export::spans::spawn(
     //     collector.clone(),
-    //     ophanim_export::spans::SpanExportConfig::new("http://localhost:4318")
-    //         .with_service_name("ophanim-demo"),
+    //     fast_telemetry_export::spans::SpanExportConfig::new("http://localhost:4318")
+    //         .with_service_name("fast-telemetry-demo"),
     //     cancel.clone(),
     // );
 
     // Stale series sweeper
     // let m = metrics.clone();
     // let c = cancel.clone();
-    // tokio::spawn(ophanim_export::sweeper::run(
-    //     ophanim_export::sweeper::SweepConfig::default(),
+    // tokio::spawn(fast_telemetry_export::sweeper::run(
+    //     fast_telemetry_export::sweeper::SweepConfig::default(),
     //     c,
     //     move |threshold| m.evict_stale_series(threshold),
     // ));

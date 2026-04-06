@@ -1,25 +1,17 @@
-# ophanim
-
-<p align="center">
-  <img src="ophanim.png" alt="ophanim — the many-eyed wheels" width="400">
-</p>
-
+# fast-telemetry
 High-performance, cache-friendly telemetry for Rust.
-
-Named after the [Ophanim](https://en.wikipedia.org/wiki/Ophanim) — the many-eyed
-wheels from Ezekiel's vision. All seeing.
 
 ## Crates
 
 | Crate                                     | Description                                                                                                        |
 |-------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| [`ophanim`](crates/ophanim)               | Sharded counters, gauges, histograms, distributions, spans, and format serialization (Prometheus, DogStatsD, OTLP) |
-| [`ophanim-macros`](crates/ophanim-macros) | Derive macros: `ExportMetrics` and `LabelEnum`                                                                     |
-| [`ophanim-export`](crates/ophanim-export) | I/O adapters: DogStatsD over UDP, OTLP over HTTP/protobuf, span export, stale-series sweeping                      |
+| [`fast-telemetry`](crates/fast-telemetry)               | Sharded counters, gauges, histograms, distributions, spans, and format serialization (Prometheus, DogStatsD, OTLP) |
+| [`fast-telemetry-macros`](crates/fast-telemetry-macros) | Derive macros: `ExportMetrics` and `LabelEnum`                                                                     |
+| [`fast-telemetry-export`](crates/fast-telemetry-export) | I/O adapters: DogStatsD over UDP, OTLP over HTTP/protobuf, span export, stale-series sweeping                      |
 
 ## Why
 
-Ophanim grew out of [Eden](https://eden.dev)'s observability stack. Eden was a
+fast-telemetry grew out of [Eden](https://eden.dev)'s observability stack. Eden was a
 heavy user of the OpenTelemetry ecosystem — we relied on the `opentelemetry`
 crate and its SDK for metrics across our services. That worked fine until we
 started benchmarking our high-performance Redis proxy under realistic production
@@ -38,7 +30,7 @@ that counter continually transfers between cores
 This serializes what should be parallel work, creating latency spikes and
 throughput cliffs — exactly the opposite of what you want under high concurrency.
 
-Ophanim started as sharded counters and gauges to fix that contention. Once those
+fast-telemetry started as sharded counters and gauges to fix that contention. Once those
 proved themselves, we expanded to cover the rest of what we'd been using the OTel
 SDK for — histograms, distributions, labeled metrics, lightweight spans — and
 added export adapters for the backends we actually use (Prometheus, DogStatsD,
@@ -52,7 +44,7 @@ infrequent relative to increments.
 
 | Operation                        | Latency       |
 |----------------------------------|---------------|
-| Thread-local increment (ophanim) | ~2 ns         |
+| Thread-local increment (fast-telemetry) | ~2 ns         |
 | Uncontended atomic               | ~10 ns        |
 | **Contended atomic (16 cores)**  | **40-400 ns** |
 
@@ -61,11 +53,11 @@ second and don't want your telemetry to be the thing that slows you down or poll
 
 ## When to use this (and when not to)
 
-Ophanim is for applications where **telemetry throughput matters** — you're
+fast-telemetry is for applications where **telemetry throughput matters** — you're
 recording millions of metric events per second across many cores and you've
 measured that your current metrics layer is a bottleneck.
 
-**Use ophanim when:**
+**Use fast-telemetry when:**
 
 - You need e.g. per-request, per-endpoint, or per-tenant counters at high concurrency, and you want every single event
 - You've profiled and found your metrics SDK is a bottleneck
@@ -80,25 +72,26 @@ measured that your current metrics layer is a bottleneck.
 - You want automatic context propagation, SDK-managed pipelines, or deep
   integration with the broader OTel collector ecosystem
 
-Ophanim trades API surface and ecosystem breadth for contention-free recording.
+fast-telemetry trades API surface and ecosystem breadth for contention-free recording.
 
-If you don't have a contention problem, you're free to look
+If you don't have a contention problem, you're probably better off with the
+broader OpenTelemetry ecosystem.
 
 For detailed benchmark results and methodology, see
-[BENCHMARK_REPORT.md](crates/ophanim/bench/BENCHMARK_REPORT.md) and the
-[bench harness README](crates/ophanim/bench/README.md).
+[BENCHMARK_REPORT.md](crates/fast-telemetry/bench/BENCHMARK_REPORT.md) and the
+[bench harness README](crates/fast-telemetry/bench/README.md).
 
 ## Quick Start
 
 ```toml
 [dependencies]
-ophanim = "0.1"
+fast-telemetry = "0.1"
 ```
 
 ### Define Metrics
 
 ```rust
-use ophanim::{Counter, Histogram, Gauge, ExportMetrics};
+use fast_telemetry::{Counter, Histogram, Gauge, ExportMetrics};
 
 #[derive(ExportMetrics)]
 #[metric_prefix = "myapp"]
@@ -149,7 +142,7 @@ metrics.export_dogstatsd( & mut output, & [("env", "prod")]);
 ### Compile-Time Labels (O(1) array lookup)
 
 ```rust
-use ophanim::{LabeledCounter, DeriveLabel};
+use fast_telemetry::{LabeledCounter, DeriveLabel};
 
 #[derive(Copy, Clone, Debug, DeriveLabel)]
 #[label_name = "method"]
@@ -167,21 +160,44 @@ counter.inc(HttpMethod::Get);
 ### Dynamic Runtime Labels
 
 ```rust
-use ophanim::DynamicCounter;
+use fast_telemetry::{DynamicCounter, advance_cycle};
 
-let counter = DynamicCounter::new(4);
+let counter = DynamicCounter::with_max_series(4, 10_000);
 counter.inc(& [("endpoint_id", "ep-1"), ("org_id", "org-a")]);
 
 // Hot-path optimization: resolve once, then increment via handle
 let series = counter.series(& [("endpoint_id", "ep-1"), ("org_id", "org-a")]);
 series.inc();
+
+// Long-lived handles can outlive a stale-series sweep.
+if series.is_evicted() {
+  let fresh = counter.series(& [("endpoint_id", "ep-1"), ("org_id", "org-a")]);
+  fresh.inc();
+}
+
+advance_cycle();
+let _evicted = counter.evict_stale(30);
+let _overflow = counter.overflow_count();
 ```
+
+Dynamic metrics are useful when the active label set is only known at runtime,
+but they come with a lifecycle worth planning for:
+
+- `with_max_series(...)` bounds cardinality for `DynamicCounter`,
+  `DynamicDistribution`, `DynamicGauge`, and `DynamicGaugeI64`
+- `DynamicHistogram::with_limits(..., max_series)` provides the same cap for histograms
+- once the cap is hit, new label sets are redirected into a single overflow series
+  and `overflow_count()` tells you how often that happened
+- stale series are evicted with `evict_stale(...)` after `advance_cycle()`
+- long-lived handles can check `is_evicted()` and re-resolve with `series(...)`
 
 ## Spans
 
 ```rust
 use std::sync::Arc;
-use ophanim::{SpanCollector, SpanKind, SpanStatus};
+use fast_telemetry::{
+  SpanCollector, SpanKind, SpanStatus, current_span_id, current_trace_id,
+};
 
 let collector = Arc::new(SpanCollector::new(4, 4096));
 
@@ -199,25 +215,47 @@ child.set_status(SpanStatus::Ok);
 root.set_status(SpanStatus::Ok);
 } // spans submit to collector on drop
 
+if let (Some(trace_id), Some(span_id)) = (current_trace_id(), current_span_id()) {
+println!("trace_id={trace_id} span_id={span_id}");
+}
+
 let mut completed = Vec::new();
+collector.flush_local();
 collector.drain_into( & mut completed);
 ```
 
-## Export Adapters (ophanim-export)
+Call `flush_local()` before `drain_into()` when you are draining on the same
+thread that just recorded spans. `SpanCollector::new(shards, capacity)` keeps
+its historical signature for compatibility, but those tuning arguments are
+currently ignored because buffers are now managed per thread.
 
-For production use, `ophanim-export` provides background export loops with
+For manual cross-service propagation, use an incoming W3C `traceparent` header
+to start a span and `traceparent()` on the current span for outgoing requests:
+
+```rust
+let mut inbound = collector.start_span_from_traceparent(
+  request.headers().get("traceparent").and_then(|v| v.to_str().ok()),
+  "handle_request",
+  SpanKind::Server,
+);
+let outbound_traceparent = inbound.traceparent();
+```
+
+## Export Adapters (fast-telemetry-export)
+
+For production use, `fast-telemetry-export` provides background export loops with
 batching, compression, backoff, and graceful shutdown.
 
 ```toml
 [dependencies]
-ophanim-export = "0.1"
+fast-telemetry-export = "0.1"
 ```
 
 ### DogStatsD
 
 ```rust
 use std::sync::Arc;
-use ophanim_export::dogstatsd::{DogStatsDConfig, run};
+use fast_telemetry_export::dogstatsd::{DogStatsDConfig, run};
 use tokio_util::sync::CancellationToken;
 
 let cancel = CancellationToken::new();
@@ -232,17 +270,25 @@ tokio::spawn(run(config, cancel, move | output| {
 }));
 ```
 
+`MyMetricsExportState` is the derive-generated per-sink state type from
+`#[derive(ExportMetrics)]`. Keep one state value per DogStatsD export loop when
+using delta temporality.
+
 ### OTLP Metrics
 
 ```rust
 use std::sync::Arc;
-use ophanim_export::otlp::{OtlpConfig, run};
+use std::time::Duration;
+use fast_telemetry_export::otlp::{OtlpConfig, run};
 use tokio_util::sync::CancellationToken;
 
 let cancel = CancellationToken::new();
 let config = OtlpConfig::new("http://otel-collector:4318")
     .with_service_name("myapp")
-    .with_attribute("service.version", "1.0");
+    .with_scope_name("proxy")
+    .with_attribute("service.version", "1.0")
+    .with_header("Authorization", "Bearer <token>")
+    .with_timeout(Duration::from_secs(5));
 
 let metrics = Arc::new(my_metrics);
 
@@ -251,15 +297,23 @@ tokio::spawn(run(config, cancel, move | out| {
 }));
 ```
 
+The OTLP metrics exporter gzip-compresses larger payloads automatically and
+applies exponential backoff on transport failures.
+
 ### OTLP Spans
 
 ```rust
-use ophanim_export::spans::{SpanExportConfig, spawn};
+use std::time::Duration;
+use fast_telemetry_export::spans::{SpanExportConfig, spawn};
 use tokio_util::sync::CancellationToken;
 
 let cancel = CancellationToken::new();
 let config = SpanExportConfig::new("http://otel-collector:4318")
-.with_service_name("myapp");
+    .with_service_name("myapp")
+    .with_scope_name("proxy")
+    .with_header("Authorization", "Bearer <token>")
+    .with_timeout(Duration::from_secs(5))
+    .with_max_batch_size(1024);
 
 spawn(collector, config, cancel);
 ```
@@ -269,12 +323,23 @@ spawn(collector, config, cancel);
 Bounds memory from dynamic labels by evicting inactive series:
 
 ```rust
-use ophanim_export::sweeper::{SweepConfig, run};
+use std::sync::Arc;
+use fast_telemetry::advance_cycle;
+use fast_telemetry_export::sweeper::{SweepConfig, run};
+use tokio_util::sync::CancellationToken;
+
+let metrics = Arc::new(my_metrics);
+let cancel = CancellationToken::new();
 
 tokio::spawn(run(SweepConfig::default (), cancel, move | threshold| {
-  metrics.evict_stale_series(threshold)
+  advance_cycle();
+  metrics.requests_by_endpoint.evict_stale(threshold)
+    + metrics.latency_by_endpoint.evict_stale(threshold)
 }));
 ```
+
+If you wrap your metrics in a helper method, call `advance_cycle()` once per
+sweep and then sum each dynamic metric's `evict_stale(...)` result.
 
 ## OTLP Protobuf (Manual)
 
@@ -282,13 +347,13 @@ For direct control over OTLP encoding without the export loop.
 Add `#[otlp]` to your metrics struct to generate the `export_otlp()` method:
 
 ```rust
-use ophanim::otlp;
+use fast_telemetry::otlp;
 
 let mut metrics = Vec::new();
-my_metrics.export_otlp( & mut metrics, ophanim::otlp::now_nanos());
+my_metrics.export_otlp( & mut metrics, fast_telemetry::otlp::now_nanos());
 
 let resource = otlp::build_resource("myapp", & [("env", "prod")]);
-let request = otlp::build_export_request( & resource, "ophanim", metrics);
+let request = otlp::build_export_request( & resource, "fast-telemetry", metrics);
 // Encode and send `request` with your own transport
 ```
 
@@ -319,7 +384,7 @@ let request = otlp::build_export_request( & resource, "ophanim", metrics);
 
 | Macro                                      | Purpose                                                                                   |
 |--------------------------------------------|-------------------------------------------------------------------------------------------|
-| `#[derive(ExportMetrics)]`                 | Generate `export_prometheus`, `export_dogstatsd`, `export_dogstatsd_delta`, `export_otlp` |
+| `#[derive(ExportMetrics)]`                 | Generate `export_prometheus`, `export_dogstatsd`, `export_dogstatsd_delta`, `export_dogstatsd_with_temporality`, and optional `export_otlp` |
 | `#[derive(LabelEnum)]` (via `DeriveLabel`) | Generate `LabelEnum` trait impl for enum labels                                           |
 
 ### Export Formats
@@ -327,8 +392,8 @@ let request = otlp::build_export_request( & resource, "ophanim", metrics);
 | Format          | Method                                            | Transport                 |
 |-----------------|---------------------------------------------------|---------------------------|
 | Prometheus text | `export_prometheus()`                             | Serve at `/metrics`       |
-| DogStatsD       | `export_dogstatsd()` / `export_dogstatsd_delta()` | UDP via `ophanim-export`  |
-| OTLP protobuf   | `export_otlp()` (requires `#[otlp]` on struct)    | HTTP via `ophanim-export` |
+| DogStatsD       | `export_dogstatsd()`, `export_dogstatsd_delta()`, or `export_dogstatsd_with_temporality(..., Temporality, ...)` | UDP via `fast-telemetry-export`  |
+| OTLP protobuf   | `export_otlp()` (requires `#[otlp]` on struct)    | HTTP via `fast-telemetry-export` |
 
 ## Shard Count
 
@@ -347,11 +412,11 @@ This project has since evolved substantially.
 
 ## Scope
 
-Ophanim is **metrics and lightweight spans**. It does not cover:
+fast-telemetry is **metrics and lightweight spans**. It does not cover:
 
 - Structured logging
 - Distributed trace backends (ingestion, storage, query)
-- Cross-service context propagation
+- Automatic cross-service context propagation
 - Alerting or dashboarding
 
 ## Further Reading
