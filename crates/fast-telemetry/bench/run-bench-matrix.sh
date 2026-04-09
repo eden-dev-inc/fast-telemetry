@@ -36,6 +36,7 @@ while [[ $# -gt 0 ]]; do
       echo "  cache profiles: uniform,hotspot,churn"
       echo "  span scenarios: root,lifecycle,pipeline"
       echo "  default iters: cache=50000000 span=1000000"
+      echo "Modes may include metrics for cache entities with direct metrics-rs equivalents."
       exit 0
       ;;
     *)
@@ -91,7 +92,7 @@ else
   CACHE_PROFILES=(uniform hotspot churn)
 fi
 SPAN_SCENARIOS=(root lifecycle pipeline)
-SPAN_MODES="$(echo "$MODES_CSV" | sed -E 's/(^|,)atomic(,|$)/\1\2/g' | sed -E 's/,,+/,/g; s/^,//; s/,$//')"
+SPAN_MODES="$(echo "$MODES_CSV" | sed -E 's/(^|,)(atomic|metrics)(,|$)/\1\3/g' | sed -E 's/,,+/,/g; s/^,//; s/,$//')"
 if [[ -z "$SPAN_MODES" ]]; then
   echo "ERROR: no valid modes left for span benchmarks (span supports fast,otel)"
   exit 1
@@ -105,10 +106,13 @@ for entity in "${CACHE_ENTITIES[@]}"; do
     CASE_MODES="$MODES_CSV"
     if [[ "$entity" != "counter" ]]; then
       CASE_MODES="$(echo "$MODES_CSV" | sed -E 's/(^|,)atomic(,|$)/\1\2/g' | sed -E 's/,,+/,/g; s/^,//; s/,$//')"
-      if [[ -z "$CASE_MODES" ]]; then
-        echo "ERROR: no valid modes left for entity=$entity (atomic only supports counter)"
-        exit 1
-      fi
+    fi
+    if [[ "$entity" == "distribution" || "$entity" == "dynamic_distribution" ]]; then
+      CASE_MODES="$(echo "$CASE_MODES" | sed -E 's/(^|,)metrics(,|$)/\1\2/g' | sed -E 's/,,+/,/g; s/^,//; s/,$//')"
+    fi
+    if [[ -z "$CASE_MODES" ]]; then
+      echo "ERROR: no valid modes left for entity=$entity after filtering unsupported modes"
+      exit 1
     fi
     "$SCRIPT_DIR/run-cache-bench.sh" \
       --threads "$THREADS" \

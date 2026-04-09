@@ -27,7 +27,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [--threads N] [--runs N] [--preset quick|full] [--modes list] [--iters-cache N] [--iters-span N] [--export-interval-ms N]"
       echo ""
       echo "Runs matrix workloads and generates an HTML report with SVG charts."
-      echo "Default modes: fast,otel,atomic (atomic applies only to cache counter cases)"
+      echo "Default modes: fast,otel,atomic (atomic applies only to cache counter cases; metrics can be added via --modes)"
       echo "Preset quick defaults: iters-cache=10000000, iters-span=300000"
       echo "Preset full defaults:  iters-cache=50000000, iters-span=1000000"
       exit 0

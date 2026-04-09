@@ -20,13 +20,15 @@ default = ["macros"]
 macros = ["dep:fast-telemetry-macros"]
 otlp = ["dep:opentelemetry-proto", "dep:prost"]
 shuttle-tests = ["dep:shuttle"]
-bench-tools = ["dep:libc", "dep:opentelemetry", "dep:opentelemetry_sdk"]
+bench-tools = ["dep:libc", "dep:metrics", "dep:metrics-util", "dep:opentelemetry", "dep:opentelemetry_sdk"]
 eviction = []
 
 [dependencies]
 crossbeam-utils = { workspace = true }
 fast-telemetry-macros = { workspace = true, optional = true }
 libc = { version = "0.2", optional = true }
+metrics = { workspace = true, optional = true }
+metrics-util = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-proto = { version = "0.30", default-features = false, features = ["gen-tonic", "gen-tonic-messages", "metrics", "trace"], optional = true }
 opentelemetry_sdk = { workspace = true, optional = true, features = ["testing"] }
