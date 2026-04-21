@@ -219,7 +219,7 @@ impl DynamicGaugeI64 {
             };
         }
         let series = self.lookup_or_create(labels);
-        self.update_cache(labels, Arc::clone(&series));
+        self.update_cache(labels, &series);
         DynamicGaugeI64Series {
             series,
             shard_mask: self.shard_mask,
@@ -248,7 +248,7 @@ impl DynamicGaugeI64 {
         }
 
         let series = self.lookup_or_create(labels);
-        self.update_cache(labels, Arc::clone(&series));
+        self.update_cache(labels, &series);
         let shard_idx = thread_id() & self.shard_mask;
         series.add_at(shard_idx, value);
     }
@@ -263,7 +263,7 @@ impl DynamicGaugeI64 {
         }
 
         let series = self.lookup_or_create(labels);
-        self.update_cache(labels, Arc::clone(&series));
+        self.update_cache(labels, &series);
         let shard_idx = thread_id() & self.shard_mask;
         series.set_at(shard_idx, value);
     }
@@ -443,7 +443,7 @@ impl DynamicGaugeI64 {
         })
     }
 
-    fn update_cache(&self, labels: &[(&str, &str)], series: Arc<GaugeI64Series>) {
+    fn update_cache(&self, labels: &[(&str, &str)], series: &Arc<GaugeI64Series>) {
         SERIES_CACHE.with(|cache| {
             let ordered_labels = labels
                 .iter()
@@ -452,7 +452,7 @@ impl DynamicGaugeI64 {
             *cache.borrow_mut() = Some(SeriesCacheEntry {
                 gauge_id: self.id,
                 ordered_labels,
-                series: Arc::downgrade(&series),
+                series: Arc::downgrade(series),
             });
         });
     }

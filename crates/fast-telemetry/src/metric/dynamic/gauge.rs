@@ -166,7 +166,7 @@ impl DynamicGauge {
             return DynamicGaugeSeries { series };
         }
         let series = self.lookup_or_create(labels);
-        self.update_cache(labels, Arc::clone(&series));
+        self.update_cache(labels, &series);
         DynamicGaugeSeries { series }
     }
 
@@ -179,7 +179,7 @@ impl DynamicGauge {
         }
 
         let series = self.lookup_or_create(labels);
-        self.update_cache(labels, Arc::clone(&series));
+        self.update_cache(labels, &series);
         series.set(value);
     }
 
@@ -353,7 +353,7 @@ impl DynamicGauge {
         })
     }
 
-    fn update_cache(&self, labels: &[(&str, &str)], series: Arc<GaugeSeries>) {
+    fn update_cache(&self, labels: &[(&str, &str)], series: &Arc<GaugeSeries>) {
         SERIES_CACHE.with(|cache| {
             let ordered_labels = labels
                 .iter()
@@ -362,7 +362,7 @@ impl DynamicGauge {
             *cache.borrow_mut() = Some(SeriesCacheEntry {
                 gauge_id: self.id,
                 ordered_labels,
-                series: Arc::downgrade(&series),
+                series: Arc::downgrade(series),
             });
         });
     }
