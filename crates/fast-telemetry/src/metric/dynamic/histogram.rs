@@ -311,7 +311,7 @@ impl DynamicHistogram {
             };
         }
         let series = self.lookup_or_create(labels);
-        self.update_cache(labels, Arc::clone(&series));
+        self.update_cache(labels, &series);
         DynamicHistogramSeries {
             series,
             shard_mask: self.shard_mask,
@@ -328,7 +328,7 @@ impl DynamicHistogram {
         }
 
         let series = self.lookup_or_create(labels);
-        self.update_cache(labels, Arc::clone(&series));
+        self.update_cache(labels, &series);
         let shard_idx = thread_id() & self.shard_mask;
         series.record_at(shard_idx, value);
     }
@@ -541,7 +541,7 @@ impl DynamicHistogram {
         })
     }
 
-    fn update_cache(&self, labels: &[(&str, &str)], series: Arc<HistogramSeries>) {
+    fn update_cache(&self, labels: &[(&str, &str)], series: &Arc<HistogramSeries>) {
         SERIES_CACHE.with(|cache| {
             let ordered_labels = labels
                 .iter()
@@ -550,7 +550,7 @@ impl DynamicHistogram {
             *cache.borrow_mut() = Some(SeriesCacheEntry {
                 histogram_id: self.id,
                 ordered_labels,
-                series: Arc::downgrade(&series),
+                series: Arc::downgrade(series),
             });
         });
     }

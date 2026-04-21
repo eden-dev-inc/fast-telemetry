@@ -206,7 +206,7 @@ impl DynamicDistribution {
         }
         let series = self.lookup_or_create(labels);
         let buf = self.get_or_create_thread_buf(&series);
-        self.update_cache(labels, Arc::clone(&series), Arc::clone(&buf));
+        self.update_cache(labels, &series, Arc::clone(&buf));
         DynamicDistributionSeries { series, buf }
     }
 
@@ -220,7 +220,7 @@ impl DynamicDistribution {
 
         let series = self.lookup_or_create(labels);
         let buf = self.get_or_create_thread_buf(&series);
-        self.update_cache(labels, Arc::clone(&series), Arc::clone(&buf));
+        self.update_cache(labels, &series, Arc::clone(&buf));
         buf.record(value);
     }
 
@@ -418,7 +418,7 @@ impl DynamicDistribution {
     fn update_cache(
         &self,
         labels: &[(&str, &str)],
-        series: Arc<DistributionSeries>,
+        series: &Arc<DistributionSeries>,
         buf: Arc<ExpBuckets>,
     ) {
         SERIES_CACHE.with(|cache| {
@@ -429,7 +429,7 @@ impl DynamicDistribution {
             *cache.borrow_mut() = Some(SeriesCacheEntry {
                 distribution_id: self.id,
                 ordered_labels,
-                series: Arc::downgrade(&series),
+                series: Arc::downgrade(series),
                 buf,
             });
         });

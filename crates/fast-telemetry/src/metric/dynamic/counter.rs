@@ -193,7 +193,7 @@ impl DynamicCounter {
             };
         }
         let series = self.lookup_or_create(labels);
-        self.update_cache(labels, Arc::clone(&series));
+        self.update_cache(labels, &series);
         DynamicCounterSeries {
             series,
             shard_mask: self.shard_mask,
@@ -216,7 +216,7 @@ impl DynamicCounter {
         }
 
         let series = self.lookup_or_create(labels);
-        self.update_cache(labels, Arc::clone(&series));
+        self.update_cache(labels, &series);
         let shard_idx = thread_id() & self.shard_mask;
         series.add_at(shard_idx, value);
     }
@@ -401,7 +401,7 @@ impl DynamicCounter {
         })
     }
 
-    fn update_cache(&self, labels: &[(&str, &str)], series: Arc<CounterSeries>) {
+    fn update_cache(&self, labels: &[(&str, &str)], series: &Arc<CounterSeries>) {
         SERIES_CACHE.with(|cache| {
             let ordered_labels = labels
                 .iter()
@@ -410,7 +410,7 @@ impl DynamicCounter {
             *cache.borrow_mut() = Some(SeriesCacheEntry {
                 counter_id: self.id,
                 ordered_labels,
-                series: Arc::downgrade(&series),
+                series: Arc::downgrade(series),
             });
         });
     }
