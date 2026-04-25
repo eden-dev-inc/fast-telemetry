@@ -1,5 +1,6 @@
 //! Runtime-labeled gauge for dynamic dimensions.
 
+use super::cache::{CacheableSeries, LabelCache, SERIES_CACHE_SIZE};
 #[cfg(feature = "eviction")]
 use super::current_cycle;
 use super::{DynamicLabelSet, GAUGE_IDS};
@@ -76,6 +77,12 @@ impl GaugeSeries {
     }
 }
 
+impl CacheableSeries for GaugeSeries {
+    fn is_evicted(&self) -> bool {
+        self.is_evicted()
+    }
+}
+
 /// A reusable handle to a dynamic-label gauge series.
 ///
 /// Use this for hot paths to avoid per-update label canonicalization and map
@@ -106,14 +113,9 @@ impl DynamicGaugeSeries {
     }
 }
 
-struct SeriesCacheEntry {
-    gauge_id: usize,
-    ordered_labels: Vec<(String, String)>,
-    series: Weak<GaugeSeries>,
-}
-
 thread_local! {
-    static SERIES_CACHE: RefCell<Option<SeriesCacheEntry>> = const { RefCell::new(None) };
+    static SERIES_CACHE: RefCell<LabelCache<Weak<GaugeSeries>, SERIES_CACHE_SIZE>> =
+        RefCell::new(LabelCache::new());
 }
 
 /// Gauge keyed by runtime label sets.
@@ -329,24 +331,7 @@ impl DynamicGauge {
 
     fn cached_series(&self, labels: &[(&str, &str)]) -> Option<Arc<GaugeSeries>> {
         SERIES_CACHE.with(|cache| {
-            let cache_ref = cache.borrow();
-            let entry = cache_ref.as_ref()?;
-            if entry.gauge_id != self.id {
-                return None;
-            }
-            if entry.ordered_labels.len() != labels.len() {
-                return None;
-            }
-            for (idx, (k, v)) in labels.iter().enumerate() {
-                let (ek, ev) = &entry.ordered_labels[idx];
-                if ek != k || ev != v {
-                    return None;
-                }
-            }
-            let series = entry.series.upgrade()?;
-            if series.is_evicted() {
-                return None;
-            }
+            let series = cache.borrow_mut().get(self.id, labels)?;
             #[cfg(feature = "eviction")]
             series.touch(current_cycle());
             Some(series)
@@ -355,15 +340,9 @@ impl DynamicGauge {
 
     fn update_cache(&self, labels: &[(&str, &str)], series: &Arc<GaugeSeries>) {
         SERIES_CACHE.with(|cache| {
-            let ordered_labels = labels
-                .iter()
-                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-                .collect();
-            *cache.borrow_mut() = Some(SeriesCacheEntry {
-                gauge_id: self.id,
-                ordered_labels,
-                series: Arc::downgrade(series),
-            });
+            cache
+                .borrow_mut()
+                .insert(self.id, labels, Arc::downgrade(series));
         });
     }
 }
