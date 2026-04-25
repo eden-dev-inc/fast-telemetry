@@ -103,7 +103,7 @@ fast-telemetry = "0.1"
 ### Define Metrics
 
 ```rust
-use fast_telemetry::{Counter, Histogram, Gauge, ExportMetrics};
+use fast_telemetry::{Counter, ExportMetrics, Gauge, Histogram, MaxGauge};
 
 #[derive(ExportMetrics)]
 #[metric_prefix = "myapp"]
@@ -116,6 +116,9 @@ pub struct AppMetrics {
 
     #[help = "Current queue depth"]
     pub queue_depth: Gauge,
+
+    #[help = "Peak queue depth seen during the current export window"]
+    pub queue_depth_peak: MaxGauge,
 }
 
 impl AppMetrics {
@@ -124,6 +127,7 @@ impl AppMetrics {
             requests: Counter::new(4),     // use available_parallelism() in production
             latency: Histogram::with_latency_buckets(4),
             queue_depth: Gauge::new(),
+            queue_depth_peak: MaxGauge::new(4),
         }
     }
 }
@@ -135,6 +139,7 @@ impl AppMetrics {
 metrics.requests.inc();
 metrics.latency.record(elapsed_us);
 metrics.queue_depth.set(queue.len() as i64);
+metrics.queue_depth_peak.observe(queue.len() as i64);
 ```
 
 ### Export
@@ -148,6 +153,39 @@ metrics.export_prometheus( & mut output);
 let mut output = String::new();
 metrics.export_dogstatsd( & mut output, & [("env", "prod")]);
 ```
+
+### Extrema Gauges
+
+Use extrema gauges when you want peak/trough tracking without putting a single
+contended atomic on the hot path.
+
+```rust
+use fast_telemetry::{MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64};
+
+let queue_peak = MaxGauge::new(4);
+queue_peak.observe(queue.len() as i64);
+
+let min_free_slots = MinGauge::with_value(4, i64::MAX);
+min_free_slots.observe(free_slots as i64);
+
+let cpu_peak = MaxGaugeF64::new(4);
+cpu_peak.observe(cpu_utilization);
+
+let cheapest_latency_ms = MinGaugeF64::with_value(4, f64::INFINITY);
+cheapest_latency_ms.observe(latency_ms);
+```
+
+For interval export, call `swap_reset()` in your sampler/exporter task:
+
+```rust
+let peak_in_window = queue_peak.swap_reset();
+let min_in_window = cheapest_latency_ms.swap_reset();
+```
+
+`observe()` is hot-path safe and shard-friendly. `get()` returns the current
+extremum across shards, and `swap_reset()` gives you the previous window's
+extremum while resetting back to the constructor's initial value. The `f64`
+variants ignore `NaN` observations.
 
 ## Labeled Metrics
 
@@ -380,6 +418,8 @@ let request = otlp::build_export_request( & resource, "fast-telemetry", metrics)
 | `Histogram`          | Latency distributions with fixed buckets | ~2ns + bucket lookup      |
 | `Distribution`       | Exponential-bucket distributions         | ~2ns + bucket lookup      |
 | `Gauge` / `GaugeF64` | Point-in-time values                     | ~2ns (single atomic)      |
+| `MaxGauge` / `MinGauge` | Peak/trough of integer observations   | ~2ns (sharded min/max)    |
+| `MaxGaugeF64` / `MinGaugeF64` | Peak/trough of float observations | ~2ns (sharded min/max)    |
 
 ### Labeled Variants
 
