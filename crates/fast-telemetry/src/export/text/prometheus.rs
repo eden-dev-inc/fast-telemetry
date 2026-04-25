@@ -1,7 +1,7 @@
 use crate::{
     Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
     DynamicHistogram, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledGauge,
-    LabeledHistogram,
+    LabeledHistogram, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
 };
 use std::fmt::Write as _;
 
@@ -64,6 +64,70 @@ impl PrometheusExport for Gauge {
 }
 
 impl PrometheusExport for GaugeF64 {
+    fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
+        output.push_str("# HELP ");
+        output.push_str(name);
+        output.push(' ');
+        output.push_str(help);
+        output.push_str("\n# TYPE ");
+        output.push_str(name);
+        output.push_str(" gauge\n");
+        output.push_str(name);
+        output.push(' ');
+        push_display(output, self.get());
+        output.push('\n');
+    }
+}
+
+impl PrometheusExport for MaxGauge {
+    fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
+        output.push_str("# HELP ");
+        output.push_str(name);
+        output.push(' ');
+        output.push_str(help);
+        output.push_str("\n# TYPE ");
+        output.push_str(name);
+        output.push_str(" gauge\n");
+        output.push_str(name);
+        output.push(' ');
+        push_display(output, self.get());
+        output.push('\n');
+    }
+}
+
+impl PrometheusExport for MaxGaugeF64 {
+    fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
+        output.push_str("# HELP ");
+        output.push_str(name);
+        output.push(' ');
+        output.push_str(help);
+        output.push_str("\n# TYPE ");
+        output.push_str(name);
+        output.push_str(" gauge\n");
+        output.push_str(name);
+        output.push(' ');
+        push_display(output, self.get());
+        output.push('\n');
+    }
+}
+
+impl PrometheusExport for MinGauge {
+    fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
+        output.push_str("# HELP ");
+        output.push_str(name);
+        output.push(' ');
+        output.push_str(help);
+        output.push_str("\n# TYPE ");
+        output.push_str(name);
+        output.push_str(" gauge\n");
+        output.push_str(name);
+        output.push(' ');
+        push_display(output, self.get());
+        output.push('\n');
+    }
+}
+
+impl PrometheusExport for MinGaugeF64 {
     fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
         output.push_str("# HELP ");
         output.push_str(name);

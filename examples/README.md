@@ -2,7 +2,7 @@
 
 | Example        | Crates used                             | What it shows                                                                                         |
 |----------------|-----------------------------------------|-------------------------------------------------------------------------------------------------------|
-| [`demo`](demo) | fast-telemetry, fast-telemetry-macros, fast-telemetry-export | Full pipeline: define metrics with derive macros, record, export via Prometheus/DogStatsD/OTLP, spans |
+| [`demo`](demo) | fast-telemetry, fast-telemetry-macros, fast-telemetry-export | Full pipeline: define metrics with derive macros, record counters/gauges/extrema, export via Prometheus/DogStatsD/OTLP, spans |
 
 Run with:
 

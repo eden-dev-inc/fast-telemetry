@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use fast_telemetry::{
     Counter, DeriveLabel, Distribution, DynamicCounter, ExportMetrics, Gauge, Histogram, LabelEnum,
-    LabeledCounter, LabeledHistogram, SpanCollector, SpanKind, SpanStatus,
+    LabeledCounter, LabeledHistogram, MaxGauge, MinGauge, SpanCollector, SpanKind, SpanStatus,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -65,6 +65,12 @@ pub struct AppMetrics {
     #[help = "Current in-flight requests"]
     pub in_flight: Gauge,
 
+    #[help = "Peak in-flight requests seen during the current run"]
+    pub in_flight_peak: MaxGauge,
+
+    #[help = "Smallest response size seen during the current run"]
+    pub min_response_bytes: MinGauge,
+
     #[help = "Requests by endpoint (runtime labels)"]
     pub requests_by_endpoint: DynamicCounter,
 }
@@ -89,6 +95,8 @@ impl AppMetrics {
             latency_by_method: LabeledHistogram::with_latency_buckets(shards),
             response_bytes: Distribution::new(shards),
             in_flight: Gauge::new(),
+            in_flight_peak: MaxGauge::new(shards),
+            min_response_bytes: MinGauge::with_value(shards, i64::MAX),
             requests_by_endpoint: DynamicCounter::new(shards),
         }
     }
@@ -107,6 +115,8 @@ fn simulate_requests(metrics: &AppMetrics) {
     metrics.latency_by_method.record(HttpMethod::Get, 150);
     metrics.response_bytes.record(4096);
     metrics.in_flight.set(3);
+    metrics.in_flight_peak.observe(3);
+    metrics.min_response_bytes.observe(4096);
 
     // Dynamic labels -- runtime endpoint tracking
     metrics
@@ -131,12 +141,15 @@ fn simulate_requests(metrics: &AppMetrics) {
     metrics.latency.record(2500); // 2.5ms
     metrics.latency_by_method.record(HttpMethod::Post, 2500);
     metrics.response_bytes.record(128);
+    metrics.in_flight_peak.observe(8);
+    metrics.min_response_bytes.observe(128);
 
     // Simulate a failed request
     metrics.requests.inc();
     metrics.requests_by_method.inc(HttpMethod::Get);
     metrics.requests_by_status.inc(StatusClass::ServerError5xx);
     metrics.latency.record(50_000); // 50ms timeout
+    metrics.in_flight_peak.observe(11);
 }
 
 fn simulate_spans(collector: Arc<SpanCollector>) {

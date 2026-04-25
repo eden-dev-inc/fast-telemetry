@@ -1,7 +1,8 @@
 use crate::{
     Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
     DynamicHistogram, DynamicLabelSet, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter,
-    LabeledGauge, LabeledHistogram, exp_buckets::ExpBucketsSnapshot,
+    LabeledGauge, LabeledHistogram, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
+    exp_buckets::ExpBucketsSnapshot,
 };
 use std::fmt::{Display, Write as _};
 
@@ -356,6 +357,50 @@ impl DogStatsDExport for Gauge {
         output.push_str(name);
         output.push(':');
         push_display(output, self.get());
+        output.push_str("|g");
+        append_tags(output, tags);
+        output.push('\n');
+    }
+}
+
+impl DogStatsDExport for MaxGauge {
+    fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
+        output.push_str(name);
+        output.push(':');
+        push_display(output, self.get());
+        output.push_str("|g");
+        append_tags(output, tags);
+        output.push('\n');
+    }
+}
+
+impl DogStatsDExport for MaxGaugeF64 {
+    fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
+        output.push_str(name);
+        output.push(':');
+        write_gauge_f64_value(output, self.get());
+        output.push_str("|g");
+        append_tags(output, tags);
+        output.push('\n');
+    }
+}
+
+impl DogStatsDExport for MinGauge {
+    fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
+        output.push_str(name);
+        output.push(':');
+        push_display(output, self.get());
+        output.push_str("|g");
+        append_tags(output, tags);
+        output.push('\n');
+    }
+}
+
+impl DogStatsDExport for MinGaugeF64 {
+    fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
+        output.push_str(name);
+        output.push(':');
+        write_gauge_f64_value(output, self.get());
         output.push_str("|g");
         append_tags(output, tags);
         output.push('\n');
