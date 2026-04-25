@@ -10,7 +10,8 @@ use crate::exp_buckets::ExpBucketsSnapshot;
 use crate::{
     Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
     DynamicHistogram, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledGauge,
-    LabeledHistogram, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
+    LabeledHistogram, LabeledSampledTimer, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
+    SampledTimer,
 };
 
 /// Re-export proto types so downstream crates (and the derive macro) can reference them.
@@ -347,6 +348,25 @@ impl OtlpExport for Histogram {
     }
 }
 
+impl OtlpExport for SampledTimer {
+    fn export_otlp(
+        &self,
+        metrics: &mut Vec<pb::Metric>,
+        name: &str,
+        description: &str,
+        time_unix_nano: u64,
+    ) {
+        let calls_name = format!("{name}.calls");
+        let samples_name = format!("{name}.samples");
+        let calls_description = format!("{description} total calls");
+        let samples_description = format!("{description} sampled latency in nanoseconds");
+        self.calls_metric()
+            .export_otlp(metrics, &calls_name, &calls_description, time_unix_nano);
+        self.histogram()
+            .export_otlp(metrics, &samples_name, &samples_description, time_unix_nano);
+    }
+}
+
 /// Build an OTLP ExponentialHistogramDataPoint from an ExpBucketsSnapshot.
 fn exp_histogram_data_point(
     snap: &ExpBucketsSnapshot,
@@ -507,6 +527,65 @@ impl<L: LabelEnum> OtlpExport for LabeledHistogram<L> {
             description: description.to_string(),
             data: Some(pb::metric::Data::Histogram(pb::OtlpHistogram {
                 data_points,
+                aggregation_temporality: pb::AggregationTemporality::Cumulative as i32,
+            })),
+            ..Default::default()
+        });
+    }
+}
+
+impl<L: LabelEnum> OtlpExport for LabeledSampledTimer<L> {
+    fn export_otlp(
+        &self,
+        metrics: &mut Vec<pb::Metric>,
+        name: &str,
+        description: &str,
+        time_unix_nano: u64,
+    ) {
+        let calls_name = format!("{name}.calls");
+        let samples_name = format!("{name}.samples");
+        let calls_description = format!("{description} total calls");
+        let samples_description = format!("{description} sampled latency in nanoseconds");
+
+        let mut call_points = Vec::new();
+        let mut sample_points = Vec::new();
+
+        for (label, calls, histogram) in self.iter() {
+            call_points.push(int_data_point(
+                calls.sum() as i64,
+                vec![label_to_attribute(label)],
+                time_unix_nano,
+            ));
+
+            let (bucket_counts, explicit_bounds) =
+                cumulative_to_otlp_buckets(&histogram.buckets_cumulative());
+            sample_points.push(pb::HistogramDataPoint {
+                attributes: vec![label_to_attribute(label)],
+                time_unix_nano,
+                count: histogram.count(),
+                sum: Some(histogram.sum() as f64),
+                bucket_counts,
+                explicit_bounds,
+                ..Default::default()
+            });
+        }
+
+        metrics.push(pb::Metric {
+            name: calls_name,
+            description: calls_description,
+            data: Some(pb::metric::Data::Sum(pb::Sum {
+                data_points: call_points,
+                aggregation_temporality: pb::AggregationTemporality::Cumulative as i32,
+                is_monotonic: false,
+            })),
+            ..Default::default()
+        });
+
+        metrics.push(pb::Metric {
+            name: samples_name,
+            description: samples_description,
+            data: Some(pb::metric::Data::Histogram(pb::OtlpHistogram {
+                data_points: sample_points,
                 aggregation_temporality: pb::AggregationTemporality::Cumulative as i32,
             })),
             ..Default::default()

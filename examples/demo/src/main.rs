@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fast_telemetry::{
-    Counter, DeriveLabel, Distribution, DynamicCounter, ExportMetrics, Gauge, Histogram, LabelEnum,
+    Counter, DeriveLabel, Distribution, DynamicCounter, ExportMetrics, Gauge, Histogram,
     LabeledCounter, LabeledHistogram, MaxGauge, MinGauge, SpanCollector, SpanKind, SpanStatus,
 };
 use tokio_util::sync::CancellationToken;

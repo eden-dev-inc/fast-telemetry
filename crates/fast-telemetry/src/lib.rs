@@ -51,7 +51,8 @@ pub use metric::{
     DynamicDistributionSeries, DynamicGauge, DynamicGaugeI64, DynamicGaugeI64Series,
     DynamicGaugeSeries, DynamicHistogram, DynamicHistogramSeries, DynamicHistogramSeriesView,
     DynamicLabelSet, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledGauge,
-    LabeledHistogram, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
+    LabeledHistogram, LabeledSampledTimer, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
+    SampledTimer, SampledTimerGuard,
 };
 #[cfg(feature = "eviction")]
 pub use metric::{advance_cycle, current_cycle};
