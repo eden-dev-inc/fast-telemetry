@@ -394,6 +394,55 @@ fn bench_record_dynamic_counter(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_record_dynamic_counter_cache_pattern(c: &mut Criterion) {
+    let mut group = c.benchmark_group("record/dynamic_counter_cache_pattern");
+
+    for cardinality in [1usize, 4, 8, 16, 64] {
+        let counter = DynamicCounter::new(8);
+        let label_strs: Vec<String> = (0..cardinality).map(|i| format!("ep{i}")).collect();
+        for label in &label_strs {
+            counter.inc(&[("endpoint", label.as_str())]);
+        }
+
+        group.bench_with_input(
+            BenchmarkId::new("rotating_hot_set", cardinality),
+            &cardinality,
+            |b, &n| {
+                let mut i = 0usize;
+                b.iter(|| {
+                    let label = label_strs[i % n].as_str();
+                    counter.inc(black_box(&[("endpoint", label)]));
+                    i = i.wrapping_add(1);
+                });
+            },
+        );
+    }
+
+    let counter = DynamicCounter::new(8);
+    counter.inc(&[("endpoint", "ep0")]);
+    group.bench_function("same_label", |b| {
+        b.iter(|| {
+            counter.inc(black_box(&[("endpoint", "ep0")]));
+        });
+    });
+
+    let counter = DynamicCounter::with_max_series(8, 32);
+    let churn_labels: Vec<String> = (0..256).map(|i| format!("ep{i}")).collect();
+    for label in &churn_labels[..32] {
+        counter.inc(&[("endpoint", label.as_str())]);
+    }
+    group.bench_function("overflow_churn", |b| {
+        let mut i = 0usize;
+        b.iter(|| {
+            let label = churn_labels[i % churn_labels.len()].as_str();
+            counter.inc(black_box(&[("endpoint", label)]));
+            i = i.wrapping_add(1);
+        });
+    });
+
+    group.finish();
+}
+
 fn bench_record_dynamic_distribution(c: &mut Criterion) {
     let mut group = c.benchmark_group("record/dynamic_distribution");
 
@@ -1304,6 +1353,7 @@ criterion_group!(
     bench_record_labeled_counter,
     bench_record_labeled_histogram,
     bench_record_dynamic_counter,
+    bench_record_dynamic_counter_cache_pattern,
     bench_record_dynamic_distribution,
     bench_record_dynamic_counter_first_touch,
 );
