@@ -6,7 +6,7 @@
 //! Run with: cargo run --example service_metrics
 
 use fast_telemetry::{
-    Counter, DeriveLabel, ExportMetrics, Gauge, LabelEnum, LabeledCounter, LabeledHistogram,
+    Counter, DeriveLabel, ExportMetrics, Gauge, LabeledCounter, LabeledHistogram,
 };
 use std::sync::Arc;
 use std::thread;

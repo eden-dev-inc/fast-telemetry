@@ -2,8 +2,10 @@
 //!
 //! Run with: cargo run --example labeled
 
+use std::time::Duration;
+
 use fast_telemetry::{
-    DeriveLabel, ExportMetrics, LabelEnum, LabeledCounter, LabeledGauge, LabeledHistogram,
+    DeriveLabel, ExportMetrics, LabeledCounter, LabeledGauge, LabeledHistogram, LabeledSampledTimer,
 };
 
 // Define label enums with the derive macro.
@@ -39,6 +41,9 @@ struct HttpMetrics {
     #[help = "Request latency by method (microseconds)"]
     latency: LabeledHistogram<HttpMethod>,
 
+    #[help = "Handler phase latency"]
+    phase_latency: LabeledSampledTimer<HttpMethod>,
+
     #[help = "Active connections by method"]
     active: LabeledGauge<HttpMethod>,
 }
@@ -49,6 +54,7 @@ impl HttpMetrics {
             requests: LabeledCounter::new(4),
             responses: LabeledCounter::new(4),
             latency: LabeledHistogram::with_latency_buckets(4),
+            phase_latency: LabeledSampledTimer::with_latency_buckets(4, 32),
             active: LabeledGauge::new(),
         }
     }
@@ -61,12 +67,18 @@ fn main() {
     for _ in 0..100 {
         metrics.requests.inc(HttpMethod::Get);
         metrics.latency.record(HttpMethod::Get, 150);
+        metrics
+            .phase_latency
+            .record_elapsed(HttpMethod::Get, Duration::from_nanos(120_000));
         metrics.responses.inc(StatusClass::Success2xx);
     }
 
     for _ in 0..30 {
         metrics.requests.inc(HttpMethod::Post);
         metrics.latency.record(HttpMethod::Post, 500);
+        metrics
+            .phase_latency
+            .record_elapsed(HttpMethod::Post, Duration::from_nanos(240_000));
         metrics.responses.inc(StatusClass::Success2xx);
     }
 

@@ -1,8 +1,8 @@
 use crate::{
     Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
     DynamicHistogram, DynamicLabelSet, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter,
-    LabeledGauge, LabeledHistogram, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
-    exp_buckets::ExpBucketsSnapshot,
+    LabeledGauge, LabeledHistogram, LabeledSampledTimer, MaxGauge, MaxGaugeF64, MinGauge,
+    MinGaugeF64, SampledTimer, exp_buckets::ExpBucketsSnapshot,
 };
 use std::fmt::{Display, Write as _};
 
@@ -441,6 +441,17 @@ impl DogStatsDExport for Histogram {
     }
 }
 
+impl DogStatsDExport for SampledTimer {
+    fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
+        let calls_name = format!("{name}.calls");
+        let samples_name = format!("{name}.samples");
+        self.calls_metric()
+            .export_dogstatsd(output, &calls_name, tags);
+        self.histogram()
+            .export_dogstatsd(output, &samples_name, tags);
+    }
+}
+
 impl DogStatsDExport for Distribution {
     /// Export distribution as `|d` samples for Datadog percentile computation.
     fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
@@ -493,6 +504,47 @@ impl<L: LabelEnum> DogStatsDExport for LabeledHistogram<L> {
             output.push_str("|c");
             append_tags_with_label(output, L::LABEL_NAME, variant, tags);
             output.push('\n');
+        }
+    }
+}
+
+impl<L: LabelEnum> DogStatsDExport for LabeledSampledTimer<L> {
+    fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
+        let calls_name = format!("{name}.calls");
+        let samples_name = format!("{name}.samples");
+
+        for (label, calls, histogram) in self.iter() {
+            let variant = label.variant_name();
+
+            __write_dogstatsd_with_label(
+                output,
+                &calls_name,
+                calls.sum(),
+                "c",
+                L::LABEL_NAME,
+                variant,
+                tags,
+            );
+
+            __write_dogstatsd_with_label(
+                output,
+                &format!("{}.count", samples_name),
+                histogram.count(),
+                "c",
+                L::LABEL_NAME,
+                variant,
+                tags,
+            );
+
+            __write_dogstatsd_with_label(
+                output,
+                &format!("{}.sum", samples_name),
+                histogram.sum(),
+                "c",
+                L::LABEL_NAME,
+                variant,
+                tags,
+            );
         }
     }
 }

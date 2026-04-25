@@ -1,7 +1,8 @@
 use crate::{
     Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
     DynamicHistogram, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledGauge,
-    LabeledHistogram, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
+    LabeledHistogram, LabeledSampledTimer, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
+    SampledTimer,
 };
 use std::fmt::Write as _;
 
@@ -28,6 +29,84 @@ fn write_dynamic_labels(output: &mut String, labels: &[(String, String)]) {
         output.push_str("=\"");
         output.push_str(v);
         output.push('"');
+    }
+}
+
+fn write_labeled_counter_series<L, I>(output: &mut String, name: &str, help: &str, series: I)
+where
+    L: LabelEnum,
+    I: IntoIterator<Item = (L, u64)>,
+{
+    output.push_str("# HELP ");
+    output.push_str(name);
+    output.push(' ');
+    output.push_str(help);
+    output.push_str("\n# TYPE ");
+    output.push_str(name);
+    output.push_str(" counter\n");
+
+    for (label, count) in series {
+        output.push_str(name);
+        output.push('{');
+        output.push_str(L::LABEL_NAME);
+        output.push_str("=\"");
+        output.push_str(label.variant_name());
+        output.push_str("\"} ");
+        push_display(output, count);
+        output.push('\n');
+    }
+}
+
+fn write_labeled_histogram_series<L, I>(output: &mut String, name: &str, help: &str, series: I)
+where
+    L: LabelEnum,
+    I: IntoIterator<Item = (L, Vec<(u64, u64)>, u64, u64)>,
+{
+    output.push_str("# HELP ");
+    output.push_str(name);
+    output.push(' ');
+    output.push_str(help);
+    output.push_str("\n# TYPE ");
+    output.push_str(name);
+    output.push_str(" histogram\n");
+
+    for (label, buckets, sum, count) in series {
+        let variant = label.variant_name();
+
+        for (bound, bucket_count) in buckets {
+            output.push_str(name);
+            output.push_str("_bucket{");
+            output.push_str(L::LABEL_NAME);
+            output.push_str("=\"");
+            output.push_str(variant);
+            output.push_str("\",le=\"");
+            if bound == u64::MAX {
+                output.push_str("+Inf");
+            } else {
+                push_display(output, bound);
+            }
+            output.push_str("\"} ");
+            push_display(output, bucket_count);
+            output.push('\n');
+        }
+
+        output.push_str(name);
+        output.push_str("_sum{");
+        output.push_str(L::LABEL_NAME);
+        output.push_str("=\"");
+        output.push_str(variant);
+        output.push_str("\"} ");
+        push_display(output, sum);
+        output.push('\n');
+
+        output.push_str(name);
+        output.push_str("_count{");
+        output.push_str(L::LABEL_NAME);
+        output.push_str("=\"");
+        output.push_str(variant);
+        output.push_str("\"} ");
+        push_display(output, count);
+        output.push('\n');
     }
 }
 
@@ -178,6 +257,19 @@ impl PrometheusExport for Histogram {
     }
 }
 
+impl PrometheusExport for SampledTimer {
+    fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
+        let calls_name = format!("{name}_calls");
+        let samples_name = format!("{name}_samples");
+        let calls_help = format!("{help} total calls");
+        let samples_help = format!("{help} sampled latency in nanoseconds");
+        self.calls_metric()
+            .export_prometheus(output, &calls_name, &calls_help);
+        self.histogram()
+            .export_prometheus(output, &samples_name, &samples_help);
+    }
+}
+
 impl PrometheusExport for Distribution {
     /// Export distribution as summary (count + sum only, no quantiles).
     fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
@@ -203,24 +295,12 @@ impl PrometheusExport for Distribution {
 
 impl<L: LabelEnum> PrometheusExport for LabeledCounter<L> {
     fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
-        output.push_str("# HELP ");
-        output.push_str(name);
-        output.push(' ');
-        output.push_str(help);
-        output.push_str("\n# TYPE ");
-        output.push_str(name);
-        output.push_str(" counter\n");
-
-        for (label, count) in self.iter() {
-            output.push_str(name);
-            output.push('{');
-            output.push_str(L::LABEL_NAME);
-            output.push_str("=\"");
-            output.push_str(label.variant_name());
-            output.push_str("\"} ");
-            push_display(output, count);
-            output.push('\n');
-        }
+        write_labeled_counter_series::<L, _>(
+            output,
+            name,
+            help,
+            self.iter().map(|(label, count)| (label, count as u64)),
+        );
     }
 }
 
@@ -249,52 +329,37 @@ impl<L: LabelEnum> PrometheusExport for LabeledGauge<L> {
 
 impl<L: LabelEnum> PrometheusExport for LabeledHistogram<L> {
     fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
-        output.push_str("# HELP ");
-        output.push_str(name);
-        output.push(' ');
-        output.push_str(help);
-        output.push_str("\n# TYPE ");
-        output.push_str(name);
-        output.push_str(" histogram\n");
+        write_labeled_histogram_series::<L, _>(output, name, help, self.iter());
+    }
+}
 
-        for (label, buckets, sum, count) in self.iter() {
-            let variant = label.variant_name();
+impl<L: LabelEnum> PrometheusExport for LabeledSampledTimer<L> {
+    fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
+        let calls_name = format!("{name}_calls");
+        let samples_name = format!("{name}_samples");
+        let calls_help = format!("{help} total calls");
+        let samples_help = format!("{help} sampled latency in nanoseconds");
 
-            for (bound, bucket_count) in buckets {
-                output.push_str(name);
-                output.push_str("_bucket{");
-                output.push_str(L::LABEL_NAME);
-                output.push_str("=\"");
-                output.push_str(variant);
-                output.push_str("\",le=\"");
-                if bound == u64::MAX {
-                    output.push_str("+Inf");
-                } else {
-                    push_display(output, bound);
-                }
-                output.push_str("\"} ");
-                push_display(output, bucket_count);
-                output.push('\n');
-            }
-
-            output.push_str(name);
-            output.push_str("_sum{");
-            output.push_str(L::LABEL_NAME);
-            output.push_str("=\"");
-            output.push_str(variant);
-            output.push_str("\"} ");
-            push_display(output, sum);
-            output.push('\n');
-
-            output.push_str(name);
-            output.push_str("_count{");
-            output.push_str(L::LABEL_NAME);
-            output.push_str("=\"");
-            output.push_str(variant);
-            output.push_str("\"} ");
-            push_display(output, count);
-            output.push('\n');
-        }
+        write_labeled_counter_series::<L, _>(
+            output,
+            &calls_name,
+            &calls_help,
+            self.iter()
+                .map(|(label, calls, _)| (label, calls.sum() as u64)),
+        );
+        write_labeled_histogram_series::<L, _>(
+            output,
+            &samples_name,
+            &samples_help,
+            self.iter().map(|(label, _, histogram)| {
+                (
+                    label,
+                    histogram.buckets_cumulative(),
+                    histogram.sum(),
+                    histogram.count(),
+                )
+            }),
+        );
     }
 }
 
