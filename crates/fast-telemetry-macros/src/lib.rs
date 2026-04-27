@@ -24,6 +24,10 @@ enum MetricKind {
     Gauge,
     GaugeF64,
     Histogram,
+    MaxGauge,
+    MaxGaugeF64,
+    MinGauge,
+    MinGaugeF64,
     LabeledCounter(Type),
     LabeledGauge,
     LabeledHistogram(Type),
@@ -60,6 +64,10 @@ fn metric_kind(ty: &Type) -> Option<MetricKind> {
         "Gauge" => Some(MetricKind::Gauge),
         "GaugeF64" => Some(MetricKind::GaugeF64),
         "Histogram" => Some(MetricKind::Histogram),
+        "MaxGauge" => Some(MetricKind::MaxGauge),
+        "MaxGaugeF64" => Some(MetricKind::MaxGaugeF64),
+        "MinGauge" => Some(MetricKind::MinGauge),
+        "MinGaugeF64" => Some(MetricKind::MinGaugeF64),
         "LabeledCounter" => {
             let PathArguments::AngleBracketed(args) = &segment.arguments else {
                 return None;
@@ -245,6 +253,10 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
             MetricKind::Counter
             | MetricKind::Gauge
             | MetricKind::GaugeF64
+            | MetricKind::MaxGauge
+            | MetricKind::MaxGaugeF64
+            | MetricKind::MinGauge
+            | MetricKind::MinGaugeF64
             | MetricKind::Distribution
             | MetricKind::DynamicCounter
             | MetricKind::DynamicGauge
@@ -262,7 +274,13 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
         }
 
         match &metric_kind {
-            MetricKind::Counter | MetricKind::Gauge | MetricKind::GaugeF64 => {
+            MetricKind::Counter
+            | MetricKind::Gauge
+            | MetricKind::GaugeF64
+            | MetricKind::MaxGauge
+            | MetricKind::MaxGaugeF64
+            | MetricKind::MinGauge
+            | MetricKind::MinGaugeF64 => {
                 dogstatsd_reserve_hint +=
                     statsd_metric_name.len() + DOGSTATSD_SIMPLE_LINE_OVERHEAD_BYTES;
                 dogstatsd_delta_reserve_hint +=
@@ -622,7 +640,12 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                     state.#sum_state_field.retain(|k, _| current_keys.contains(k));
                 });
             }
-            MetricKind::Gauge | MetricKind::GaugeF64 => {
+            MetricKind::Gauge
+            | MetricKind::GaugeF64
+            | MetricKind::MaxGauge
+            | MetricKind::MaxGaugeF64
+            | MetricKind::MinGauge
+            | MetricKind::MinGaugeF64 => {
                 state_label_count_exprs.push(quote! { 0usize });
                 // Gauges are point-in-time, no delta tracking needed (always export current value)
                 delta_exports.push(quote! {

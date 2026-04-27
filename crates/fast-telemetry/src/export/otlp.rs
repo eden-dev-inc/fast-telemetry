@@ -10,7 +10,7 @@ use crate::exp_buckets::ExpBucketsSnapshot;
 use crate::{
     Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
     DynamicHistogram, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledGauge,
-    LabeledHistogram,
+    LabeledHistogram, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
 };
 
 /// Re-export proto types so downstream crates (and the derive macro) can reference them.
@@ -221,6 +221,82 @@ impl OtlpExport for Gauge {
 }
 
 impl OtlpExport for GaugeF64 {
+    fn export_otlp(
+        &self,
+        metrics: &mut Vec<pb::Metric>,
+        name: &str,
+        description: &str,
+        time_unix_nano: u64,
+    ) {
+        metrics.push(pb::Metric {
+            name: name.to_string(),
+            description: description.to_string(),
+            data: Some(pb::metric::Data::Gauge(pb::OtlpGauge {
+                data_points: vec![double_data_point(self.get(), Vec::new(), time_unix_nano)],
+            })),
+            ..Default::default()
+        });
+    }
+}
+
+impl OtlpExport for MaxGauge {
+    fn export_otlp(
+        &self,
+        metrics: &mut Vec<pb::Metric>,
+        name: &str,
+        description: &str,
+        time_unix_nano: u64,
+    ) {
+        metrics.push(pb::Metric {
+            name: name.to_string(),
+            description: description.to_string(),
+            data: Some(pb::metric::Data::Gauge(pb::OtlpGauge {
+                data_points: vec![int_data_point(self.get(), Vec::new(), time_unix_nano)],
+            })),
+            ..Default::default()
+        });
+    }
+}
+
+impl OtlpExport for MaxGaugeF64 {
+    fn export_otlp(
+        &self,
+        metrics: &mut Vec<pb::Metric>,
+        name: &str,
+        description: &str,
+        time_unix_nano: u64,
+    ) {
+        metrics.push(pb::Metric {
+            name: name.to_string(),
+            description: description.to_string(),
+            data: Some(pb::metric::Data::Gauge(pb::OtlpGauge {
+                data_points: vec![double_data_point(self.get(), Vec::new(), time_unix_nano)],
+            })),
+            ..Default::default()
+        });
+    }
+}
+
+impl OtlpExport for MinGauge {
+    fn export_otlp(
+        &self,
+        metrics: &mut Vec<pb::Metric>,
+        name: &str,
+        description: &str,
+        time_unix_nano: u64,
+    ) {
+        metrics.push(pb::Metric {
+            name: name.to_string(),
+            description: description.to_string(),
+            data: Some(pb::metric::Data::Gauge(pb::OtlpGauge {
+                data_points: vec![int_data_point(self.get(), Vec::new(), time_unix_nano)],
+            })),
+            ..Default::default()
+        });
+    }
+}
+
+impl OtlpExport for MinGaugeF64 {
     fn export_otlp(
         &self,
         metrics: &mut Vec<pb::Metric>,
