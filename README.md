@@ -103,7 +103,7 @@ fast-telemetry = "0.1"
 ### Define Metrics
 
 ```rust
-use fast_telemetry::{Counter, ExportMetrics, Gauge, Histogram, MaxGauge};
+use fast_telemetry::{Counter, ExportMetrics, Gauge, Histogram, MaxGauge, SampledTimer};
 
 #[derive(ExportMetrics)]
 #[metric_prefix = "myapp"]
@@ -113,6 +113,9 @@ pub struct AppMetrics {
 
     #[help = "Request latency in microseconds"]
     pub latency: Histogram,
+
+    #[help = "Hot path latency"]
+    pub hot_path_latency: SampledTimer,
 
     #[help = "Current queue depth"]
     pub queue_depth: Gauge,
@@ -126,6 +129,7 @@ impl AppMetrics {
         Self {
             requests: Counter::new(4),     // use available_parallelism() in production
             latency: Histogram::with_latency_buckets(4),
+            hot_path_latency: SampledTimer::with_latency_buckets(4, 64),
             queue_depth: Gauge::new(),
             queue_depth_peak: MaxGauge::new(4),
         }
@@ -138,9 +142,65 @@ impl AppMetrics {
 ```rust
 metrics.requests.inc();
 metrics.latency.record(elapsed_us);
+metrics.hot_path_latency.record_elapsed(std::time::Duration::from_nanos(125_000));
 metrics.queue_depth.set(queue.len() as i64);
 metrics.queue_depth_peak.observe(queue.len() as i64);
 ```
+
+### Sampled Timers
+
+`SampledTimer` is for measuring elapsed time around an operation. You can start
+timing with an RAII guard and let it record on drop, or record a pre-measured
+`Duration` directly.
+
+It is designed for hot paths where you want timing instrumentation to stay
+cheap. Every use increments a total call counter, while elapsed-time
+measurements are sampled at the configured stride before being recorded into the
+latency histogram.
+
+```rust
+use std::time::Duration;
+use fast_telemetry::{DeriveLabel, LabeledSampledTimer, SampledTimer};
+
+let timer = SampledTimer::with_latency_buckets(4, 64);
+
+// Record a duration you already measured elsewhere.
+timer.record_elapsed(Duration::from_nanos(180_000));
+
+{
+    // Time this scope with an RAII guard.
+    let _guard = timer.start();
+    // timed work
+}
+
+#[derive(Copy, Clone, Debug, DeriveLabel)]
+#[label_name = "phase"]
+enum Phase {
+    Parse,
+    Execute,
+}
+
+let labeled = LabeledSampledTimer::<Phase>::with_latency_buckets(4, 32);
+
+{
+    // Time a labeled scope with the same guard pattern.
+    let _guard = labeled.start(Phase::Parse);
+    // timed parse work
+}
+
+// Or record a pre-measured labeled duration directly.
+labeled.record_elapsed(Phase::Parse, Duration::from_nanos(90_000));
+```
+
+Sampled timers record durations in **nanoseconds**. They export as a composite
+metric:
+
+- Prometheus: `name_calls` and `name_samples`
+- DogStatsD / OTLP: `name.calls` and `name.samples`
+
+`name_calls` / `name.calls` is the total operation count. `name_samples` is the
+sampled latency histogram. The timer/guard API is the instrumentation surface;
+sampling is how it keeps that instrumentation cheap enough for hot code.
 
 ### Export
 
