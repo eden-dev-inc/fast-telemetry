@@ -36,9 +36,13 @@ pub struct MinGaugeF64 {
 }
 
 impl MinGaugeF64 {
-    /// Create a new min gauge with all shards initialized to zero.
+    /// Create a new min gauge with all shards initialized to [`f64::INFINITY`],
+    /// so any (non-NaN) observation displaces the initial value.
+    ///
+    /// `get()` on a gauge that has never been observed returns [`f64::INFINITY`];
+    /// callers that need a different sentinel should use [`Self::with_value`].
     pub fn new(shard_count: usize) -> Self {
-        Self::with_value(shard_count, 0.0)
+        Self::with_value(shard_count, f64::INFINITY)
     }
 
     /// Create a new min gauge with all shards initialized to `initial`.
@@ -134,5 +138,15 @@ mod tests {
         let gauge = MinGaugeF64::with_value(4, 1.0);
         gauge.observe(f64::NAN);
         assert!((gauge.get() - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn new_tracks_minimum_of_positive_observations() {
+        let gauge = MinGaugeF64::new(4);
+        assert!(gauge.get().is_infinite() && gauge.get().is_sign_positive());
+        gauge.observe(8.0);
+        gauge.observe(3.25);
+        gauge.observe(5.5);
+        assert!((gauge.get() - 3.25).abs() < f64::EPSILON);
     }
 }
