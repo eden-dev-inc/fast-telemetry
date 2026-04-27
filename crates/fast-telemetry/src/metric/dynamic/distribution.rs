@@ -4,6 +4,7 @@
 //! `Distribution` implementation.  Each label set × thread gets its own
 //! fixed-size bucket array.
 
+use super::cache::{CacheValue, LabelCache, SERIES_CACHE_SIZE};
 #[cfg(feature = "eviction")]
 use super::current_cycle;
 use super::{DISTRIBUTION_IDS, DynamicLabelSet};
@@ -114,6 +115,23 @@ impl DistributionSeries {
     }
 }
 
+struct DistributionCacheValue {
+    series: Weak<DistributionSeries>,
+    buf: Arc<ExpBuckets>,
+}
+
+impl CacheValue for DistributionCacheValue {
+    type Strong = (Arc<DistributionSeries>, Arc<ExpBuckets>);
+
+    fn upgrade(&self) -> Option<Self::Strong> {
+        Some((self.series.upgrade()?, Arc::clone(&self.buf)))
+    }
+
+    fn is_valid(strong: &Self::Strong) -> bool {
+        !strong.0.is_evicted()
+    }
+}
+
 /// A reusable handle to a dynamic-label distribution series.
 ///
 /// Use this for hot paths to avoid per-update label canonicalization and map
@@ -149,15 +167,9 @@ impl DynamicDistributionSeries {
     }
 }
 
-struct SeriesCacheEntry {
-    distribution_id: usize,
-    ordered_labels: Vec<(String, String)>,
-    series: Weak<DistributionSeries>,
-    buf: Arc<ExpBuckets>,
-}
-
 thread_local! {
-    static SERIES_CACHE: RefCell<Option<SeriesCacheEntry>> = const { RefCell::new(None) };
+    static SERIES_CACHE: RefCell<LabelCache<DistributionCacheValue, SERIES_CACHE_SIZE>> =
+        RefCell::new(LabelCache::new());
     static SERIES_BUF_CACHE: RefCell<Vec<(usize, usize, Weak<ExpBuckets>)>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -390,28 +402,10 @@ impl DynamicDistribution {
         labels: &[(&str, &str)],
     ) -> Option<(Arc<DistributionSeries>, Arc<ExpBuckets>)> {
         SERIES_CACHE.with(|cache| {
-            let cache_ref = cache.borrow();
-            let entry = cache_ref.as_ref()?;
-            if entry.distribution_id != self.id {
-                return None;
-            }
-            if entry.ordered_labels.len() != labels.len() {
-                return None;
-            }
-            for (idx, (k, v)) in labels.iter().enumerate() {
-                let (ek, ev) = &entry.ordered_labels[idx];
-                if ek != k || ev != v {
-                    return None;
-                }
-            }
-            let series = entry.series.upgrade()?;
-            // Check tombstone - forces re-lookup if series was evicted
-            if series.is_evicted() {
-                return None;
-            }
+            let (series, buf) = cache.borrow_mut().get(self.id, labels)?;
             #[cfg(feature = "eviction")]
             series.touch(current_cycle());
-            Some((series, Arc::clone(&entry.buf)))
+            Some((series, buf))
         })
     }
 
@@ -422,16 +416,14 @@ impl DynamicDistribution {
         buf: Arc<ExpBuckets>,
     ) {
         SERIES_CACHE.with(|cache| {
-            let ordered_labels = labels
-                .iter()
-                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-                .collect();
-            *cache.borrow_mut() = Some(SeriesCacheEntry {
-                distribution_id: self.id,
-                ordered_labels,
-                series: Arc::downgrade(series),
-                buf,
-            });
+            cache.borrow_mut().insert(
+                self.id,
+                labels,
+                DistributionCacheValue {
+                    series: Arc::downgrade(series),
+                    buf,
+                },
+            );
         });
     }
 

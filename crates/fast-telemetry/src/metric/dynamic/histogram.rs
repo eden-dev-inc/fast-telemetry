@@ -1,5 +1,6 @@
 //! Runtime-labeled histogram for dynamic dimensions.
 
+use super::cache::{CacheableSeries, LabelCache, SERIES_CACHE_SIZE};
 #[cfg(feature = "eviction")]
 use super::current_cycle;
 use super::{DynamicLabelSet, HISTOGRAM_IDS, thread_id};
@@ -155,6 +156,12 @@ impl HistogramSeries {
     }
 }
 
+impl CacheableSeries for HistogramSeries {
+    fn is_evicted(&self) -> bool {
+        self.is_evicted()
+    }
+}
+
 /// A reusable handle to a dynamic-label histogram series.
 ///
 /// Use this for hot paths to avoid per-update label canonicalization and map
@@ -220,14 +227,9 @@ impl DynamicHistogramSeries {
     }
 }
 
-struct SeriesCacheEntry {
-    histogram_id: usize,
-    ordered_labels: Vec<(String, String)>,
-    series: Weak<HistogramSeries>,
-}
-
 thread_local! {
-    static SERIES_CACHE: RefCell<Option<SeriesCacheEntry>> = const { RefCell::new(None) };
+    static SERIES_CACHE: RefCell<LabelCache<Weak<HistogramSeries>, SERIES_CACHE_SIZE>> =
+        RefCell::new(LabelCache::new());
 }
 
 /// Histogram keyed by runtime label sets.
@@ -517,24 +519,7 @@ impl DynamicHistogram {
 
     fn cached_series(&self, labels: &[(&str, &str)]) -> Option<Arc<HistogramSeries>> {
         SERIES_CACHE.with(|cache| {
-            let cache_ref = cache.borrow();
-            let entry = cache_ref.as_ref()?;
-            if entry.histogram_id != self.id {
-                return None;
-            }
-            if entry.ordered_labels.len() != labels.len() {
-                return None;
-            }
-            for (idx, (k, v)) in labels.iter().enumerate() {
-                let (ek, ev) = &entry.ordered_labels[idx];
-                if ek != k || ev != v {
-                    return None;
-                }
-            }
-            let series = entry.series.upgrade()?;
-            if series.is_evicted() {
-                return None;
-            }
+            let series = cache.borrow_mut().get(self.id, labels)?;
             #[cfg(feature = "eviction")]
             series.touch(current_cycle());
             Some(series)
@@ -543,15 +528,9 @@ impl DynamicHistogram {
 
     fn update_cache(&self, labels: &[(&str, &str)], series: &Arc<HistogramSeries>) {
         SERIES_CACHE.with(|cache| {
-            let ordered_labels = labels
-                .iter()
-                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-                .collect();
-            *cache.borrow_mut() = Some(SeriesCacheEntry {
-                histogram_id: self.id,
-                ordered_labels,
-                series: Arc::downgrade(series),
-            });
+            cache
+                .borrow_mut()
+                .insert(self.id, labels, Arc::downgrade(series));
         });
     }
 }

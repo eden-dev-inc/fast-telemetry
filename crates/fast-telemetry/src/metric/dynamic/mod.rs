@@ -10,6 +10,7 @@
 //! - Series handles for zero-lookup repeated access
 //! - Access-timestamp eviction for bounded cardinality
 
+mod cache;
 mod counter;
 mod distribution;
 mod gauge;
