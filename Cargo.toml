@@ -42,6 +42,8 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
 # --- Dev/test/bench only ---
 criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
+metrics = "0.24.3"
+metrics-util = { version = "0.20.1", features = ["registry", "storage"] }
 opentelemetry = "0.31"
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
 shuttle = "0.8"

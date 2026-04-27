@@ -42,6 +42,52 @@ Useful benchmark groups to inspect in the Criterion HTML report:
 - `contention/counter_write_export_overlap/...`
 - `export/span_otlp_cycle/...`
 
+## CPU Usage
+
+The script-driven workloads now emit process CPU accounting on every run:
+
+- `cpu_user_seconds`
+- `cpu_system_seconds`
+- `cpu_total_seconds`
+- `cpu_avg_cores`
+- `cpu_utilization_pct`
+- `cpu_ns_per_op`
+
+`cpu_utilization_pct` is computed as `cpu_total_seconds / total_seconds * 100`, so
+multi-threaded runs can exceed `100%`. `cpu_avg_cores` is the same number expressed
+as average cores consumed during the run.
+
+Example:
+
+```bash
+./bench/run-cache-bench.sh --entity counter --profile hotspot --threads 16 --runs 5
+```
+
+Each `*-run-*.txt` file and the generated `summary.csv` will include the CPU fields,
+so you can compare throughput and CPU cost together on macOS or Linux without
+requiring `perf`.
+
+## metrics-rs Comparison
+
+`run-cache-bench.sh` also supports `mode=metrics`, backed by the
+[`metrics`](https://docs.rs/metrics/latest/metrics/) facade and
+[`metrics-util`](https://docs.rs/metrics-util/latest/metrics_util/) `Registry<_, AtomicStorage>`.
+
+This comparison is available for entities with direct equivalents in the
+`metrics` ecosystem:
+
+- `counter`
+- `dynamic_counter`
+- `dynamic_gauge`
+- `dynamic_gauge_i64` (recorded via `f64` gauges)
+- `dynamic_histogram`
+- `labeled_counter`
+- `labeled_gauge`
+- `labeled_histogram`
+
+`distribution` and `dynamic_distribution` are excluded because `metrics-rs`
+does not expose a matching distribution primitive.
+
 ## Entry Points
 
 - `run-cache-bench.sh` -- cache-line contention workloads across metric entities and label access profiles
@@ -57,6 +103,9 @@ Useful benchmark groups to inspect in the Criterion HTML report:
 
 # Focused cache workload with perf counters
 ./bench/run-cache-bench.sh --entity counter --profile hotspot --threads 16 --runs 5 --perf
+
+# Compare fast-telemetry, metrics-rs, and OpenTelemetry on the same cache workload
+./bench/run-cache-bench.sh --entity counter --profile hotspot --threads 16 --runs 5 --modes fast,metrics,otel
 
 # All span scenarios
 ./bench/run-span-bench.sh --scenario all --threads 16 --runs 5
@@ -74,7 +123,7 @@ Useful benchmark groups to inspect in the Criterion HTML report:
 | `--perf-record`            | Capture `perf.data` + text report                                |
 | `--perf-freq <N>`          | `perf record` sample frequency (default: 99)                     |
 | `--export-interval-ms <N>` | Exporter thread period (default: 10)                             |
-| `--modes <list>`           | Select modes (default: `fast,otel`; options: `fast,otel,atomic`) |
+| `--modes <list>`           | Select modes (default: `fast,otel`; options: `fast,otel,atomic,metrics`) |
 | `--entity <name>`          | Metric entity to benchmark                                       |
 | `--labels <N>`             | Label cardinality (default: 16, max: 256)                        |
 | `--profile <name>`         | Label access pattern: `uniform`, `hotspot`, `churn`              |

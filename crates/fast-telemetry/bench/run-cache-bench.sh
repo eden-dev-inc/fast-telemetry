@@ -68,8 +68,9 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [--threads N] [--iters N] [--shards N] [--runs N] [--entity name] [--labels N] [--profile name] [--export-interval-ms N] [--modes list] [--validate-export] [--collector|--collector-keep-up] [--pin] [--cpu-list list] [--perf] [--perf-stat] [--perf-record] [--perf-freq N]"
       echo ""
       echo "Defaults: threads=nproc, iters=10000000, shards=threads, runs=3"
-      echo "--modes comma-separated modes: fast,otel,atomic (default: fast,otel)"
+      echo "--modes comma-separated modes: fast,otel,atomic,metrics (default: fast,otel)"
       echo "--entity one of: counter,distribution,dynamic_counter,dynamic_distribution,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
+      echo "  metrics mode supports: counter,dynamic_counter,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
       echo "--labels label cardinality for labeled entities (default: 16)"
       echo "--profile access pattern: uniform,hotspot,churn (default: uniform)"
       echo "--validate-export run export/parity acceptance tests before benchmark"
@@ -125,9 +126,9 @@ if [[ ${#MODES_ARR[@]} -eq 0 ]]; then
 fi
 for mode in "${MODES_ARR[@]}"; do
   case "$mode" in
-    fast|otel|atomic) ;;
+    fast|otel|atomic|metrics) ;;
     *)
-      echo "ERROR: unsupported mode '$mode' (expected fast,otel,atomic)"
+      echo "ERROR: unsupported mode '$mode' (expected fast,otel,atomic,metrics)"
       exit 1
       ;;
   esac
@@ -137,6 +138,15 @@ if [[ "$ENTITY" != "counter" ]]; then
   for mode in "${MODES_ARR[@]}"; do
     if [[ "$mode" == "atomic" ]]; then
       echo "ERROR: mode=atomic is only valid with --entity counter"
+      exit 1
+    fi
+  done
+fi
+
+if [[ "$ENTITY" == "distribution" || "$ENTITY" == "dynamic_distribution" ]]; then
+  for mode in "${MODES_ARR[@]}"; do
+    if [[ "$mode" == "metrics" ]]; then
+      echo "ERROR: mode=metrics is not valid with --entity $ENTITY (metrics-rs has no distribution primitive)"
       exit 1
     fi
   done
@@ -192,6 +202,7 @@ fi
 
 FAST_CMD=("$BIN" --mode fast --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --export-interval-ms "$EXPORT_INTERVAL_MS")
 ATOMIC_CMD=("$BIN" --mode atomic --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --export-interval-ms "$EXPORT_INTERVAL_MS")
+METRICS_CMD=("$BIN" --mode metrics --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --export-interval-ms "$EXPORT_INTERVAL_MS")
 OTEL_CMD=("$BIN" --mode otel --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --export-interval-ms "$EXPORT_INTERVAL_MS")
 
 run_cmd() {
@@ -213,6 +224,7 @@ for run in $(seq 1 "$RUNS"); do
     case "$mode" in
       fast) run_cmd "${FAST_CMD[@]}" | tee "$RUN_DIR/fast-run-${run}.txt" ;;
       atomic) run_cmd "${ATOMIC_CMD[@]}" | tee "$RUN_DIR/atomic-run-${run}.txt" ;;
+      metrics) run_cmd "${METRICS_CMD[@]}" | tee "$RUN_DIR/metrics-run-${run}.txt" ;;
       otel) run_cmd "${OTEL_CMD[@]}" | tee "$RUN_DIR/otel-run-${run}.txt" ;;
     esac
   done
@@ -266,6 +278,14 @@ if [[ "$PERF_STAT" == "1" ]]; then
         fi
         sudo chown "$(id -u):$(id -g)" "$RUN_DIR/perf-atomic.txt"
         ;;
+      metrics)
+        if [[ "$PIN" == "1" ]]; then
+          sudo perf stat -e "$EVENTS" -o "$RUN_DIR/perf-metrics.txt" -- taskset -c "$CPU_LIST" "${METRICS_CMD[@]}"
+        else
+          sudo perf stat -e "$EVENTS" -o "$RUN_DIR/perf-metrics.txt" -- "${METRICS_CMD[@]}"
+        fi
+        sudo chown "$(id -u):$(id -g)" "$RUN_DIR/perf-metrics.txt"
+        ;;
       otel)
         if [[ "$PIN" == "1" ]]; then
           sudo perf stat -e "$EVENTS" -o "$RUN_DIR/perf-otel.txt" -- taskset -c "$CPU_LIST" "${OTEL_CMD[@]}"
@@ -297,6 +317,14 @@ if [[ "$PERF_RECORD" == "1" ]]; then
           sudo perf record -g -F "$PERF_FREQ" -o "$RUN_DIR/perf-atomic.data" -- "${ATOMIC_CMD[@]}"
         fi
         sudo chown "$(id -u):$(id -g)" "$RUN_DIR/perf-atomic.data"
+        ;;
+      metrics)
+        if [[ "$PIN" == "1" ]]; then
+          sudo perf record -g -F "$PERF_FREQ" -o "$RUN_DIR/perf-metrics.data" -- taskset -c "$CPU_LIST" "${METRICS_CMD[@]}"
+        else
+          sudo perf record -g -F "$PERF_FREQ" -o "$RUN_DIR/perf-metrics.data" -- "${METRICS_CMD[@]}"
+        fi
+        sudo chown "$(id -u):$(id -g)" "$RUN_DIR/perf-metrics.data"
         ;;
       otel)
         if [[ "$PIN" == "1" ]]; then

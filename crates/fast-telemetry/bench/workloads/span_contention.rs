@@ -15,6 +15,10 @@ use std::time::{Duration, Instant};
 mod thread_affinity {
     include!("thread_affinity.rs");
 }
+mod process_usage {
+    include!("process_usage.rs");
+}
+use process_usage::ProcessCpuSnapshot;
 use thread_affinity::ThreadAffinityMode;
 
 // ============================================================================
@@ -392,11 +396,13 @@ fn run_otel(
 fn main() {
     let cfg = parse_args();
     let total_ops = cfg.threads * cfg.iters;
+    let cpu_start = ProcessCpuSnapshot::capture().ok();
 
     let result = match cfg.mode {
         Mode::Fast => run_fast(cfg.scenario, cfg.threads, cfg.iters, cfg.thread_affinity, cfg.export_interval_ms),
         Mode::Otel => run_otel(cfg.scenario, cfg.threads, cfg.iters, cfg.thread_affinity, cfg.export_interval_ms),
     };
+    let cpu_usage = cpu_start.and_then(|start| ProcessCpuSnapshot::capture().ok().map(|end| end.elapsed_since(start)));
 
     let record_ops_per_sec = (total_ops as f64) / result.record_seconds;
     let total_ops_per_sec = (total_ops as f64) / result.total_seconds;
@@ -413,6 +419,20 @@ fn main() {
         Scenario::RootOnly => "root",
         Scenario::Lifecycle => "lifecycle",
         Scenario::Pipeline => "pipeline",
+    };
+    let cpu_user_seconds = cpu_usage.map_or(0.0, |usage| usage.user_seconds);
+    let cpu_system_seconds = cpu_usage.map_or(0.0, |usage| usage.system_seconds);
+    let cpu_total_seconds = cpu_usage.map_or(0.0, |usage| usage.total_seconds);
+    let cpu_avg_cores = if result.total_seconds > 0.0 {
+        cpu_total_seconds / result.total_seconds
+    } else {
+        0.0
+    };
+    let cpu_utilization_pct = cpu_avg_cores * 100.0;
+    let cpu_ns_per_op = if total_ops > 0 {
+        (cpu_total_seconds * 1_000_000_000.0) / (total_ops as f64)
+    } else {
+        0.0
     };
 
     println!("mode={mode}");
@@ -431,4 +451,11 @@ fn main() {
     println!("export_count={}", result.export_count);
     println!("export_seconds={:.6}", result.export_seconds);
     println!("export_avg_ms={export_avg_ms:.6}");
+    println!("cpu_usage_measured={}", cpu_usage.is_some());
+    println!("cpu_user_seconds={cpu_user_seconds:.6}");
+    println!("cpu_system_seconds={cpu_system_seconds:.6}");
+    println!("cpu_total_seconds={cpu_total_seconds:.6}");
+    println!("cpu_avg_cores={cpu_avg_cores:.6}");
+    println!("cpu_utilization_pct={cpu_utilization_pct:.2}");
+    println!("cpu_ns_per_op={cpu_ns_per_op:.2}");
 }
