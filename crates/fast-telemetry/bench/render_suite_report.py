@@ -30,6 +30,10 @@ def read_summary(path: pathlib.Path) -> Dict[str, Dict[str, float]]:
                 "total_min": float(row["min_total_ops_per_sec"]),
                 "total_max": float(row["max_total_ops_per_sec"]),
                 "export_med_ms": float(row["median_export_avg_ms"]),
+                "cpu_total_med_s": float(row.get("median_cpu_total_seconds", 0.0) or 0.0),
+                "cpu_avg_cores": float(row.get("median_cpu_avg_cores", 0.0) or 0.0),
+                "cpu_util_pct": float(row.get("median_cpu_utilization_pct", 0.0) or 0.0),
+                "cpu_ns_per_op": float(row.get("median_cpu_ns_per_op", 0.0) or 0.0),
             }
     return out
 
@@ -194,6 +198,7 @@ def main() -> int:
         meta = parse_kv(sample) if sample else {}
         label = f"{meta.get('entity', 'unknown')}:{meta.get('profile', 'uniform')}"
         fast = summary.get("fast", {}).get("total_med", 0.0)
+        metrics_total = summary.get("metrics", {}).get("total_med", 0.0)
         otel = summary.get("otel", {}).get("total_med", 0.0)
         atomic = summary.get("atomic", {}).get("total_med", 0.0)
         cache_rows.append(
@@ -201,9 +206,20 @@ def main() -> int:
                 "label": label,
                 "dir": d.name,
                 "fast_total": fast,
+                "metrics_total": metrics_total,
                 "otel_total": otel,
                 "atomic_total": atomic,
+                "fast_cpu_avg_cores": summary.get("fast", {}).get("cpu_avg_cores", 0.0),
+                "metrics_cpu_avg_cores": summary.get("metrics", {}).get("cpu_avg_cores", 0.0),
+                "otel_cpu_avg_cores": summary.get("otel", {}).get("cpu_avg_cores", 0.0),
+                "atomic_cpu_avg_cores": summary.get("atomic", {}).get("cpu_avg_cores", 0.0),
+                "fast_cpu_ns_per_op": summary.get("fast", {}).get("cpu_ns_per_op", 0.0),
+                "metrics_cpu_ns_per_op": summary.get("metrics", {}).get("cpu_ns_per_op", 0.0),
+                "otel_cpu_ns_per_op": summary.get("otel", {}).get("cpu_ns_per_op", 0.0),
+                "atomic_cpu_ns_per_op": summary.get("atomic", {}).get("cpu_ns_per_op", 0.0),
+                "fast_metrics_speedup": (fast / metrics_total) if metrics_total else 0.0,
                 "fast_otel_speedup": (fast / otel) if otel else 0.0,
+                "metrics_otel_speedup": (metrics_total / otel) if otel else 0.0,
                 "fast_atomic_speedup": (fast / atomic) if atomic else 0.0,
             }
         )
@@ -222,10 +238,15 @@ def main() -> int:
                 "dir": d.name,
                 "fast_total": fast,
                 "otel_total": otel,
+                "fast_cpu_avg_cores": summary.get("fast", {}).get("cpu_avg_cores", 0.0),
+                "otel_cpu_avg_cores": summary.get("otel", {}).get("cpu_avg_cores", 0.0),
+                "fast_cpu_ns_per_op": summary.get("fast", {}).get("cpu_ns_per_op", 0.0),
+                "otel_cpu_ns_per_op": summary.get("otel", {}).get("cpu_ns_per_op", 0.0),
                 "fast_otel_speedup": (fast / otel) if otel else 0.0,
             }
         )
 
+    has_metrics_cache = any(float(row.get("metrics_total", 0.0)) > 0.0 for row in cache_rows)
     now = dt.datetime.now().isoformat(timespec="seconds")
     html_out = f"""<!doctype html>
 <html>
@@ -263,12 +284,13 @@ def main() -> int:
   <div class="card">
     <h2>Cache Benchmarks</h2>
     {speedup_svg(cache_rows, "fast/otel speedup by case", "fast_otel_speedup")}
+    {speedup_svg(cache_rows, "fast/metrics speedup by case", "fast_metrics_speedup") if has_metrics_cache else ""}
     {dumbbell_svg(cache_rows, "fast vs otel throughput by case (dumbbell, log scale)", "fast_total", "otel_total")}
     {bar_svg(cache_rows, "fast median total ops/sec by case", "fast_total")}
     {render_table(
         cache_rows,
-        ["case", "run_dir", "fast_total", "otel_total", "atomic_total", "fast/otel", "fast/atomic"],
-        ["label", "dir", "fast_total", "otel_total", "atomic_total", "fast_otel_speedup", "fast_atomic_speedup"],
+        ["case", "run_dir", "fast_total", "metrics_total", "otel_total", "atomic_total", "fast_cpu_cores", "metrics_cpu_cores", "otel_cpu_cores", "atomic_cpu_cores", "fast_cpu_ns/op", "metrics_cpu_ns/op", "otel_cpu_ns/op", "atomic_cpu_ns/op", "fast/metrics", "fast/otel", "metrics/otel", "fast/atomic"],
+        ["label", "dir", "fast_total", "metrics_total", "otel_total", "atomic_total", "fast_cpu_avg_cores", "metrics_cpu_avg_cores", "otel_cpu_avg_cores", "atomic_cpu_avg_cores", "fast_cpu_ns_per_op", "metrics_cpu_ns_per_op", "otel_cpu_ns_per_op", "atomic_cpu_ns_per_op", "fast_metrics_speedup", "fast_otel_speedup", "metrics_otel_speedup", "fast_atomic_speedup"],
     )}
   </div>
   <div class="card">
@@ -278,8 +300,8 @@ def main() -> int:
     {bar_svg(span_rows, "fast median total ops/sec by scenario", "fast_total")}
     {render_table(
         span_rows,
-        ["scenario", "run_dir", "fast_total", "otel_total", "fast/otel"],
-        ["label", "dir", "fast_total", "otel_total", "fast_otel_speedup"],
+        ["scenario", "run_dir", "fast_total", "otel_total", "fast_cpu_cores", "otel_cpu_cores", "fast_cpu_ns/op", "otel_cpu_ns/op", "fast/otel"],
+        ["label", "dir", "fast_total", "otel_total", "fast_cpu_avg_cores", "otel_cpu_avg_cores", "fast_cpu_ns_per_op", "otel_cpu_ns_per_op", "fast_otel_speedup"],
     )}
   </div>
 </body>
