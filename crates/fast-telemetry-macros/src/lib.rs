@@ -24,6 +24,7 @@ enum MetricKind {
     Gauge,
     GaugeF64,
     Histogram,
+    SampledTimer,
     MaxGauge,
     MaxGaugeF64,
     MinGauge,
@@ -31,6 +32,7 @@ enum MetricKind {
     LabeledCounter(Type),
     LabeledGauge,
     LabeledHistogram(Type),
+    LabeledSampledTimer(Type),
 }
 
 // Output reserve heuristics for derive-generated exporters.
@@ -39,6 +41,7 @@ const PROM_COMPLEX_METRIC_OVERHEAD_BYTES: usize = 128;
 const DOGSTATSD_SIMPLE_LINE_OVERHEAD_BYTES: usize = 24;
 const DOGSTATSD_HISTOGRAM_LINE_OVERHEAD_BYTES: usize = 30;
 const DOGSTATSD_HISTOGRAM_LINES: usize = 2;
+const DOGSTATSD_SAMPLED_TIMER_LINES: usize = 3;
 const DOGSTATSD_TAG_PREFIX_BYTES: usize = 2; // "|#"
 const DOGSTATSD_TAG_PAIR_OVERHEAD_BYTES: usize = 2; // ":" plus separator/comma budget
 const DYNAMIC_LABELS_PER_SERIES_ESTIMATE: usize = 10;
@@ -64,6 +67,7 @@ fn metric_kind(ty: &Type) -> Option<MetricKind> {
         "Gauge" => Some(MetricKind::Gauge),
         "GaugeF64" => Some(MetricKind::GaugeF64),
         "Histogram" => Some(MetricKind::Histogram),
+        "SampledTimer" => Some(MetricKind::SampledTimer),
         "MaxGauge" => Some(MetricKind::MaxGauge),
         "MaxGaugeF64" => Some(MetricKind::MaxGaugeF64),
         "MinGauge" => Some(MetricKind::MinGauge),
@@ -98,6 +102,16 @@ fn metric_kind(ty: &Type) -> Option<MetricKind> {
             };
             Some(MetricKind::LabeledHistogram(label_ty.clone()))
         }
+        "LabeledSampledTimer" => {
+            let PathArguments::AngleBracketed(args) = &segment.arguments else {
+                return None;
+            };
+            let arg = args.args.first()?;
+            let GenericArgument::Type(label_ty) = arg else {
+                return None;
+            };
+            Some(MetricKind::LabeledSampledTimer(label_ty.clone()))
+        }
         _ => None,
     }
 }
@@ -112,10 +126,10 @@ fn metric_kind(ty: &Type) -> Option<MetricKind> {
 /// - `export_otlp(...)` — OTLP protobuf (only when `#[otlp]` attribute is present)
 ///
 /// Supports unlabeled metrics (`Counter`, `Gauge`, `GaugeF64`, `Histogram`,
-/// `Distribution`), compile-time labeled metrics (`LabeledCounter<L>`,
-/// `LabeledGauge<L>`, `LabeledHistogram<L>`), and runtime-labeled metrics
-/// (`DynamicCounter`, `DynamicGauge`, `DynamicGaugeI64`, `DynamicHistogram`,
-/// `DynamicDistribution`).
+/// `Distribution`, `SampledTimer`), compile-time labeled metrics
+/// (`LabeledCounter<L>`, `LabeledGauge<L>`, `LabeledHistogram<L>`,
+/// `LabeledSampledTimer<L>`), and runtime-labeled metrics (`DynamicCounter`,
+/// `DynamicGauge`, `DynamicGaugeI64`, `DynamicHistogram`, `DynamicDistribution`).
 ///
 /// # Example
 ///
@@ -266,9 +280,11 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 prom_reserve_hint += PROM_BASE_FIELD_OVERHEAD_BYTES;
             }
             MetricKind::Histogram
+            | MetricKind::SampledTimer
             | MetricKind::DynamicHistogram
             | MetricKind::DynamicDistribution
-            | MetricKind::LabeledHistogram(_) => {
+            | MetricKind::LabeledHistogram(_)
+            | MetricKind::LabeledSampledTimer(_) => {
                 prom_reserve_hint += PROM_COMPLEX_METRIC_OVERHEAD_BYTES;
             }
         }
@@ -297,6 +313,16 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                     * DOGSTATSD_HISTOGRAM_LINES;
                 dogstatsd_tag_line_hint += DOGSTATSD_HISTOGRAM_LINES;
                 dogstatsd_delta_tag_line_hint += DOGSTATSD_HISTOGRAM_LINES;
+            }
+            MetricKind::SampledTimer => {
+                dogstatsd_reserve_hint += (statsd_metric_name.len()
+                    + DOGSTATSD_HISTOGRAM_LINE_OVERHEAD_BYTES)
+                    * DOGSTATSD_SAMPLED_TIMER_LINES;
+                dogstatsd_delta_reserve_hint += (statsd_metric_name.len()
+                    + DOGSTATSD_HISTOGRAM_LINE_OVERHEAD_BYTES)
+                    * DOGSTATSD_SAMPLED_TIMER_LINES;
+                dogstatsd_tag_line_hint += DOGSTATSD_SAMPLED_TIMER_LINES;
+                dogstatsd_delta_tag_line_hint += DOGSTATSD_SAMPLED_TIMER_LINES;
             }
             MetricKind::Distribution => {
                 dogstatsd_reserve_hint +=
@@ -336,6 +362,14 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 dogstatsd_delta_reserve_hint += (statsd_metric_name.len()
                     + DOGSTATSD_HISTOGRAM_LINE_OVERHEAD_BYTES)
                     * DOGSTATSD_HISTOGRAM_LINES;
+            }
+            MetricKind::LabeledSampledTimer(_) => {
+                dogstatsd_reserve_hint += (statsd_metric_name.len()
+                    + DOGSTATSD_HISTOGRAM_LINE_OVERHEAD_BYTES)
+                    * DOGSTATSD_SAMPLED_TIMER_LINES;
+                dogstatsd_delta_reserve_hint += (statsd_metric_name.len()
+                    + DOGSTATSD_HISTOGRAM_LINE_OVERHEAD_BYTES)
+                    * DOGSTATSD_SAMPLED_TIMER_LINES;
             }
         }
 
@@ -681,6 +715,47 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                     fast_telemetry::__macro_support::__write_dogstatsd(output, #sum_metric_name, delta_sum, "c", tags);
                 });
             }
+            MetricKind::SampledTimer => {
+                let calls_state_field = format_ident!("{}_calls", field_name);
+                let count_state_field = format_ident!("{}_sample_count", field_name);
+                let sum_state_field = format_ident!("{}_sample_sum", field_name);
+                let calls_metric_name = format!("{}.calls", statsd_metric_name);
+                let count_metric_name = format!("{}.samples.count", statsd_metric_name);
+                let sum_metric_name = format!("{}.samples.sum", statsd_metric_name);
+                state_label_count_exprs.push(quote! { 0usize });
+                state_fields.push(quote! { #calls_state_field: u64, });
+                state_fields.push(quote! { #count_state_field: u64, });
+                state_fields.push(quote! { #sum_state_field: u64, });
+                state_inits.push(quote! { #calls_state_field: 0, });
+                state_inits.push(quote! { #count_state_field: 0, });
+                state_inits.push(quote! { #sum_state_field: 0, });
+                delta_exports.push(quote! {
+                    let current_calls = self.#field_name.calls();
+                    let current_count = self.#field_name.sample_count();
+                    let current_sum = self.#field_name.sample_sum_nanos();
+                    let delta_calls = if current_calls >= state.#calls_state_field {
+                        current_calls - state.#calls_state_field
+                    } else {
+                        current_calls
+                    };
+                    let delta_count = if current_count >= state.#count_state_field {
+                        current_count - state.#count_state_field
+                    } else {
+                        current_count
+                    };
+                    let delta_sum = if current_sum >= state.#sum_state_field {
+                        current_sum - state.#sum_state_field
+                    } else {
+                        current_sum
+                    };
+                    state.#calls_state_field = current_calls;
+                    state.#count_state_field = current_count;
+                    state.#sum_state_field = current_sum;
+                    fast_telemetry::__macro_support::__write_dogstatsd(output, #calls_metric_name, delta_calls, "c", tags);
+                    fast_telemetry::__macro_support::__write_dogstatsd(output, #count_metric_name, delta_count, "c", tags);
+                    fast_telemetry::__macro_support::__write_dogstatsd(output, #sum_metric_name, delta_sum, "c", tags);
+                });
+            }
             MetricKind::LabeledCounter(label_ty) => {
                 state_label_count_exprs.push(quote! { 0usize });
                 state_fields.push(quote! { #field_name: Vec<isize>, });
@@ -699,7 +774,7 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                             delta,
                             "c",
                             <#label_ty as fast_telemetry::LabelEnum>::LABEL_NAME,
-                            label.variant_name(),
+                            <#label_ty as fast_telemetry::LabelEnum>::variant_name(label),
                             tags,
                         );
                     }
@@ -748,7 +823,7 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                             delta_count,
                             "c",
                             <#label_ty as fast_telemetry::LabelEnum>::LABEL_NAME,
-                            label.variant_name(),
+                            <#label_ty as fast_telemetry::LabelEnum>::variant_name(label),
                             tags,
                         );
                         fast_telemetry::__macro_support::__write_dogstatsd_with_label(
@@ -757,7 +832,81 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                             delta_sum,
                             "c",
                             <#label_ty as fast_telemetry::LabelEnum>::LABEL_NAME,
-                            label.variant_name(),
+                            <#label_ty as fast_telemetry::LabelEnum>::variant_name(label),
+                            tags,
+                        );
+                    }
+                });
+            }
+            MetricKind::LabeledSampledTimer(label_ty) => {
+                let calls_state_field = format_ident!("{}_calls", field_name);
+                let count_state_field = format_ident!("{}_sample_count", field_name);
+                let sum_state_field = format_ident!("{}_sample_sum", field_name);
+                let calls_metric_name = format!("{}.calls", statsd_metric_name);
+                let count_metric_name = format!("{}.samples.count", statsd_metric_name);
+                let sum_metric_name = format!("{}.samples.sum", statsd_metric_name);
+                state_label_count_exprs.push(quote! { 0usize });
+                state_fields.push(quote! { #calls_state_field: Vec<u64>, });
+                state_fields.push(quote! { #count_state_field: Vec<u64>, });
+                state_fields.push(quote! { #sum_state_field: Vec<u64>, });
+                state_inits.push(quote! {
+                    #calls_state_field: vec![0; <#label_ty as fast_telemetry::LabelEnum>::CARDINALITY],
+                });
+                state_inits.push(quote! {
+                    #count_state_field: vec![0; <#label_ty as fast_telemetry::LabelEnum>::CARDINALITY],
+                });
+                state_inits.push(quote! {
+                    #sum_state_field: vec![0; <#label_ty as fast_telemetry::LabelEnum>::CARDINALITY],
+                });
+                delta_exports.push(quote! {
+                    for idx in 0..<#label_ty as fast_telemetry::LabelEnum>::CARDINALITY {
+                        let label = <#label_ty as fast_telemetry::LabelEnum>::from_index(idx);
+                        let current_calls = self.#field_name.calls(label);
+                        let current_count = self.#field_name.sample_count(label);
+                        let current_sum = self.#field_name.sample_sum_nanos(label);
+                        let delta_calls = if current_calls >= state.#calls_state_field[idx] {
+                            current_calls - state.#calls_state_field[idx]
+                        } else {
+                            current_calls
+                        };
+                        let delta_count = if current_count >= state.#count_state_field[idx] {
+                            current_count - state.#count_state_field[idx]
+                        } else {
+                            current_count
+                        };
+                        let delta_sum = if current_sum >= state.#sum_state_field[idx] {
+                            current_sum - state.#sum_state_field[idx]
+                        } else {
+                            current_sum
+                        };
+                        state.#calls_state_field[idx] = current_calls;
+                        state.#count_state_field[idx] = current_count;
+                        state.#sum_state_field[idx] = current_sum;
+                        fast_telemetry::__macro_support::__write_dogstatsd_with_label(
+                            output,
+                            #calls_metric_name,
+                            delta_calls,
+                            "c",
+                            <#label_ty as fast_telemetry::LabelEnum>::LABEL_NAME,
+                            <#label_ty as fast_telemetry::LabelEnum>::variant_name(label),
+                            tags,
+                        );
+                        fast_telemetry::__macro_support::__write_dogstatsd_with_label(
+                            output,
+                            #count_metric_name,
+                            delta_count,
+                            "c",
+                            <#label_ty as fast_telemetry::LabelEnum>::LABEL_NAME,
+                            <#label_ty as fast_telemetry::LabelEnum>::variant_name(label),
+                            tags,
+                        );
+                        fast_telemetry::__macro_support::__write_dogstatsd_with_label(
+                            output,
+                            #sum_metric_name,
+                            delta_sum,
+                            "c",
+                            <#label_ty as fast_telemetry::LabelEnum>::LABEL_NAME,
+                            <#label_ty as fast_telemetry::LabelEnum>::variant_name(label),
                             tags,
                         );
                     }

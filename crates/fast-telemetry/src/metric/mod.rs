@@ -12,6 +12,7 @@ mod max_gauge;
 mod max_gauge_f64;
 mod min_gauge;
 mod min_gauge_f64;
+mod sampled_timer;
 
 pub use counter::Counter;
 pub use distribution::Distribution;
@@ -33,3 +34,4 @@ pub use max_gauge::MaxGauge;
 pub use max_gauge_f64::MaxGaugeF64;
 pub use min_gauge::MinGauge;
 pub use min_gauge_f64::MinGaugeF64;
+pub use sampled_timer::{LabeledSampledTimer, SampledTimer, SampledTimerGuard};
