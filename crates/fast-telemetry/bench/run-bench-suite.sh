@@ -5,15 +5,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESULTS_DIR="$SCRIPT_DIR/results"
 
 THREADS="$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)"
-RUNS="5"
+RUNS="9"
 PRESET="quick"
 MODES_CSV="fast,otel,atomic"
-ITERS_CACHE="10000000"
-ITERS_SPAN="300000"
+ITERS_CACHE="50000000"
+ITERS_SPAN="1000000"
 EXPORT_INTERVAL_MS="10"
 ITERS_CACHE_SET=0
 ITERS_SPAN_SET=0
-SKIP_PREFLIGHT=0
+STRICT_PREFLIGHT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -24,18 +24,18 @@ while [[ $# -gt 0 ]]; do
     --iters-cache) ITERS_CACHE="$2"; ITERS_CACHE_SET=1; shift 2 ;;
     --iters-span) ITERS_SPAN="$2"; ITERS_SPAN_SET=1; shift 2 ;;
     --export-interval-ms) EXPORT_INTERVAL_MS="$2"; shift 2 ;;
-    --skip-preflight) SKIP_PREFLIGHT=1; shift ;;
+    --strict-preflight) STRICT_PREFLIGHT=1; shift ;;
+    --skip-preflight) STRICT_PREFLIGHT=0; shift ;;
     --help)
-      echo "Usage: $0 [--threads N] [--runs N] [--preset quick|full] [--modes list] [--iters-cache N] [--iters-span N] [--export-interval-ms N] [--skip-preflight]"
+      echo "Usage: $0 [--threads N] [--runs N] [--preset quick|full] [--modes list] [--iters-cache N] [--iters-span N] [--export-interval-ms N] [--strict-preflight]"
       echo ""
       echo "Runs matrix workloads and generates an HTML report with SVG charts."
       echo "Default modes: fast,otel,atomic (atomic applies only to cache counter cases; metrics can be added via --modes)"
-      echo "Preset quick defaults: iters-cache=10000000, iters-span=300000"
-      echo "Preset full defaults:  iters-cache=50000000, iters-span=1000000"
+      echo "Preset quick defaults: iters-cache=50000000, iters-span=1000000, runs=9"
+      echo "Preset full defaults:  iters-cache=200000000, iters-span=5000000, runs=9"
       echo ""
-      echo "Refuses to run if 1-min load avg exceeds cores/8 (host is too noisy"
-      echo "to produce decision-quality numbers). Override with --skip-preflight"
-      echo "or BENCH_SKIP_PREFLIGHT=1."
+      echo "By default, preflight only warns about a noisy host. Pass --strict-preflight"
+      echo "to refuse to run when 1-min load avg exceeds cores/8."
       exit 0
       ;;
     *)
@@ -47,10 +47,10 @@ done
 
 if [[ "$PRESET" == "full" ]]; then
   if [[ "$ITERS_CACHE_SET" == "0" ]]; then
-    ITERS_CACHE="50000000"
+    ITERS_CACHE="200000000"
   fi
   if [[ "$ITERS_SPAN_SET" == "0" ]]; then
-    ITERS_SPAN="1000000"
+    ITERS_SPAN="5000000"
   fi
 fi
 
@@ -66,10 +66,10 @@ echo "iters_cache=$ITERS_CACHE iters_span=$ITERS_SPAN export_interval_ms=$EXPORT
 echo "suite_dir=$SUITE_DIR"
 echo ""
 
-if [[ "$SKIP_PREFLIGHT" == "1" ]]; then
-  BENCH_SKIP_PREFLIGHT=1 "$SCRIPT_DIR/preflight.sh" "$SUITE_DIR/host.json"
-else
+if [[ "$STRICT_PREFLIGHT" == "1" ]]; then
   "$SCRIPT_DIR/preflight.sh" "$SUITE_DIR/host.json"
+else
+  BENCH_SKIP_PREFLIGHT=1 "$SCRIPT_DIR/preflight.sh" "$SUITE_DIR/host.json"
 fi
 
 echo ""

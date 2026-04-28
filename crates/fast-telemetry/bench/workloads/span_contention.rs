@@ -161,12 +161,16 @@ where
     });
 
     let worker = Arc::new(worker);
+    let warmup_iters = (iters / 10).max(1);
     let mut workers = Vec::with_capacity(threads);
     for t in 0..threads {
         let worker_fn = Arc::clone(&worker);
         let worker_barrier = Arc::clone(&barrier);
         workers.push(std::thread::spawn(move || {
             thread_affinity::pin_worker_thread(t, thread_affinity);
+            // Warmup pass: discarded from measurement because it runs before
+            // the barrier release.
+            worker_fn(t, warmup_iters);
             worker_barrier.wait();
             worker_fn(t, iters);
         }));
