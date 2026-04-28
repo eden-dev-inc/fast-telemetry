@@ -10,6 +10,9 @@ Cargo.lock
 .vscode/
 *.iml
 
+# Agent state
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db
