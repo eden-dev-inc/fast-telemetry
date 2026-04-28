@@ -117,6 +117,10 @@ def main() -> int:
             "total_tm": trimmed_mean(vals["total"]),
             "total_min": min(vals["total"]),
             "total_max": max(vals["total"]),
+            # Wall-time-derived throughput is noise-contaminated by scheduler
+            # stalls when the host has ambient load. Kept for informational
+            # purposes (it's what users actually experience) but NOT the
+            # regression signal.
             "total_cv_pct": cv_pct(vals["total"]),
             "export_tm": trimmed_mean(vals["export"]),
             "cpu_user_tm": trimmed_mean(vals["cpu_user"]),
@@ -124,7 +128,13 @@ def main() -> int:
             "cpu_total_tm": trimmed_mean(vals["cpu_total"]),
             "cpu_cores_tm": trimmed_mean(vals["cpu_cores"]),
             "cpu_util_tm": trimmed_mean(vals["cpu_util"]),
+            # CPU-time per op is the regression-tracking metric: it counts only
+            # time the bench process was on-CPU (via getrusage RUSAGE_SELF), so
+            # it's invariant to scheduler stalls and noisy neighbors.
             "cpu_ns_per_op_tm": trimmed_mean(vals["cpu_ns_per_op"]),
+            "cpu_ns_per_op_min": min(vals["cpu_ns_per_op"]) if vals["cpu_ns_per_op"] else 0.0,
+            "cpu_ns_per_op_max": max(vals["cpu_ns_per_op"]) if vals["cpu_ns_per_op"] else 0.0,
+            "cpu_ns_per_op_cv_pct": cv_pct(vals["cpu_ns_per_op"]),
         })
 
     csv_lines = [
@@ -132,7 +142,7 @@ def main() -> int:
         "min_total_ops_per_sec,max_total_ops_per_sec,total_cv_pct,"
         "trimmed_export_avg_ms,trimmed_cpu_user_seconds,trimmed_cpu_system_seconds,"
         "trimmed_cpu_total_seconds,trimmed_cpu_avg_cores,trimmed_cpu_utilization_pct,"
-        "trimmed_cpu_ns_per_op"
+        "trimmed_cpu_ns_per_op,min_cpu_ns_per_op,max_cpu_ns_per_op,cpu_ns_per_op_cv_pct"
     ]
     for r in rows:
         csv_lines.append(
@@ -140,36 +150,39 @@ def main() -> int:
             f"{r['total_min']:.2f},{r['total_max']:.2f},{r['total_cv_pct']:.2f},"
             f"{r['export_tm']:.6f},{r['cpu_user_tm']:.6f},{r['cpu_system_tm']:.6f},"
             f"{r['cpu_total_tm']:.6f},{r['cpu_cores_tm']:.6f},{r['cpu_util_tm']:.2f},"
-            f"{r['cpu_ns_per_op_tm']:.2f}"
+            f"{r['cpu_ns_per_op_tm']:.2f},{r['cpu_ns_per_op_min']:.2f},"
+            f"{r['cpu_ns_per_op_max']:.2f},{r['cpu_ns_per_op_cv_pct']:.2f}"
         )
     (run_dir / "summary.csv").write_text("\n".join(csv_lines) + "\n")
 
     print("")
-    print("Summary (trimmed mean throughput and CPU cost, total min/max, CV):")
+    print("Summary (cpu_ns_per_op is the regression metric; throughput is informational):")
     for r in rows:
-        cv_marker = " [HIGH-CV]" if r["total_cv_pct"] > 10.0 else ""
+        cpu_cv = r["cpu_ns_per_op_cv_pct"]
+        wall_cv = r["total_cv_pct"]
+        cpu_cv_marker = " [HIGH-CV]" if cpu_cv > 10.0 else ""
         print(
-            f"  {r['mode']:6s} runs={r['n']} record_tm={r['record_tm']:,.2f} "
-            f"total_tm={r['total_tm']:,.2f} min={r['total_min']:,.2f} max={r['total_max']:,.2f} "
-            f"cv={r['total_cv_pct']:.1f}%{cv_marker} "
-            f"export_avg_ms={r['export_tm']:.6f} "
-            f"cpu_total_s={r['cpu_total_tm']:.6f} cpu_user_s={r['cpu_user_tm']:.6f} "
-            f"cpu_system_s={r['cpu_system_tm']:.6f} cpu_avg_cores={r['cpu_cores_tm']:.3f} "
-            f"cpu_util_pct={r['cpu_util_tm']:.2f} cpu_ns_per_op={r['cpu_ns_per_op_tm']:.2f}"
+            f"  {r['mode']:6s} runs={r['n']} "
+            f"cpu_ns_per_op={r['cpu_ns_per_op_tm']:.2f} (cv={cpu_cv:.1f}%{cpu_cv_marker}, "
+            f"min={r['cpu_ns_per_op_min']:.2f} max={r['cpu_ns_per_op_max']:.2f})  "
+            f"total_ops/s={r['total_tm']:,.0f} (wall_cv={wall_cv:.1f}%)  "
+            f"cpu_total_s={r['cpu_total_tm']:.3f} cpu_avg_cores={r['cpu_cores_tm']:.2f} "
+            f"export_avg_ms={r['export_tm']:.4f}"
         )
 
     if rows:
-        tm = {r["mode"]: r["total_tm"] for r in rows}
-        if "fast" in tm and "metrics" in tm:
-            print(f"  fast/metrics total speedup: {tm['fast'] / tm['metrics']:.2f}x")
-        if "fast" in tm and "atomic" in tm:
-            print(f"  fast/atomic total speedup: {tm['fast'] / tm['atomic']:.2f}x")
-        if "fast" in tm and "otel" in tm:
-            print(f"  fast/otel total speedup:   {tm['fast'] / tm['otel']:.2f}x")
-        if "metrics" in tm and "otel" in tm:
-            print(f"  metrics/otel total speedup:{tm['metrics'] / tm['otel']:.2f}x")
-        if "atomic" in tm and "otel" in tm:
-            print(f"  atomic/otel total speedup: {tm['atomic'] / tm['otel']:.2f}x")
+        # Speedup ratios from cpu_ns_per_op (lower is better, so divide).
+        ns = {r["mode"]: r["cpu_ns_per_op_tm"] for r in rows if r["cpu_ns_per_op_tm"] > 0}
+        if "fast" in ns and "metrics" in ns:
+            print(f"  fast/metrics speedup: {ns['metrics'] / ns['fast']:.2f}x")
+        if "fast" in ns and "atomic" in ns:
+            print(f"  fast/atomic speedup:  {ns['atomic'] / ns['fast']:.2f}x")
+        if "fast" in ns and "otel" in ns:
+            print(f"  fast/otel speedup:    {ns['otel'] / ns['fast']:.2f}x")
+        if "metrics" in ns and "otel" in ns:
+            print(f"  metrics/otel speedup: {ns['otel'] / ns['metrics']:.2f}x")
+        if "atomic" in ns and "otel" in ns:
+            print(f"  atomic/otel speedup:  {ns['otel'] / ns['atomic']:.2f}x")
 
     return 0
 
