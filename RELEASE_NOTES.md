@@ -1,5 +1,23 @@
 # Release Notes
 
+## 0.1.2 - 2026-04-28
+
+Republished crates: `fast-telemetry`. (`fast-telemetry-macros` is unchanged since 0.1.1 and stays at that version. `fast-telemetry-export` is unchanged since 0.1.0.)
+
+Highlights:
+
+- export performance: the Prometheus and DogStatsD text exporters now format numeric values via `itoa` (integers) and `ryu` (floats) instead of going through the `core::fmt::Display` formatter machinery. Microbenchmarks show 18% to 45% reductions in format-path time across counter, histogram, and distribution exports. The largest wins are on distribution exports (44% on Prometheus, 42% on DogStatsD).
+- floating-point output: `f64` values now use `ryu`'s shortest-roundtrip canonical form. For typical values this matches the previous output. Very large or very small values may now use scientific notation (for example, `1e10` instead of `10000000000`); both forms parse correctly per the Prometheus and DogStatsD specs.
+- internal: a `FastFormat` trait is exposed under `__macro_support`. It is not part of the stable public API.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.1.2"
+fast-telemetry-export = "0.1.0"
+```
+
 ## 0.1.1 - 2026-04-27
 
 Republished crates: `fast-telemetry`, `fast-telemetry-macros`. (`fast-telemetry-export` is unchanged since 0.1.0 and stays at that version; it picks up `fast-telemetry` 0.1.1 via semver.)
