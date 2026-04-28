@@ -21,7 +21,9 @@ fast-telemetry-export = { path = "crates/fast-telemetry-export", version = "0.1.
 
 # --- Core: fast-telemetry runtime dependencies ---
 crossbeam-utils = "0.8"
+itoa = "1"
 parking_lot = "0.12"
+ryu = "1"
 uuid = { version = "1", features = ["v4"] }
 
 # --- Macros: fast-telemetry-macros proc-macro dependencies ---

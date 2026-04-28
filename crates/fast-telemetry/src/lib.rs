@@ -44,6 +44,7 @@ pub mod __macro_support {
         __write_dogstatsd_distribution_delta_dynamic,
         __write_dogstatsd_distribution_delta_dynamic_pairs, __write_dogstatsd_distribution_dynamic,
         __write_dogstatsd_dynamic, __write_dogstatsd_dynamic_pairs, __write_dogstatsd_with_label,
+        FastFormat,
     };
 }
 pub use metric::{
