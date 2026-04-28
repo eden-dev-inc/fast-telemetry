@@ -324,10 +324,10 @@ impl OtlpExport for Histogram {
         description: &str,
         time_unix_nano: u64,
     ) {
-        let cumulative = self.buckets_cumulative();
         let count = self.count();
         let sum = self.sum();
-        let (bucket_counts, explicit_bounds) = cumulative_to_otlp_buckets(&cumulative);
+        let (bucket_counts, explicit_bounds) =
+            cumulative_to_otlp_buckets_iter(self.buckets_cumulative_iter());
 
         metrics.push(pb::Metric {
             name: name.to_string(),
@@ -558,7 +558,7 @@ impl<L: LabelEnum> OtlpExport for LabeledSampledTimer<L> {
             ));
 
             let (bucket_counts, explicit_bounds) =
-                cumulative_to_otlp_buckets(&histogram.buckets_cumulative());
+                cumulative_to_otlp_buckets_iter(histogram.buckets_cumulative_iter());
             sample_points.push(pb::HistogramDataPoint {
                 attributes: vec![label_to_attribute(label)],
                 time_unix_nano,
