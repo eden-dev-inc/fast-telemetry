@@ -24,6 +24,7 @@ pub use gauge_i64::{DynamicGaugeI64, DynamicGaugeI64Series};
 pub use histogram::{DynamicHistogram, DynamicHistogramSeries, DynamicHistogramSeriesView};
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 #[cfg(feature = "eviction")]
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -53,9 +54,14 @@ pub fn advance_cycle() -> u32 {
 ///
 /// Labels are deduplicated by key (last value wins) and sorted by key to ensure
 /// stable identity regardless of input order.
+///
+/// Internally stored as `Arc<[_]>` so cloning is a cheap refcount bump rather
+/// than re-allocating each label string. This lets exporters snapshot label
+/// sets out of the dynamic-metric index under the read lock and release the
+/// lock before formatting.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DynamicLabelSet {
-    labels: Vec<(String, String)>,
+    labels: Arc<[(String, String)]>,
 }
 
 impl DynamicLabelSet {
@@ -66,7 +72,7 @@ impl DynamicLabelSet {
             map.insert((*k).to_string(), (*v).to_string());
         }
         Self {
-            labels: map.into_iter().collect(),
+            labels: map.into_iter().collect::<Vec<_>>().into(),
         }
     }
 
@@ -76,7 +82,7 @@ impl DynamicLabelSet {
     #[doc(hidden)]
     pub fn from_canonical_pairs(labels: &[(String, String)]) -> Self {
         Self {
-            labels: labels.to_vec(),
+            labels: labels.to_vec().into(),
         }
     }
 

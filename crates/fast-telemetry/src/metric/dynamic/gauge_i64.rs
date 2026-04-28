@@ -314,15 +314,20 @@ impl DynamicGaugeI64 {
         self.overflow_count.load(Ordering::Relaxed)
     }
 
-    /// Iterate all series without cloning label sets.
+    /// Iterate all series without doing heavy work under the read lock.
     ///
-    /// Calls `f` with borrowed label pairs and the current value for each series.
-    /// Used by exporters to avoid the intermediate `snapshot()` allocation.
+    /// Snapshots under the lock, then invokes `f` outside; see [`DynamicCounter::visit_series`].
     pub(crate) fn visit_series(&self, mut f: impl FnMut(&[(String, String)], i64)) {
         for shard in &self.index_shards {
-            let guard = shard.read();
-            for (labels, series) in guard.iter() {
-                f(labels.pairs(), series.sum());
+            let snapshot: Vec<(DynamicLabelSet, i64)> = {
+                let guard = shard.read();
+                guard
+                    .iter()
+                    .map(|(labels, series)| (labels.clone(), series.sum()))
+                    .collect()
+            };
+            for (labels, value) in &snapshot {
+                f(labels.pairs(), *value);
             }
         }
     }

@@ -401,18 +401,24 @@ impl DynamicHistogram {
         self.overflow_count.load(Ordering::Relaxed)
     }
 
-    /// Iterate all series without cloning label sets.
+    /// Iterate all series without doing heavy work under the read lock.
     ///
-    /// Calls `f` with borrowed label pairs and a borrowed series view.
-    /// Used by exporters/macros to avoid `snapshot()` and bucket vec allocations.
+    /// Snapshots `Arc<HistogramSeries>` pairs under the lock, releases it,
+    /// then invokes `f` with views over the cloned Arcs.
     #[doc(hidden)]
     pub fn visit_series<F>(&self, mut f: F)
     where
         F: for<'a> FnMut(&'a [(String, String)], DynamicHistogramSeriesView<'a>),
     {
         for shard in &self.index_shards {
-            let guard = shard.read();
-            for (labels, series) in guard.iter() {
+            let snapshot: Vec<(DynamicLabelSet, Arc<HistogramSeries>)> = {
+                let guard = shard.read();
+                guard
+                    .iter()
+                    .map(|(labels, series)| (labels.clone(), Arc::clone(series)))
+                    .collect()
+            };
+            for (labels, series) in &snapshot {
                 f(labels.pairs(), DynamicHistogramSeriesView { series });
             }
         }

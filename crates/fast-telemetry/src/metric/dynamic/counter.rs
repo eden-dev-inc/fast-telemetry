@@ -267,16 +267,24 @@ impl DynamicCounter {
         self.overflow_count.load(Ordering::Relaxed)
     }
 
-    /// Iterate all series without cloning label sets.
+    /// Iterate all series without doing heavy work under the read lock.
     ///
-    /// Calls `f` with borrowed label pairs and the current sum for each series.
-    /// Used by exporters/macros to avoid the intermediate `snapshot()` allocation.
+    /// Snapshots `(label_set, sum)` pairs under the shard read lock, releases
+    /// the lock, then invokes `f` for each entry. This keeps writers from
+    /// stalling on the lock during the formatting / encoding work the exporter
+    /// does in `f`. Cloning the label set is a cheap `Arc` bump.
     #[doc(hidden)]
     pub fn visit_series(&self, mut f: impl FnMut(&[(String, String)], isize)) {
         for shard in &self.index_shards {
-            let guard = shard.read();
-            for (labels, series) in guard.iter() {
-                f(labels.pairs(), series.sum());
+            let snapshot: Vec<(DynamicLabelSet, isize)> = {
+                let guard = shard.read();
+                guard
+                    .iter()
+                    .map(|(labels, series)| (labels.clone(), series.sum()))
+                    .collect()
+            };
+            for (labels, sum) in &snapshot {
+                f(labels.pairs(), *sum);
             }
         }
     }

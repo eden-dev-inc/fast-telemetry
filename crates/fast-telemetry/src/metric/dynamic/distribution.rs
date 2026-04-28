@@ -287,19 +287,23 @@ impl DynamicDistribution {
         self.overflow_count.load(Ordering::Relaxed)
     }
 
-    /// Iterate all series without cloning label sets.
+    /// Iterate all series without doing heavy work under the read lock.
     ///
-    /// Calls `f` with borrowed label pairs, count, sum, and bucket snapshot
-    /// for each series. Used by exporters/macros to avoid `snapshot()` cloning.
+    /// Snapshots under the lock, then invokes `f` outside; see [`DynamicCounter::visit_series`].
     #[doc(hidden)]
     pub fn visit_series(
         &self,
         mut f: impl FnMut(&[(String, String)], u64, u64, ExpBucketsSnapshot),
     ) {
         for shard in &self.index_shards {
-            let guard = shard.read();
-            for (labels, series) in guard.iter() {
-                let snap = series.buckets_snapshot();
+            let snapshot: Vec<(DynamicLabelSet, ExpBucketsSnapshot)> = {
+                let guard = shard.read();
+                guard
+                    .iter()
+                    .map(|(labels, series)| (labels.clone(), series.buckets_snapshot()))
+                    .collect()
+            };
+            for (labels, snap) in snapshot {
                 f(labels.pairs(), snap.count, snap.sum, snap);
             }
         }
