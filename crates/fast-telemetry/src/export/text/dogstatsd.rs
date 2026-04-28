@@ -431,13 +431,21 @@ impl DogStatsDExport for Histogram {
 
 impl DogStatsDExport for SampledTimer {
     fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
-        let calls_name = format!("{name}.calls");
-        let samples_name = format!("{name}.samples");
+        let calls_name = concat_two(name, ".calls");
+        let samples_name = concat_two(name, ".samples");
         self.calls_metric()
             .export_dogstatsd(output, &calls_name, tags);
         self.histogram()
             .export_dogstatsd(output, &samples_name, tags);
     }
+}
+
+#[inline]
+fn concat_two(a: &str, b: &str) -> String {
+    let mut s = String::with_capacity(a.len() + b.len());
+    s.push_str(a);
+    s.push_str(b);
+    s
 }
 
 impl DogStatsDExport for Distribution {
@@ -498,8 +506,9 @@ impl<L: LabelEnum> DogStatsDExport for LabeledHistogram<L> {
 
 impl<L: LabelEnum> DogStatsDExport for LabeledSampledTimer<L> {
     fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
-        let calls_name = format!("{name}.calls");
-        let samples_name = format!("{name}.samples");
+        let calls_name = concat_two(name, ".calls");
+        let samples_count_name = concat_three(name, ".samples", ".count");
+        let samples_sum_name = concat_three(name, ".samples", ".sum");
 
         for (label, calls, histogram) in self.iter() {
             let variant = label.variant_name();
@@ -516,7 +525,7 @@ impl<L: LabelEnum> DogStatsDExport for LabeledSampledTimer<L> {
 
             __write_dogstatsd_with_label(
                 output,
-                &format!("{}.count", samples_name),
+                &samples_count_name,
                 histogram.count(),
                 "c",
                 L::LABEL_NAME,
@@ -526,7 +535,7 @@ impl<L: LabelEnum> DogStatsDExport for LabeledSampledTimer<L> {
 
             __write_dogstatsd_with_label(
                 output,
-                &format!("{}.sum", samples_name),
+                &samples_sum_name,
                 histogram.sum(),
                 "c",
                 L::LABEL_NAME,
@@ -535,6 +544,15 @@ impl<L: LabelEnum> DogStatsDExport for LabeledSampledTimer<L> {
             );
         }
     }
+}
+
+#[inline]
+fn concat_three(a: &str, b: &str, c: &str) -> String {
+    let mut s = String::with_capacity(a.len() + b.len() + c.len());
+    s.push_str(a);
+    s.push_str(b);
+    s.push_str(c);
+    s
 }
 
 impl DogStatsDExport for DynamicCounter {
@@ -568,8 +586,8 @@ impl DogStatsDExport for DynamicGaugeI64 {
 
 impl DogStatsDExport for DynamicHistogram {
     fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
-        let count_name = format!("{}.count", name);
-        let sum_name = format!("{}.sum", name);
+        let count_name = concat_two(name, ".count");
+        let sum_name = concat_two(name, ".sum");
         self.visit_series(|labels, series| {
             __write_dogstatsd_dynamic_pairs(output, &count_name, series.count(), "c", labels, tags);
             __write_dogstatsd_dynamic_pairs(output, &sum_name, series.sum(), "c", labels, tags);

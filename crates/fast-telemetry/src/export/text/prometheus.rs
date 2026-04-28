@@ -233,7 +233,7 @@ impl PrometheusExport for Histogram {
         output.push_str(name);
         output.push_str(" histogram\n");
 
-        for (bound, count) in self.buckets_cumulative() {
+        for (bound, count) in self.buckets_cumulative_iter() {
             output.push_str(name);
             output.push_str("_bucket{le=\"");
             if bound == u64::MAX {
@@ -260,15 +260,23 @@ impl PrometheusExport for Histogram {
 
 impl PrometheusExport for SampledTimer {
     fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
-        let calls_name = format!("{name}_calls");
-        let samples_name = format!("{name}_samples");
-        let calls_help = format!("{help} total calls");
-        let samples_help = format!("{help} sampled latency in nanoseconds");
+        let calls_name = concat_two(name, "_calls");
+        let samples_name = concat_two(name, "_samples");
+        let calls_help = concat_two(help, " total calls");
+        let samples_help = concat_two(help, " sampled latency in nanoseconds");
         self.calls_metric()
             .export_prometheus(output, &calls_name, &calls_help);
         self.histogram()
             .export_prometheus(output, &samples_name, &samples_help);
     }
+}
+
+#[inline]
+fn concat_two(a: &str, b: &str) -> String {
+    let mut s = String::with_capacity(a.len() + b.len());
+    s.push_str(a);
+    s.push_str(b);
+    s
 }
 
 impl PrometheusExport for Distribution {
@@ -336,10 +344,10 @@ impl<L: LabelEnum> PrometheusExport for LabeledHistogram<L> {
 
 impl<L: LabelEnum> PrometheusExport for LabeledSampledTimer<L> {
     fn export_prometheus(&self, output: &mut String, name: &str, help: &str) {
-        let calls_name = format!("{name}_calls");
-        let samples_name = format!("{name}_samples");
-        let calls_help = format!("{help} total calls");
-        let samples_help = format!("{help} sampled latency in nanoseconds");
+        let calls_name = concat_two(name, "_calls");
+        let samples_name = concat_two(name, "_samples");
+        let calls_help = concat_two(help, " total calls");
+        let samples_help = concat_two(help, " sampled latency in nanoseconds");
 
         write_labeled_counter_series::<L, _>(
             output,
