@@ -3,6 +3,7 @@
 //! This module provides Prometheus and DogStatsD export traits/implementations.
 
 mod dogstatsd;
+mod fast_format;
 mod prometheus;
 
 pub use dogstatsd::{
@@ -12,4 +13,5 @@ pub use dogstatsd::{
     __write_dogstatsd_dynamic, __write_dogstatsd_dynamic_pairs, __write_dogstatsd_with_label,
     DogStatsDExport,
 };
+pub use fast_format::FastFormat;
 pub use prometheus::PrometheusExport;
