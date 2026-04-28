@@ -5,9 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESULTS_DIR="$SCRIPT_DIR/results"
 
 THREADS="$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)"
-ITERS_CACHE="10000000"
-ITERS_SPAN="300000"
-RUNS="3"
+ITERS_CACHE="50000000"
+ITERS_SPAN="1000000"
+RUNS="9"
 PRESET="quick"
 EXPORT_INTERVAL_MS="10"
 MODES_CSV="fast,otel"
@@ -30,12 +30,12 @@ while [[ $# -gt 0 ]]; do
       echo "  cache entities: counter,dynamic_counter,labeled_counter,dynamic_histogram"
       echo "  cache profiles: uniform,hotspot"
       echo "  span scenarios: root,lifecycle,pipeline"
-      echo "  default iters: cache=10000000 span=300000"
+      echo "  default iters: cache=50000000 span=1000000"
       echo "Preset full:"
       echo "  cache entities: all cache benchmark entities"
       echo "  cache profiles: uniform,hotspot,churn"
       echo "  span scenarios: root,lifecycle,pipeline"
-      echo "  default iters: cache=50000000 span=1000000"
+      echo "  default iters: cache=200000000 span=5000000"
       echo "Modes may include metrics for cache entities with direct metrics-rs equivalents."
       exit 0
       ;;
@@ -56,10 +56,10 @@ esac
 
 if [[ "$PRESET" == "full" ]]; then
   if [[ "$ITERS_CACHE_SET" == "0" ]]; then
-    ITERS_CACHE="50000000"
+    ITERS_CACHE="200000000"
   fi
   if [[ "$ITERS_SPAN_SET" == "0" ]]; then
-    ITERS_SPAN="1000000"
+    ITERS_SPAN="5000000"
   fi
 fi
 

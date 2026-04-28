@@ -18,6 +18,14 @@ def parse_kv(path: pathlib.Path) -> Dict[str, str]:
     return out
 
 
+def _f(row: Dict[str, str], *keys: str) -> float:
+    """Read the first present column; tolerates renames between summary versions."""
+    for k in keys:
+        if k in row and row[k] not in (None, ""):
+            return float(row[k])
+    return 0.0
+
+
 def read_summary(path: pathlib.Path) -> Dict[str, Dict[str, float]]:
     out: Dict[str, Dict[str, float]] = {}
     with path.open(newline="") as f:
@@ -25,15 +33,16 @@ def read_summary(path: pathlib.Path) -> Dict[str, Dict[str, float]]:
             mode = row["mode"]
             out[mode] = {
                 "runs": float(row["runs"]),
-                "record_med": float(row["median_record_ops_per_sec"]),
-                "total_med": float(row["median_total_ops_per_sec"]),
-                "total_min": float(row["min_total_ops_per_sec"]),
-                "total_max": float(row["max_total_ops_per_sec"]),
-                "export_med_ms": float(row["median_export_avg_ms"]),
-                "cpu_total_med_s": float(row.get("median_cpu_total_seconds", 0.0) or 0.0),
-                "cpu_avg_cores": float(row.get("median_cpu_avg_cores", 0.0) or 0.0),
-                "cpu_util_pct": float(row.get("median_cpu_utilization_pct", 0.0) or 0.0),
-                "cpu_ns_per_op": float(row.get("median_cpu_ns_per_op", 0.0) or 0.0),
+                "record_med": _f(row, "trimmed_record_ops_per_sec", "median_record_ops_per_sec"),
+                "total_med": _f(row, "trimmed_total_ops_per_sec", "median_total_ops_per_sec"),
+                "total_min": _f(row, "min_total_ops_per_sec"),
+                "total_max": _f(row, "max_total_ops_per_sec"),
+                "total_cv_pct": _f(row, "total_cv_pct"),
+                "export_med_ms": _f(row, "trimmed_export_avg_ms", "median_export_avg_ms"),
+                "cpu_total_med_s": _f(row, "trimmed_cpu_total_seconds", "median_cpu_total_seconds"),
+                "cpu_avg_cores": _f(row, "trimmed_cpu_avg_cores", "median_cpu_avg_cores"),
+                "cpu_util_pct": _f(row, "trimmed_cpu_utilization_pct", "median_cpu_utilization_pct"),
+                "cpu_ns_per_op": _f(row, "trimmed_cpu_ns_per_op", "median_cpu_ns_per_op"),
             }
     return out
 

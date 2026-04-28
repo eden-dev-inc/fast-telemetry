@@ -5,6 +5,32 @@ import statistics
 import sys
 
 
+def trimmed_mean(vals):
+    """Mean after dropping the highest and lowest values.
+
+    For >=5 runs, drops floor((n-1)/4) from each side. This makes a single
+    process spike during one run not poison the headline number. For <5 runs,
+    falls back to the median.
+    """
+    if not vals:
+        return 0.0
+    if len(vals) < 5:
+        return statistics.median(vals)
+    trim = (len(vals) - 1) // 4
+    sorted_vals = sorted(vals)
+    return statistics.fmean(sorted_vals[trim:len(sorted_vals) - trim])
+
+
+def cv_pct(vals):
+    """Coefficient of variation as a percentage. <10% is decision-quality."""
+    if len(vals) < 2:
+        return 0.0
+    mean = statistics.fmean(vals)
+    if mean == 0.0:
+        return 0.0
+    return (statistics.stdev(vals) / mean) * 100.0
+
+
 def parse_mode(run_dir: pathlib.Path, mode: str):
     record_vals = []
     total_vals = []
@@ -62,17 +88,17 @@ def parse_mode(run_dir: pathlib.Path, mode: str):
             cpu_util_vals.append(cpu_utilization)
         if cpu_ns_per_op is not None:
             cpu_ns_per_op_vals.append(cpu_ns_per_op)
-    return (
-        record_vals,
-        total_vals,
-        export_vals,
-        cpu_user_vals,
-        cpu_system_vals,
-        cpu_total_vals,
-        cpu_core_vals,
-        cpu_util_vals,
-        cpu_ns_per_op_vals,
-    )
+    return {
+        "record": record_vals,
+        "total": total_vals,
+        "export": export_vals,
+        "cpu_user": cpu_user_vals,
+        "cpu_system": cpu_system_vals,
+        "cpu_total": cpu_total_vals,
+        "cpu_cores": cpu_core_vals,
+        "cpu_util": cpu_util_vals,
+        "cpu_ns_per_op": cpu_ns_per_op_vals,
+    }
 
 
 def main() -> int:
@@ -81,120 +107,69 @@ def main() -> int:
 
     rows = []
     for mode in modes:
-        (
-            record_vals,
-            total_vals,
-            export_vals,
-            cpu_user_vals,
-            cpu_system_vals,
-            cpu_total_vals,
-            cpu_core_vals,
-            cpu_util_vals,
-            cpu_ns_per_op_vals,
-        ) = parse_mode(run_dir, mode)
-        if not total_vals:
+        vals = parse_mode(run_dir, mode)
+        if not vals["total"]:
             continue
-        rows.append(
-            (
-                mode,
-                record_vals,
-                total_vals,
-                export_vals,
-                cpu_user_vals,
-                cpu_system_vals,
-                cpu_total_vals,
-                cpu_core_vals,
-                cpu_util_vals,
-                cpu_ns_per_op_vals,
-                statistics.median(record_vals) if record_vals else 0.0,
-                statistics.median(total_vals),
-                min(total_vals),
-                max(total_vals),
-                statistics.median(export_vals) if export_vals else 0.0,
-                statistics.median(cpu_user_vals) if cpu_user_vals else 0.0,
-                statistics.median(cpu_system_vals) if cpu_system_vals else 0.0,
-                statistics.median(cpu_total_vals) if cpu_total_vals else 0.0,
-                statistics.median(cpu_core_vals) if cpu_core_vals else 0.0,
-                statistics.median(cpu_util_vals) if cpu_util_vals else 0.0,
-                statistics.median(cpu_ns_per_op_vals) if cpu_ns_per_op_vals else 0.0,
-            )
-        )
+        rows.append({
+            "mode": mode,
+            "n": len(vals["total"]),
+            "record_tm": trimmed_mean(vals["record"]),
+            "total_tm": trimmed_mean(vals["total"]),
+            "total_min": min(vals["total"]),
+            "total_max": max(vals["total"]),
+            "total_cv_pct": cv_pct(vals["total"]),
+            "export_tm": trimmed_mean(vals["export"]),
+            "cpu_user_tm": trimmed_mean(vals["cpu_user"]),
+            "cpu_system_tm": trimmed_mean(vals["cpu_system"]),
+            "cpu_total_tm": trimmed_mean(vals["cpu_total"]),
+            "cpu_cores_tm": trimmed_mean(vals["cpu_cores"]),
+            "cpu_util_tm": trimmed_mean(vals["cpu_util"]),
+            "cpu_ns_per_op_tm": trimmed_mean(vals["cpu_ns_per_op"]),
+        })
 
-    summary = [
-        "mode,runs,median_record_ops_per_sec,median_total_ops_per_sec,min_total_ops_per_sec,max_total_ops_per_sec,median_export_avg_ms,median_cpu_user_seconds,median_cpu_system_seconds,median_cpu_total_seconds,median_cpu_avg_cores,median_cpu_utilization_pct,median_cpu_ns_per_op"
+    csv_lines = [
+        "mode,runs,trimmed_record_ops_per_sec,trimmed_total_ops_per_sec,"
+        "min_total_ops_per_sec,max_total_ops_per_sec,total_cv_pct,"
+        "trimmed_export_avg_ms,trimmed_cpu_user_seconds,trimmed_cpu_system_seconds,"
+        "trimmed_cpu_total_seconds,trimmed_cpu_avg_cores,trimmed_cpu_utilization_pct,"
+        "trimmed_cpu_ns_per_op"
     ]
-    for (
-        mode,
-        _,
-        total_vals,
-        _,
-        _,
-        _,
-        _,
-        _,
-        _,
-        _,
-        med_record,
-        med_total,
-        lo_total,
-        hi_total,
-        med_export,
-        med_cpu_user,
-        med_cpu_system,
-        med_cpu_total,
-        med_cpu_cores,
-        med_cpu_util,
-        med_cpu_ns_per_op,
-    ) in rows:
-        summary.append(
-            f"{mode},{len(total_vals)},{med_record:.2f},{med_total:.2f},{lo_total:.2f},{hi_total:.2f},{med_export:.6f},{med_cpu_user:.6f},{med_cpu_system:.6f},{med_cpu_total:.6f},{med_cpu_cores:.6f},{med_cpu_util:.2f},{med_cpu_ns_per_op:.2f}"
+    for r in rows:
+        csv_lines.append(
+            f"{r['mode']},{r['n']},{r['record_tm']:.2f},{r['total_tm']:.2f},"
+            f"{r['total_min']:.2f},{r['total_max']:.2f},{r['total_cv_pct']:.2f},"
+            f"{r['export_tm']:.6f},{r['cpu_user_tm']:.6f},{r['cpu_system_tm']:.6f},"
+            f"{r['cpu_total_tm']:.6f},{r['cpu_cores_tm']:.6f},{r['cpu_util_tm']:.2f},"
+            f"{r['cpu_ns_per_op_tm']:.2f}"
         )
-    (run_dir / "summary.csv").write_text("\n".join(summary) + "\n")
+    (run_dir / "summary.csv").write_text("\n".join(csv_lines) + "\n")
 
     print("")
-    print("Summary (median throughput and CPU cost, total min/max):")
-    for (
-        mode,
-        _,
-        total_vals,
-        _,
-        _,
-        _,
-        _,
-        _,
-        _,
-        _,
-        med_record,
-        med_total,
-        lo_total,
-        hi_total,
-        med_export,
-        med_cpu_user,
-        med_cpu_system,
-        med_cpu_total,
-        med_cpu_cores,
-        med_cpu_util,
-        med_cpu_ns_per_op,
-    ) in rows:
+    print("Summary (trimmed mean throughput and CPU cost, total min/max, CV):")
+    for r in rows:
+        cv_marker = " [HIGH-CV]" if r["total_cv_pct"] > 10.0 else ""
         print(
-            f"  {mode:6s} runs={len(total_vals)} record_med={med_record:,.2f} total_med={med_total:,.2f} "
-            f"min={lo_total:,.2f} max={hi_total:,.2f} export_avg_ms={med_export:.6f} "
-            f"cpu_total_s={med_cpu_total:.6f} cpu_user_s={med_cpu_user:.6f} cpu_system_s={med_cpu_system:.6f} "
-            f"cpu_avg_cores={med_cpu_cores:.3f} cpu_util_pct={med_cpu_util:.2f} cpu_ns_per_op={med_cpu_ns_per_op:.2f}"
+            f"  {r['mode']:6s} runs={r['n']} record_tm={r['record_tm']:,.2f} "
+            f"total_tm={r['total_tm']:,.2f} min={r['total_min']:,.2f} max={r['total_max']:,.2f} "
+            f"cv={r['total_cv_pct']:.1f}%{cv_marker} "
+            f"export_avg_ms={r['export_tm']:.6f} "
+            f"cpu_total_s={r['cpu_total_tm']:.6f} cpu_user_s={r['cpu_user_tm']:.6f} "
+            f"cpu_system_s={r['cpu_system_tm']:.6f} cpu_avg_cores={r['cpu_cores_tm']:.3f} "
+            f"cpu_util_pct={r['cpu_util_tm']:.2f} cpu_ns_per_op={r['cpu_ns_per_op_tm']:.2f}"
         )
 
     if rows:
-        med = {row[0]: row[11] for row in rows}
-        if "fast" in med and "metrics" in med:
-            print(f"  fast/metrics total speedup: {med['fast'] / med['metrics']:.2f}x")
-        if "fast" in med and "atomic" in med:
-            print(f"  fast/atomic total speedup: {med['fast'] / med['atomic']:.2f}x")
-        if "fast" in med and "otel" in med:
-            print(f"  fast/otel total speedup:   {med['fast'] / med['otel']:.2f}x")
-        if "metrics" in med and "otel" in med:
-            print(f"  metrics/otel total speedup:{med['metrics'] / med['otel']:.2f}x")
-        if "atomic" in med and "otel" in med:
-            print(f"  atomic/otel total speedup: {med['atomic'] / med['otel']:.2f}x")
+        tm = {r["mode"]: r["total_tm"] for r in rows}
+        if "fast" in tm and "metrics" in tm:
+            print(f"  fast/metrics total speedup: {tm['fast'] / tm['metrics']:.2f}x")
+        if "fast" in tm and "atomic" in tm:
+            print(f"  fast/atomic total speedup: {tm['fast'] / tm['atomic']:.2f}x")
+        if "fast" in tm and "otel" in tm:
+            print(f"  fast/otel total speedup:   {tm['fast'] / tm['otel']:.2f}x")
+        if "metrics" in tm and "otel" in tm:
+            print(f"  metrics/otel total speedup:{tm['metrics'] / tm['otel']:.2f}x")
+        if "atomic" in tm and "otel" in tm:
+            print(f"  atomic/otel total speedup: {tm['atomic'] / tm['otel']:.2f}x")
 
     return 0
 
