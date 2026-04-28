@@ -26,6 +26,7 @@ eviction = []
 [dependencies]
 crossbeam-utils = { workspace = true }
 fast-telemetry-macros = { workspace = true, optional = true }
+itoa = { workspace = true }
 libc = { version = "0.2", optional = true }
 metrics = { workspace = true, optional = true }
 metrics-util = { workspace = true, optional = true }
@@ -34,6 +35,7 @@ opentelemetry-proto = { version = "0.30", default-features = false, features = [
 opentelemetry_sdk = { workspace = true, optional = true, features = ["testing"] }
 parking_lot = { workspace = true }
 prost = { version = "0.13", optional = true }
+ryu = { workspace = true }
 shuttle = { workspace = true, optional = true }
 uuid = { workspace = true }
 
