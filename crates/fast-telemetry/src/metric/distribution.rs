@@ -57,6 +57,22 @@ impl Distribution {
         self.cells.iter().map(|c| c.get_sum()).sum()
     }
 
+    /// Sum and count across all shards in a single pass.
+    ///
+    /// Cheaper than calling [`Self::sum`] and [`Self::count`] separately:
+    /// each shard's `ExpBuckets` is visited once, and `sum` + `count` share
+    /// a cache line per shard so the combined pass roughly halves the cache
+    /// traffic of two separate scans.
+    pub fn sum_and_count(&self) -> (u64, u64) {
+        let mut sum = 0u64;
+        let mut count = 0u64;
+        for cell in &self.cells {
+            sum += cell.get_sum();
+            count += cell.get_count();
+        }
+        (sum, count)
+    }
+
     /// Approximate minimum from bucket boundaries.
     pub fn min(&self) -> Option<u64> {
         self.buckets_snapshot().min()
