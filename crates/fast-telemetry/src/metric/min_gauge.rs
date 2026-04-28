@@ -16,9 +16,13 @@ pub struct MinGauge {
 }
 
 impl MinGauge {
-    /// Create a new min gauge with all shards initialized to zero.
+    /// Create a new min gauge with all shards initialized to [`i64::MAX`],
+    /// so any observation displaces the initial value.
+    ///
+    /// `get()` on a gauge that has never been observed returns [`i64::MAX`];
+    /// callers that need a different sentinel should use [`Self::with_value`].
     pub fn new(shard_count: usize) -> Self {
-        Self::with_value(shard_count, 0)
+        Self::with_value(shard_count, i64::MAX)
     }
 
     /// Create a new min gauge with all shards initialized to `initial`.
@@ -104,6 +108,16 @@ mod tests {
         let gauge = MinGauge::with_value(4, 10);
         assert_eq!(gauge.get(), 10);
         gauge.observe(3);
+        assert_eq!(gauge.get(), 3);
+    }
+
+    #[test]
+    fn new_tracks_minimum_of_positive_observations() {
+        let gauge = MinGauge::new(4);
+        assert_eq!(gauge.get(), i64::MAX);
+        gauge.observe(8);
+        gauge.observe(3);
+        gauge.observe(5);
         assert_eq!(gauge.get(), 3);
     }
 }
