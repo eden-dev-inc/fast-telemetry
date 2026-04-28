@@ -507,15 +507,16 @@ impl<L: LabelEnum> OtlpExport for LabeledHistogram<L> {
     ) {
         let mut data_points = Vec::new();
 
-        for (label, buckets, sum, count) in self.iter() {
+        for (label, histogram) in self.iter() {
             let attrs = vec![label_to_attribute(label)];
-            let (bucket_counts, explicit_bounds) = cumulative_to_otlp_buckets(&buckets);
+            let (bucket_counts, explicit_bounds) =
+                cumulative_to_otlp_buckets_iter(histogram.buckets_cumulative_iter());
 
             data_points.push(pb::HistogramDataPoint {
                 attributes: attrs,
                 time_unix_nano,
-                count,
-                sum: Some(sum as f64),
+                count: histogram.count(),
+                sum: Some(histogram.sum() as f64),
                 bucket_counts,
                 explicit_bounds,
                 ..Default::default()

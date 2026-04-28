@@ -484,19 +484,19 @@ impl<L: LabelEnum> DogStatsDExport for LabeledGauge<L> {
 
 impl<L: LabelEnum> DogStatsDExport for LabeledHistogram<L> {
     fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]) {
-        for (label, _buckets, sum, count) in self.iter() {
+        for (label, histogram) in self.iter() {
             let variant = label.variant_name();
 
             output.push_str(name);
             output.push_str(".count:");
-            push_display(output, count);
+            push_display(output, histogram.count());
             output.push_str("|c");
             append_tags_with_label(output, L::LABEL_NAME, variant, tags);
             output.push('\n');
 
             output.push_str(name);
             output.push_str(".sum:");
-            push_display(output, sum);
+            push_display(output, histogram.sum());
             output.push_str("|c");
             append_tags_with_label(output, L::LABEL_NAME, variant, tags);
             output.push('\n');

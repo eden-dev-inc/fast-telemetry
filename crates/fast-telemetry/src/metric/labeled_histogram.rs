@@ -98,16 +98,15 @@ impl<L: LabelEnum> LabeledHistogram<L> {
 
     /// Iterate over all label/histogram data for export.
     ///
-    /// Returns (label, cumulative_buckets, sum, count) for each variant.
-    pub fn iter(&self) -> impl Iterator<Item = (L, Vec<(u64, u64)>, u64, u64)> + '_ {
-        self.histograms.iter().enumerate().map(|(idx, histogram)| {
-            (
-                L::from_index(idx),
-                histogram.buckets_cumulative(),
-                histogram.sum(),
-                histogram.count(),
-            )
-        })
+    /// Returns (label, &Histogram) for each variant. Callers that need
+    /// cumulative buckets can call `histogram.buckets_cumulative_iter()`
+    /// without allocating a Vec; callers that only need sum/count (e.g.
+    /// DogStatsD) skip the bucket walk entirely.
+    pub fn iter(&self) -> impl Iterator<Item = (L, &'_ Histogram)> + '_ {
+        self.histograms
+            .iter()
+            .enumerate()
+            .map(|(idx, histogram)| (L::from_index(idx), histogram))
     }
 }
 
@@ -173,15 +172,15 @@ mod tests {
 
         // Fast: 1 value in bucket 0
         assert_eq!(data[0].0, TestLabel::Fast);
-        assert_eq!(data[0].3, 1); // count
+        assert_eq!(data[0].1.count(), 1);
 
         // Medium: 1 value in +Inf bucket
         assert_eq!(data[1].0, TestLabel::Medium);
-        assert_eq!(data[1].3, 1); // count
+        assert_eq!(data[1].1.count(), 1);
 
         // Slow: no values
         assert_eq!(data[2].0, TestLabel::Slow);
-        assert_eq!(data[2].3, 0); // count
+        assert_eq!(data[2].1.count(), 0);
     }
 
     #[test]

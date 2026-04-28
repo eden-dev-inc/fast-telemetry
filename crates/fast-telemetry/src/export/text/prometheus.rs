@@ -58,10 +58,10 @@ where
     }
 }
 
-fn write_labeled_histogram_series<L, I>(output: &mut String, name: &str, help: &str, series: I)
+fn write_labeled_histogram_series<'a, L, I>(output: &mut String, name: &str, help: &str, series: I)
 where
     L: LabelEnum,
-    I: IntoIterator<Item = (L, Vec<(u64, u64)>, u64, u64)>,
+    I: IntoIterator<Item = (L, &'a Histogram)>,
 {
     output.push_str("# HELP ");
     output.push_str(name);
@@ -71,10 +71,14 @@ where
     output.push_str(name);
     output.push_str(" histogram\n");
 
-    for (label, buckets, sum, count) in series {
+    for (label, histogram) in series {
         let variant = label.variant_name();
 
-        for (bound, bucket_count) in buckets {
+        // Walk buckets via the iterator form so we don't allocate a Vec per
+        // variant. The cumulative tail is the per-variant total count.
+        let mut total_count = 0u64;
+        for (bound, bucket_count) in histogram.buckets_cumulative_iter() {
+            total_count = bucket_count;
             output.push_str(name);
             output.push_str("_bucket{");
             output.push_str(L::LABEL_NAME);
@@ -97,7 +101,7 @@ where
         output.push_str("=\"");
         output.push_str(variant);
         output.push_str("\"} ");
-        push_display(output, sum);
+        push_display(output, histogram.sum());
         output.push('\n');
 
         output.push_str(name);
@@ -106,7 +110,7 @@ where
         output.push_str("=\"");
         output.push_str(variant);
         output.push_str("\"} ");
-        push_display(output, count);
+        push_display(output, total_count);
         output.push('\n');
     }
 }
@@ -360,14 +364,7 @@ impl<L: LabelEnum> PrometheusExport for LabeledSampledTimer<L> {
             output,
             &samples_name,
             &samples_help,
-            self.iter().map(|(label, _, histogram)| {
-                (
-                    label,
-                    histogram.buckets_cumulative(),
-                    histogram.sum(),
-                    histogram.count(),
-                )
-            }),
+            self.iter().map(|(label, _, histogram)| (label, histogram)),
         );
     }
 }
