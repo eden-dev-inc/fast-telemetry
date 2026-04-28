@@ -1,10 +1,10 @@
+use super::fast_format::FastFormat;
 use crate::{
     Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
     DynamicHistogram, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledGauge,
     LabeledHistogram, LabeledSampledTimer, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
     SampledTimer,
 };
-use std::fmt::Write as _;
 
 /// Trait for exporting a metric in Prometheus text exposition format.
 pub trait PrometheusExport {
@@ -16,8 +16,9 @@ pub trait PrometheusExport {
     fn export_prometheus(&self, output: &mut String, name: &str, help: &str);
 }
 
-fn push_display(output: &mut String, value: impl std::fmt::Display) {
-    let _ = write!(output, "{}", value);
+#[inline]
+fn push_display<T: FastFormat>(output: &mut String, value: T) {
+    value.fast_push(output);
 }
 
 fn write_dynamic_labels(output: &mut String, labels: &[(String, String)]) {

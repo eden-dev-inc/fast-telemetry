@@ -4,7 +4,8 @@ use crate::{
     LabeledGauge, LabeledHistogram, LabeledSampledTimer, MaxGauge, MaxGaugeF64, MinGauge,
     MinGaugeF64, SampledTimer, exp_buckets::ExpBucketsSnapshot,
 };
-use std::fmt::{Display, Write as _};
+
+use super::fast_format::{FastFormat, push_f64_compact};
 
 /// Trait for exporting a metric in DogStatsD format.
 ///
@@ -23,27 +24,14 @@ pub trait DogStatsDExport {
     fn export_dogstatsd(&self, output: &mut String, name: &str, tags: &[(&str, &str)]);
 }
 
-fn push_display(output: &mut String, value: impl Display) {
-    let _ = write!(output, "{}", value);
+#[inline]
+fn push_display<T: FastFormat>(output: &mut String, value: T) {
+    value.fast_push(output);
 }
 
+#[inline]
 fn write_gauge_f64_value(output: &mut String, value: f64) {
-    if value.fract() == 0.0 {
-        push_display(output, value as i64);
-        return;
-    }
-
-    let start_len = output.len();
-    let _ = write!(output, "{:.6}", value);
-    while output.ends_with('0') {
-        output.pop();
-    }
-    if output.ends_with('.') {
-        output.pop();
-    }
-    if output.len() == start_len {
-        output.push('0');
-    }
+    push_f64_compact(output, value);
 }
 
 /// Helper to append tags in DogStatsD format: `|#tag1:value1,tag2:value2`
@@ -119,7 +107,7 @@ fn append_tags_with_dynamic_labels(
 pub fn __write_dogstatsd(
     output: &mut String,
     name: &str,
-    value: impl Display,
+    value: impl FastFormat,
     metric_type: &str,
     tags: &[(&str, &str)],
 ) {
@@ -136,7 +124,7 @@ pub fn __write_dogstatsd(
 pub fn __write_dogstatsd_with_label(
     output: &mut String,
     name: &str,
-    value: impl Display,
+    value: impl FastFormat,
     metric_type: &str,
     label_name: &str,
     label_value: &str,
@@ -155,7 +143,7 @@ pub fn __write_dogstatsd_with_label(
 pub fn __write_dogstatsd_dynamic(
     output: &mut String,
     name: &str,
-    value: impl Display,
+    value: impl FastFormat,
     metric_type: &str,
     labels: &DynamicLabelSet,
     tags: &[(&str, &str)],
@@ -173,7 +161,7 @@ pub fn __write_dogstatsd_dynamic(
 pub fn __write_dogstatsd_dynamic_pairs(
     output: &mut String,
     name: &str,
-    value: impl Display,
+    value: impl FastFormat,
     metric_type: &str,
     labels: &[(String, String)],
     tags: &[(&str, &str)],
@@ -198,7 +186,7 @@ fn write_distribution_sample(output: &mut String, name: &str, value: u64, count:
     if count > 1 {
         // sample_rate = 1/count tells the agent to multiply this sample by count
         output.push_str("|@");
-        let _ = write!(output, "{}", 1.0 / count as f64);
+        (1.0_f64 / count as f64).fast_push(output);
     }
 }
 
