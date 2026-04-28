@@ -19,6 +19,7 @@ all-features = true
 default = ["macros"]
 macros = ["dep:fast-telemetry-macros"]
 otlp = ["dep:opentelemetry-proto", "dep:prost"]
+clickhouse = ["dep:indexmap", "dep:klickhouse"]
 shuttle-tests = ["dep:shuttle"]
 bench-tools = ["dep:libc", "dep:metrics", "dep:metrics-util", "dep:opentelemetry", "dep:opentelemetry_sdk"]
 eviction = []
@@ -26,7 +27,9 @@ eviction = []
 [dependencies]
 crossbeam-utils = { workspace = true }
 fast-telemetry-macros = { workspace = true, optional = true }
+indexmap = { workspace = true, optional = true }
 itoa = { workspace = true }
+klickhouse = { workspace = true, optional = true }
 libc = { version = "0.2", optional = true }
 metrics = { workspace = true, optional = true }
 metrics-util = { workspace = true, optional = true }

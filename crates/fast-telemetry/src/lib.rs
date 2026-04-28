@@ -66,6 +66,9 @@ pub use temporality::Temporality;
 #[cfg(feature = "otlp")]
 pub use export::otlp::OtlpExport;
 
+#[cfg(feature = "clickhouse")]
+pub use export::clickhouse::{ClickHouseExport, ClickHouseMetricBatch};
+
 #[cfg(feature = "macros")]
 pub use fast_telemetry_macros::{ExportMetrics, LabelEnum as DeriveLabel};
 
@@ -77,4 +80,9 @@ pub(crate) use metric::label;
 #[cfg(feature = "otlp")]
 pub mod otlp {
     pub use crate::export::otlp::*;
+}
+
+#[cfg(feature = "clickhouse")]
+pub mod clickhouse {
+    pub use crate::export::clickhouse::*;
 }

@@ -7,7 +7,7 @@ homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Export adapters for fast-telemetry metrics: DogStatsD, OTLP, span export, and stale-series sweeping"
+description = "Export adapters for fast-telemetry metrics: DogStatsD, OTLP, ClickHouse, span export, and stale-series sweeping"
 documentation = "https://docs.rs/fast-telemetry-export"
 keywords = ["telemetry", "metrics", "dogstatsd", "otlp", "tracing"]
 readme = "README.md"
@@ -19,6 +19,7 @@ all-features = true
 default = ["dogstatsd", "otlp"]
 dogstatsd = ["dep:memchr"]
 otlp = ["dep:flate2", "dep:prost", "dep:reqwest", "fast-telemetry/otlp"]
+clickhouse = ["dep:klickhouse", "dep:indexmap", "fast-telemetry/otlp", "fast-telemetry/clickhouse"]
 
 [dependencies]
 log = { workspace = true }
@@ -31,3 +32,18 @@ tokio-util = { workspace = true }
 flate2 = { workspace = true, optional = true }
 prost = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
+
+# clickhouse
+indexmap = { workspace = true, optional = true }
+klickhouse = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio"] }
+testcontainers = { workspace = true }
+testcontainers-modules = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[[bench]]
+name = "clickhouse_export"
+harness = false
+required-features = ["clickhouse", "otlp"]

@@ -3,7 +3,8 @@
 High-performance, cache-friendly telemetry for Rust.
 
 Thread-sharded counters, gauges, histograms, distributions, and lightweight
-spans with Prometheus, DogStatsD, and OTLP export.
+spans with Prometheus, DogStatsD, OTLP, and optional first-party ClickHouse row
+export.
 
 See the [workspace README](../../README.md) for full documentation, examples,
 and API reference.
@@ -11,7 +12,7 @@ and API reference.
 ## Companion Crates
 
 - [`fast-telemetry-macros`](../fast-telemetry-macros) — `#[derive(ExportMetrics)]` and `#[derive(LabelEnum)]`
-- [`fast-telemetry-export`](../fast-telemetry-export) — DogStatsD, OTLP, and span export adapters
+- [`fast-telemetry-export`](../fast-telemetry-export) — DogStatsD, OTLP, ClickHouse, and span export adapters
 
 ## Lineage
 

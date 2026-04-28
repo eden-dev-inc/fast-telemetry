@@ -157,3 +157,52 @@ For end-to-end UDP ingest validation:
 
 Runs `statsd-exporter` with DogStatsD tag parsing on UDP `:8125`,
 Prometheus scrape at `http://127.0.0.1:9102/metrics`.
+
+## ClickHouse Server
+
+For repeatable ClickHouse setup and end-to-end native-protocol ingest validation
+against the
+[`fast-telemetry-export`](../../fast-telemetry-export) `clickhouse` feature:
+
+```bash
+./bench/run-clickhouse.sh up      # start
+./bench/run-clickhouse.sh smoke   # HTTP ping + round-trip insert/select
+./bench/run-clickhouse.sh bench   # export-format benchmark: DogStatsD vs OTLP vs ClickHouse rows
+./bench/run-clickhouse.sh scrape  # row counts from otel_metrics_* tables
+./bench/run-clickhouse.sh down    # stop
+```
+
+Runs `clickhouse/clickhouse-server` with the native TCP protocol on `:9000`
+and the HTTP interface on `:8123` (used by `smoke`/`scrape` for ad-hoc
+queries; the exporter itself talks native TCP).
+
+The `bench` command runs:
+
+```bash
+cargo bench -p fast-telemetry-export --features clickhouse --bench clickhouse_export
+```
+
+It compares local export-format costs for Datadog-compatible DogStatsD text,
+OTLP protobuf build/encode, the current ClickHouse `export_otlp()` → row
+translation path, and the first-party `export_clickhouse()` ClickHouse row builder. It
+does not require the ClickHouse server because it isolates serialization and row
+construction from network insert latency.
+
+Use `up` to pin the server environment for real ingest tests, run the ClickHouse
+exporter workload or integration test you are measuring, then use `scrape` to
+collect table row counts. The `smoke` command is a correctness check, not a
+throughput benchmark.
+
+The `otel_standard` exporter creates its tables (`otel_metrics_sum`,
+`otel_metrics_gauge`, `otel_metrics_histogram`,
+`otel_metrics_exponential_histogram`) on first export, so `scrape` returns
+empty / "table missing" until you've run a workload that exports through
+the ClickHouse adapter.
+
+Integration tests (which spin up a fresh container per run via
+`testcontainers`) are independent of this harness:
+
+```bash
+cargo test -p fast-telemetry-export --features clickhouse \
+    --no-default-features --test clickhouse_integration
+```

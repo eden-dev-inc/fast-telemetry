@@ -114,6 +114,7 @@ fn double_data_point(
 ///
 /// OTLP expects non-cumulative bucket counts and omits the +Inf bound from
 /// `explicit_bounds` (it's implied by the final bucket).
+#[cfg(test)]
 fn cumulative_to_otlp_buckets(cumulative: &[(u64, u64)]) -> (Vec<u64>, Vec<f64>) {
     cumulative_to_otlp_buckets_iter(cumulative.iter().copied())
 }
