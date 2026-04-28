@@ -114,13 +114,18 @@ fn double_data_point(
 ///
 /// OTLP expects non-cumulative bucket counts and omits the +Inf bound from
 /// `explicit_bounds` (it's implied by the final bucket).
-fn cumulative_to_otlp_buckets(cumulative: &[(u64, u64)]) -> (Vec<u64>, Vec<f64>) {
+fn cumulative_to_otlp_buckets(cumulative: &[(u64, u64)]) -> (u64, Vec<u64>, Vec<f64>) {
     cumulative_to_otlp_buckets_iter(cumulative.iter().copied())
 }
 
+/// Convert a cumulative-bucket iterator to OTLP form.
+///
+/// Returns `(total_count, bucket_counts, explicit_bounds)`. `total_count` is
+/// the running cumulative at the +Inf bucket; callers can use it instead of a
+/// separate `Histogram::count()` scan.
 fn cumulative_to_otlp_buckets_iter(
     cumulative: impl IntoIterator<Item = (u64, u64)>,
-) -> (Vec<u64>, Vec<f64>) {
+) -> (u64, Vec<u64>, Vec<f64>) {
     let iter = cumulative.into_iter();
     let (lower, _) = iter.size_hint();
     let mut bucket_counts = Vec::with_capacity(lower);
@@ -135,7 +140,7 @@ fn cumulative_to_otlp_buckets_iter(
         }
     }
 
-    (bucket_counts, explicit_bounds)
+    (prev, bucket_counts, explicit_bounds)
 }
 
 /// Build an OTLP `Resource` with a service name and optional extra attributes.
@@ -324,9 +329,8 @@ impl OtlpExport for Histogram {
         description: &str,
         time_unix_nano: u64,
     ) {
-        let count = self.count();
         let sum = self.sum();
-        let (bucket_counts, explicit_bounds) =
+        let (count, bucket_counts, explicit_bounds) =
             cumulative_to_otlp_buckets_iter(self.buckets_cumulative_iter());
 
         metrics.push(pb::Metric {
@@ -509,7 +513,7 @@ impl<L: LabelEnum> OtlpExport for LabeledHistogram<L> {
 
         for (label, buckets, sum, count) in self.iter() {
             let attrs = vec![label_to_attribute(label)];
-            let (bucket_counts, explicit_bounds) = cumulative_to_otlp_buckets(&buckets);
+            let (_, bucket_counts, explicit_bounds) = cumulative_to_otlp_buckets(&buckets);
 
             data_points.push(pb::HistogramDataPoint {
                 attributes: attrs,
@@ -557,12 +561,12 @@ impl<L: LabelEnum> OtlpExport for LabeledSampledTimer<L> {
                 time_unix_nano,
             ));
 
-            let (bucket_counts, explicit_bounds) =
+            let (count, bucket_counts, explicit_bounds) =
                 cumulative_to_otlp_buckets_iter(histogram.buckets_cumulative_iter());
             sample_points.push(pb::HistogramDataPoint {
                 attributes: vec![label_to_attribute(label)],
                 time_unix_nano,
-                count: histogram.count(),
+                count,
                 sum: Some(histogram.sum() as f64),
                 bucket_counts,
                 explicit_bounds,
@@ -702,13 +706,13 @@ impl OtlpExport for DynamicHistogram {
         let mut data_points = Vec::new();
 
         self.visit_series(|pairs, series| {
-            let (bucket_counts, explicit_bounds) =
+            let (count, bucket_counts, explicit_bounds) =
                 cumulative_to_otlp_buckets_iter(series.buckets_cumulative_iter());
 
             data_points.push(pb::HistogramDataPoint {
                 attributes: pairs_to_attributes(pairs),
                 time_unix_nano,
-                count: series.count(),
+                count,
                 sum: Some(series.sum() as f64),
                 bucket_counts,
                 explicit_bounds,
@@ -1378,7 +1382,8 @@ mod tests {
         // Input: cumulative [(10, 1), (100, 3), (u64::MAX, 5)]
         // Expected per-bucket: [1, 2, 2], bounds: [10.0, 100.0]
         let cumulative = vec![(10, 1), (100, 3), (u64::MAX, 5)];
-        let (counts, bounds) = cumulative_to_otlp_buckets(&cumulative);
+        let (count, counts, bounds) = cumulative_to_otlp_buckets(&cumulative);
+        assert_eq!(count, 5);
         assert_eq!(counts, vec![1, 2, 2]);
         assert_eq!(bounds, vec![10.0, 100.0]);
     }

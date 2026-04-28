@@ -233,7 +233,12 @@ impl PrometheusExport for Histogram {
         output.push_str(name);
         output.push_str(" histogram\n");
 
+        // Track the running cumulative as we walk the buckets; the +Inf bucket
+        // gives us the total count, so we can skip the second N-shard scan in
+        // self.count().
+        let mut total_count = 0u64;
         for (bound, count) in self.buckets_cumulative_iter() {
+            total_count = count;
             output.push_str(name);
             output.push_str("_bucket{le=\"");
             if bound == u64::MAX {
@@ -253,7 +258,7 @@ impl PrometheusExport for Histogram {
 
         output.push_str(name);
         output.push_str("_count ");
-        push_display(output, self.count());
+        push_display(output, total_count);
         output.push('\n');
     }
 }
