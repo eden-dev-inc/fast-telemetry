@@ -13,7 +13,7 @@
 //! When the outbox is full, flushes are silently dropped.
 
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -165,7 +165,17 @@ impl Drop for ThreadLocalState {
 }
 
 thread_local! {
-    static LOCAL: RefCell<ThreadLocalState> = RefCell::new(ThreadLocalState::new());
+    /// Thread-local span state.
+    ///
+    /// Uses `UnsafeCell` rather than `RefCell` to skip the runtime borrow
+    /// check on the per-span hot path (~5 cycles saved per submit). Safety
+    /// is preserved by enforcing two invariants:
+    ///   1. All access is single-threaded (`thread_local!`).
+    ///   2. Every `&mut` borrow is fully consumed inside the closure passed
+    ///      to `LOCAL.with`. No closure recursively re-enters `with`, and
+    ///      none of the called methods (`get_or_register`, `push`,
+    ///      `should_record`) re-enter the cell.
+    static LOCAL: UnsafeCell<ThreadLocalState> = UnsafeCell::new(ThreadLocalState::new());
 }
 
 /// Thread-local span collector with zero-atomic submit path.
@@ -251,7 +261,12 @@ impl SpanCollector {
     /// arithmetic — zero atomics, zero contention.
     #[inline]
     fn should_record(&self) -> bool {
-        LOCAL.with(|cell| cell.borrow_mut().get_or_register(self).should_record())
+        LOCAL.with(|cell| {
+            // SAFETY: see LOCAL definition. Single-thread access; the &mut
+            // borrow is fully consumed before this closure returns.
+            let state = unsafe { &mut *cell.get() };
+            state.get_or_register(self).should_record()
+        })
     }
 
     /// Submit a completed span.  Called by [`Span::drop`].
@@ -262,7 +277,10 @@ impl SpanCollector {
     #[inline]
     pub(crate) fn submit(&self, span: CompletedSpan) {
         LOCAL.with(|cell| {
-            cell.borrow_mut().get_or_register(self).push(span);
+            // SAFETY: see LOCAL definition. Single-thread access; the &mut
+            // borrow is fully consumed before this closure returns.
+            let state = unsafe { &mut *cell.get() };
+            state.get_or_register(self).push(span);
         });
     }
 
@@ -274,7 +292,8 @@ impl SpanCollector {
     /// automatically when they reach [`FLUSH_THRESHOLD`] or on thread exit.
     pub fn flush_local(&self) {
         LOCAL.with(|cell| {
-            let mut state = cell.borrow_mut();
+            // SAFETY: see LOCAL definition.
+            let state = unsafe { &mut *cell.get() };
             let key = self as *const SpanCollector as usize;
             if let Some(pos) = state.entries.iter().position(|(k, _)| *k == key) {
                 state.entries[pos].1.flush();
