@@ -43,7 +43,7 @@ fn main() {
         metrics.latency.record(50 + (i % 200)); // 50-250µs
         metrics
             .hot_path_latency
-            .record_elapsed(Duration::from_nanos(80_000 + ((i % 200) as u64 * 1_000)));
+            .record_elapsed(Duration::from_nanos(80_000 + (i % 200) * 1_000));
     }
     metrics.queue_depth.set(42);
 

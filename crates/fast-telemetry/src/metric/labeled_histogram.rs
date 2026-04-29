@@ -38,8 +38,8 @@ use std::marker::PhantomData;
 /// histogram.record(Endpoint::Auth, 2000);  // 2ms
 ///
 /// // Iteration for export
-/// for (label, buckets, sum, count) in histogram.iter() {
-///     println!("{}={}: count={}", Endpoint::LABEL_NAME, label.variant_name(), count);
+/// for (label, histogram) in histogram.iter() {
+///     println!("{}={}: count={}", Endpoint::LABEL_NAME, label.variant_name(), histogram.count());
 /// }
 /// ```
 pub struct LabeledHistogram<L: LabelEnum> {
