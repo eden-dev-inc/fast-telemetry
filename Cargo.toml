@@ -15,7 +15,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 # Local crates
-fast-telemetry = { path = "crates/fast-telemetry", version = "0.2.0" }
+fast-telemetry = { path = "crates/fast-telemetry", version = "0.2.1" }
 fast-telemetry-macros = { path = "crates/fast-telemetry-macros", version = "0.2.0" }
 fast-telemetry-export = { path = "crates/fast-telemetry-export", version = "0.2.0" }
 

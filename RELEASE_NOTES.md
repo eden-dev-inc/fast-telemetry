@@ -1,5 +1,23 @@
 # Release Notes
 
+## 0.2.1 - 2026-04-29
+
+Published crates: `fast-telemetry`. (`fast-telemetry-macros` and `fast-telemetry-export` are unchanged since 0.2.0.)
+
+Highlights:
+
+- distribution export performance: Prometheus summary export now uses `Distribution::sum_and_count()` to read each shard once instead of separately walking shards for sum and count.
+- public API: added `Distribution::sum_and_count()` for callers that need both aggregate values without two shard scans.
+- span performance: replaced the thread-local span submit-path `RefCell` borrow check with an `UnsafeCell`-backed implementation, preserving the zero-atomic hot path while avoiding per-submit runtime borrow overhead.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.2.1"
+fast-telemetry-export = "0.2"
+```
+
 ## 0.2.0 - 2026-04-29
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
