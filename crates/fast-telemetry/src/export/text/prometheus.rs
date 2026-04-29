@@ -294,14 +294,16 @@ impl PrometheusExport for Distribution {
         output.push_str(name);
         output.push_str(" summary\n");
 
+        let (sum, count) = self.sum_and_count();
+
         output.push_str(name);
         output.push_str("_sum ");
-        push_display(output, self.sum());
+        push_display(output, sum);
         output.push('\n');
 
         output.push_str(name);
         output.push_str("_count ");
-        push_display(output, self.count());
+        push_display(output, count);
         output.push('\n');
     }
 }
