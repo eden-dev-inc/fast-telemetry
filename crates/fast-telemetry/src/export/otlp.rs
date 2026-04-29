@@ -109,16 +109,6 @@ fn double_data_point(
     }
 }
 
-/// Convert cumulative bucket counts (as returned by `buckets_cumulative()`) to
-/// OTLP's per-bucket counts and explicit bounds.
-///
-/// OTLP expects non-cumulative bucket counts and omits the +Inf bound from
-/// `explicit_bounds` (it's implied by the final bucket).
-#[cfg(test)]
-fn cumulative_to_otlp_buckets(cumulative: &[(u64, u64)]) -> (Vec<u64>, Vec<f64>) {
-    cumulative_to_otlp_buckets_iter(cumulative.iter().copied())
-}
-
 fn cumulative_to_otlp_buckets_iter(
     cumulative: impl IntoIterator<Item = (u64, u64)>,
 ) -> (Vec<u64>, Vec<f64>) {
@@ -1380,7 +1370,7 @@ mod tests {
         // Input: cumulative [(10, 1), (100, 3), (u64::MAX, 5)]
         // Expected per-bucket: [1, 2, 2], bounds: [10.0, 100.0]
         let cumulative = vec![(10, 1), (100, 3), (u64::MAX, 5)];
-        let (counts, bounds) = cumulative_to_otlp_buckets(&cumulative);
+        let (counts, bounds) = cumulative_to_otlp_buckets_iter(cumulative);
         assert_eq!(counts, vec![1, 2, 2]);
         assert_eq!(bounds, vec![10.0, 100.0]);
     }
