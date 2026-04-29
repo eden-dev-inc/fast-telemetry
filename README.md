@@ -98,7 +98,7 @@ dynamic metric types. Without it, these APIs are not available.
 
 ```toml
 [dependencies]
-fast-telemetry = "0.1"
+fast-telemetry = "0.2"
 ```
 
 ### Define Metrics
@@ -360,7 +360,7 @@ batching, compression, backoff, and graceful shutdown.
 
 ```toml
 [dependencies]
-fast-telemetry-export = "0.1"
+fast-telemetry-export = "0.2"
 ```
 
 ### DogStatsD

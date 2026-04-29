@@ -1,5 +1,26 @@
 # Release Notes
 
+## 0.2.0 - 2026-04-29
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
+
+Highlights:
+
+- ClickHouse export: added optional first-party ClickHouse row export support in `fast-telemetry` behind the `clickhouse` feature, including `ClickHouseExport`, `ClickHouseMetricBatch`, and OTel-standard row structs.
+- ClickHouse export crate support: `fast-telemetry-export` now ships a native TCP ClickHouse exporter with three paths: custom `klickhouse::Row` schemas, OTel-standard OTLP-to-row translation, and first-party `export_clickhouse()` row batches via `otel_standard::run_first_party`.
+- derive macros: `#[derive(ExportMetrics)]` now accepts `#[clickhouse]` and generates `export_clickhouse(...)` methods when the runtime `clickhouse` feature is enabled.
+- export performance: histogram and sampled-timer export paths avoid several intermediate allocations. `Histogram::buckets_cumulative_iter()` is a new compatible public API for allocation-free bucket export.
+- labeled histograms: `LabeledHistogram::iter()` now yields `(label, &Histogram)`, allowing exporters that only need sum/count to skip building cumulative bucket vectors.
+- tooling and docs: added ClickHouse integration tests, a Docker-based ClickHouse smoke/benchmark harness, Criterion export-format comparisons, and updated ClickHouse documentation.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.2"
+fast-telemetry-export = "0.2"
+```
+
 ## 0.1.2 - 2026-04-28
 
 Republished crates: `fast-telemetry`. (`fast-telemetry-macros` is unchanged since 0.1.1 and stays at that version. `fast-telemetry-export` is unchanged since 0.1.0.)
