@@ -124,6 +124,7 @@ fn metric_kind(ty: &Type) -> Option<MetricKind> {
 /// - `export_dogstatsd_delta(...)` — DogStatsD with per-sink delta temporality
 /// - `export_dogstatsd_with_temporality(...)` — runtime-selectable cumulative or delta export
 /// - `export_otlp(...)` — OTLP protobuf (only when `#[otlp]` attribute is present)
+/// - `export_clickhouse(...)` — ClickHouse rows (only when `#[clickhouse]` attribute is present)
 ///
 /// Supports unlabeled metrics (`Counter`, `Gauge`, `GaugeF64`, `Histogram`,
 /// `Distribution`, `SampledTimer`), compile-time labeled metrics
@@ -166,7 +167,7 @@ fn metric_kind(ty: &Type) -> Option<MetricKind> {
 /// let mut statsd_output = String::new();
 /// metrics.export_dogstatsd(&mut statsd_output, &[("env", "prod")]);
 /// ```
-#[proc_macro_derive(ExportMetrics, attributes(metric_prefix, help, otlp))]
+#[proc_macro_derive(ExportMetrics, attributes(metric_prefix, help, otlp, clickhouse))]
 pub fn derive_export_metrics(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match derive_export_metrics_impl(input) {
@@ -185,6 +186,10 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
 
     // Check for #[otlp] attribute to enable OTLP export generation
     let enable_otlp = input.attrs.iter().any(|attr| attr.path().is_ident("otlp"));
+    let enable_clickhouse = input
+        .attrs
+        .iter()
+        .any(|attr| attr.path().is_ident("clickhouse"));
 
     // Get struct fields
     let fields = match &input.data {
@@ -209,6 +214,7 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
     let mut dogstatsd_exports = Vec::new();
     let mut delta_exports = Vec::new();
     let mut otlp_exports = Vec::new();
+    let mut clickhouse_exports = Vec::new();
     let mut state_fields = Vec::new();
     let mut state_inits = Vec::new();
     let mut state_label_count_exprs = Vec::new();
@@ -250,6 +256,9 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
 
         otlp_exports.push(quote! {
             fast_telemetry::OtlpExport::export_otlp(&self.#field_name, metrics, #prom_metric_name, #help, time_unix_nano);
+        });
+        clickhouse_exports.push(quote! {
+            fast_telemetry::ClickHouseExport::export_clickhouse(&self.#field_name, batch, #prom_metric_name, #help, time_unix_nano);
         });
 
         let metric_kind = metric_kind(&field.ty).ok_or_else(|| {
@@ -931,6 +940,24 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
         quote! {}
     };
 
+    let clickhouse_method = if enable_clickhouse {
+        quote! {
+            /// Export all metrics as ClickHouse OTel-standard rows.
+            ///
+            /// `time_unix_nano` is a shared timestamp for all rows in this export cycle.
+            /// Requires the `clickhouse` feature on the `fast-telemetry` dependency.
+            pub fn export_clickhouse(
+                &self,
+                batch: &mut fast_telemetry::clickhouse::ClickHouseMetricBatch,
+                time_unix_nano: u64,
+            ) {
+                #(#clickhouse_exports)*
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let expanded = quote! {
         /// State for tracking DogStatsD delta values.
         #vis struct #state_name {
@@ -1025,6 +1052,7 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
             }
 
             #otlp_method
+            #clickhouse_method
         }
     };
 

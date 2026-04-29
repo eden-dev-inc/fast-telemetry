@@ -8,7 +8,7 @@ High-performance, cache-friendly telemetry for Rust.
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | [`fast-telemetry`](crates/fast-telemetry)               | Sharded counters, gauges, histograms, distributions, spans, and format serialization (Prometheus, DogStatsD, OTLP) |
 | [`fast-telemetry-macros`](crates/fast-telemetry-macros) | Derive macros: `ExportMetrics` and `LabelEnum`                                                                     |
-| [`fast-telemetry-export`](crates/fast-telemetry-export) | I/O adapters: DogStatsD over UDP, OTLP over HTTP/protobuf, span export, stale-series sweeping                      |
+| [`fast-telemetry-export`](crates/fast-telemetry-export) | I/O adapters: DogStatsD over UDP, OTLP over HTTP/protobuf, ClickHouse over native TCP, span export, stale-series sweeping |
 
 ## Why
 
@@ -84,11 +84,12 @@ For detailed benchmark results and methodology, see
 
 ## Feature Flags
 
-| Feature    | Default | Description                                      |
-| ---------- | ------- | ------------------------------------------------ |
-| `macros`   | ✓       | `ExportMetrics` and `LabelEnum` derive macros    |
-| `otlp`     |         | OTLP protobuf export support                     |
-| `eviction` |         | Enable stale-series eviction for dynamic metrics |
+| Feature      | Default | Description                                      |
+| ------------ | ------- | ------------------------------------------------ |
+| `macros`     | ✓       | `ExportMetrics` and `LabelEnum` derive macros    |
+| `otlp`       |         | OTLP protobuf export support                     |
+| `clickhouse` |         | First-party ClickHouse row export support        |
+| `eviction`   |         | Enable stale-series eviction for dynamic metrics |
 
 The `eviction` feature enables `evict_stale()`, `advance_cycle()`, and `current_cycle()` on
 dynamic metric types. Without it, these APIs are not available.
@@ -429,6 +430,112 @@ let config = SpanExportConfig::new("http://otel-collector:4318")
 spawn(collector, config, cancel);
 ```
 
+### ClickHouse (native TCP)
+
+Behind the `clickhouse` feature flag. Three layers are provided:
+
+**First-party OTel-standard rows** — skips OTLP protobuf construction and writes
+metrics directly into ClickHouse row batches. Enable the `clickhouse` feature on
+`fast-telemetry`, add `#[clickhouse]` to the metrics struct, and use
+`run_first_party`:
+
+```rust
+use std::sync::Arc;
+use std::time::Duration;
+use fast_telemetry::{Counter, ExportMetrics, Gauge};
+use fast_telemetry_export::clickhouse::otel_standard::{OtelStandardConfig, run_first_party};
+use tokio_util::sync::CancellationToken;
+
+#[derive(ExportMetrics)]
+#[metric_prefix = "myapp"]
+#[clickhouse]
+pub struct AppMetrics {
+    pub requests: Counter,
+    pub queue_depth: Gauge,
+}
+
+let cancel = CancellationToken::new();
+let config = OtelStandardConfig::new("clickhouse.internal:9000", "myapp")
+    .with_credentials("metrics_writer", "<password>")
+    .with_database("telemetry")
+    .with_interval(Duration::from_secs(30));
+
+let metrics = Arc::new(my_metrics);
+
+tokio::spawn(run_first_party(config, cancel, move |batch, timestamp| {
+    metrics.export_clickhouse(batch, timestamp);
+}));
+```
+
+**Drop-in OTLP translation** — auto-creates the configured database and four
+metric tables (`otel_metrics_sum`, `otel_metrics_gauge`,
+`otel_metrics_histogram`, `otel_metrics_exponential_histogram`) compatible with
+the [OpenTelemetry Collector ClickHouse exporter] layout, so common metric
+queries and dashboards can use the same column names while reusing an existing
+`export_otlp()` implementation:
+
+```rust
+use std::sync::Arc;
+use std::time::Duration;
+use fast_telemetry_export::clickhouse::otel_standard::{OtelStandardConfig, run};
+use tokio_util::sync::CancellationToken;
+
+let cancel = CancellationToken::new();
+let config = OtelStandardConfig::new("clickhouse.internal:9000", "myapp")
+    .with_credentials("metrics_writer", "<password>")
+    .with_database("telemetry")
+    .with_interval(Duration::from_secs(30));
+
+let metrics = Arc::new(my_metrics);
+
+tokio::spawn(run(config, cancel, move |out| {
+    metrics.export_otlp(out);
+}));
+```
+
+The built-in exporter writes sum, gauge, histogram, and exponential histogram
+metrics. Collector compatibility columns for scope/schema/exemplar data are
+created, but flat `export_otlp()` metrics populate them with defaults; summary
+metrics are ignored.
+
+**Generic primitive** — for custom schemas. Caller supplies a row type
+deriving `klickhouse::Row` and a translator closure that turns each
+`pb::Metric` into zero or more rows. The runtime handles connection,
+ticking, batched native-protocol inserts, and exponential backoff;
+schema and migrations are the caller's problem. Spawn one task per table
+for multi-table layouts.
+
+```rust
+use fast_telemetry::otlp::pb;
+use fast_telemetry_export::clickhouse::{ClickHouseConfig, run};
+use klickhouse::{DateTime64, Tz};
+
+#[derive(klickhouse::Row, Debug)]
+#[allow(non_snake_case)]
+struct MyRow {
+    MetricName: String,
+    TimeUnix: DateTime64<9>,
+    Value: f64,
+}
+
+tokio::spawn(run(
+    ClickHouseConfig::new("clickhouse.internal:9000").with_database("telemetry"),
+    "my_metrics",
+    cancel,
+    move |out| metrics.export_otlp(out),
+    |metric: &pb::Metric| match &metric.data {
+        Some(pb::metric::Data::Sum(s)) => s.data_points.iter().map(|dp| MyRow {
+            MetricName: metric.name.clone(),
+            TimeUnix: DateTime64::<9>(Tz::UTC, dp.time_unix_nano),
+            Value: 0.0,
+        }).collect(),
+        _ => Vec::new(),
+    },
+));
+```
+
+[OpenTelemetry Collector ClickHouse exporter]: https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/clickhouseexporter
+
 ### Stale Series Sweeper
 
 Bounds memory from dynamic labels by evicting inactive series:
@@ -502,11 +609,12 @@ let request = otlp::build_export_request( & resource, "fast-telemetry", metrics)
 
 ### Export Formats
 
-| Format          | Method                                                                                                          | Transport                        |
-| --------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| Prometheus text | `export_prometheus()`                                                                                           | Serve at `/metrics`              |
-| DogStatsD       | `export_dogstatsd()`, `export_dogstatsd_delta()`, or `export_dogstatsd_with_temporality(..., Temporality, ...)` | UDP via `fast-telemetry-export`  |
-| OTLP protobuf   | `export_otlp()` (requires `#[otlp]` on struct)                                                                  | HTTP via `fast-telemetry-export` |
+| Format          | Method                                                                                                          | Transport                                       |
+| --------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Prometheus text | `export_prometheus()`                                                                                           | Serve at `/metrics`                             |
+| DogStatsD       | `export_dogstatsd()`, `export_dogstatsd_delta()`, or `export_dogstatsd_with_temporality(..., Temporality, ...)` | UDP via `fast-telemetry-export`                 |
+| OTLP protobuf   | `export_otlp()` (requires `#[otlp]` on struct)                                                                  | HTTP via `fast-telemetry-export`                |
+| ClickHouse rows | `export_clickhouse()` (requires `#[clickhouse]` on struct) or `ClickHouseExport`; `export_otlp()` fallback also supported | Native TCP via `fast-telemetry-export[clickhouse]` |
 
 ## Shard Count
 

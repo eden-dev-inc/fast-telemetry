@@ -84,21 +84,26 @@ impl Histogram {
     ///
     /// Returns pairs of (upper_bound, cumulative_count). The last entry
     /// has bound `u64::MAX` representing +Inf.
+    ///
+    /// Prefer [`Self::buckets_cumulative_iter`] on the export path; it avoids
+    /// the `Vec` allocation per call.
     pub fn buckets_cumulative(&self) -> Vec<(u64, u64)> {
-        let mut cumulative = 0i64;
-        let mut result = Vec::with_capacity(self.buckets.len());
+        self.buckets_cumulative_iter().collect()
+    }
 
-        for (i, counter) in self.buckets.iter().enumerate() {
+    /// Iterator form of [`Self::buckets_cumulative`] that skips the `Vec`
+    /// allocation. Used by the Prometheus and OTLP export paths.
+    pub fn buckets_cumulative_iter(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
+        let mut cumulative = 0i64;
+        self.buckets.iter().enumerate().map(move |(i, counter)| {
             cumulative += counter.sum() as i64;
             let bound = if i < self.bounds.len() {
                 self.bounds[i]
             } else {
-                u64::MAX // +Inf
+                u64::MAX
             };
-            result.push((bound, cumulative as u64));
-        }
-
-        result
+            (bound, cumulative as u64)
+        })
     }
 
     pub fn sum(&self) -> u64 {

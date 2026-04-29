@@ -42,6 +42,10 @@ flate2 = "1"
 prost = "0.13"                                                            # pinned by opentelemetry-proto 0.30
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
+# --- ClickHouse: fast-telemetry-export clickhouse feature ---
+indexmap = "2"
+klickhouse = { version = "0.14", default-features = false, features = ["derive", "compression"] }
+
 # --- Dev/test/bench only ---
 criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
 metrics = "0.24.3"
@@ -50,6 +54,8 @@ opentelemetry = "0.31"
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
 shuttle = "0.8"
 statsd-parser = "0.3"
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["clickhouse"] }
 
 [profile.release]
 strip = true

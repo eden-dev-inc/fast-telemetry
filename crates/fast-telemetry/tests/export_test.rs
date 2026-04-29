@@ -70,3 +70,36 @@ fn test_export_histogram() {
     assert!(output.contains("test_latency_bucket{le=\"+Inf\"} 3"));
     assert!(output.contains("test_latency_count 3"));
 }
+
+#[cfg(feature = "clickhouse")]
+#[derive(ExportMetrics)]
+#[clickhouse]
+#[metric_prefix = "test"]
+struct ClickHouseMetrics {
+    #[help = "Total requests"]
+    requests: Counter,
+
+    #[help = "Current connections"]
+    connections: Gauge,
+}
+
+#[cfg(feature = "clickhouse")]
+#[test]
+fn test_export_clickhouse() {
+    let metrics = ClickHouseMetrics {
+        requests: Counter::new(4),
+        connections: Gauge::new(),
+    };
+    metrics.requests.add(7);
+    metrics.connections.set(3);
+
+    let mut batch = fast_telemetry::clickhouse::ClickHouseMetricBatch::new("test");
+    metrics.export_clickhouse(&mut batch, 123);
+
+    assert_eq!(batch.sums.len(), 1);
+    assert_eq!(batch.gauges.len(), 1);
+    assert_eq!(batch.sums[0].MetricName, "test_requests");
+    assert_eq!(batch.sums[0].Value, 7.0);
+    assert_eq!(batch.gauges[0].MetricName, "test_connections");
+    assert_eq!(batch.gauges[0].Value, 3.0);
+}

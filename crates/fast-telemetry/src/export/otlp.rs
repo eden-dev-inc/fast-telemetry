@@ -114,6 +114,7 @@ fn double_data_point(
 ///
 /// OTLP expects non-cumulative bucket counts and omits the +Inf bound from
 /// `explicit_bounds` (it's implied by the final bucket).
+#[cfg(test)]
 fn cumulative_to_otlp_buckets(cumulative: &[(u64, u64)]) -> (Vec<u64>, Vec<f64>) {
     cumulative_to_otlp_buckets_iter(cumulative.iter().copied())
 }
@@ -324,10 +325,10 @@ impl OtlpExport for Histogram {
         description: &str,
         time_unix_nano: u64,
     ) {
-        let cumulative = self.buckets_cumulative();
         let count = self.count();
         let sum = self.sum();
-        let (bucket_counts, explicit_bounds) = cumulative_to_otlp_buckets(&cumulative);
+        let (bucket_counts, explicit_bounds) =
+            cumulative_to_otlp_buckets_iter(self.buckets_cumulative_iter());
 
         metrics.push(pb::Metric {
             name: name.to_string(),
@@ -507,15 +508,16 @@ impl<L: LabelEnum> OtlpExport for LabeledHistogram<L> {
     ) {
         let mut data_points = Vec::new();
 
-        for (label, buckets, sum, count) in self.iter() {
+        for (label, histogram) in self.iter() {
             let attrs = vec![label_to_attribute(label)];
-            let (bucket_counts, explicit_bounds) = cumulative_to_otlp_buckets(&buckets);
+            let (bucket_counts, explicit_bounds) =
+                cumulative_to_otlp_buckets_iter(histogram.buckets_cumulative_iter());
 
             data_points.push(pb::HistogramDataPoint {
                 attributes: attrs,
                 time_unix_nano,
-                count,
-                sum: Some(sum as f64),
+                count: histogram.count(),
+                sum: Some(histogram.sum() as f64),
                 bucket_counts,
                 explicit_bounds,
                 ..Default::default()
@@ -558,7 +560,7 @@ impl<L: LabelEnum> OtlpExport for LabeledSampledTimer<L> {
             ));
 
             let (bucket_counts, explicit_bounds) =
-                cumulative_to_otlp_buckets(&histogram.buckets_cumulative());
+                cumulative_to_otlp_buckets_iter(histogram.buckets_cumulative_iter());
             sample_points.push(pb::HistogramDataPoint {
                 attributes: vec![label_to_attribute(label)],
                 time_unix_nano,
