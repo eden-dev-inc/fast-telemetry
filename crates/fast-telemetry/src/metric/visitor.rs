@@ -1,5 +1,7 @@
 //! Structured visitor API for custom metric exporters.
 
+use crate::{Distribution, DynamicHistogramSeriesView, Histogram, exp_buckets::ExpBucketsSnapshot};
+
 /// Coarse semantic kind for a metric observation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MetricKind {
@@ -171,5 +173,97 @@ pub trait MetricVisitor {
 
     fn dynamic_overflow(&mut self, meta: MetricMeta<'_>, overflow_count: u64) {
         let _ = (meta, overflow_count);
+    }
+}
+
+impl HistogramSnapshot for Histogram {
+    fn count(&self) -> u64 {
+        self.count()
+    }
+
+    fn sum(&self) -> u64 {
+        self.sum()
+    }
+
+    fn visit_buckets(&self, visitor: &mut dyn FnMut(u64, u64)) {
+        for (upper_bound, cumulative_count) in self.buckets_cumulative_iter() {
+            visitor(upper_bound, cumulative_count);
+        }
+    }
+}
+
+impl HistogramSnapshot for DynamicHistogramSeriesView<'_> {
+    fn count(&self) -> u64 {
+        self.count()
+    }
+
+    fn sum(&self) -> u64 {
+        self.sum()
+    }
+
+    fn visit_buckets(&self, visitor: &mut dyn FnMut(u64, u64)) {
+        for (upper_bound, cumulative_count) in self.buckets_cumulative_iter() {
+            visitor(upper_bound, cumulative_count);
+        }
+    }
+}
+
+impl DistributionSnapshot for Distribution {
+    fn count(&self) -> u64 {
+        self.count()
+    }
+
+    fn sum(&self) -> u64 {
+        self.sum()
+    }
+
+    fn min(&self) -> Option<u64> {
+        self.min()
+    }
+
+    fn max(&self) -> Option<u64> {
+        self.max()
+    }
+
+    fn zero_count(&self) -> u64 {
+        self.buckets_snapshot().zero_count
+    }
+
+    fn visit_positive_buckets(&self, visitor: &mut dyn FnMut(i32, u64)) {
+        visit_positive_buckets(&self.buckets_snapshot(), visitor);
+    }
+}
+
+impl DistributionSnapshot for ExpBucketsSnapshot {
+    fn count(&self) -> u64 {
+        self.count
+    }
+
+    fn sum(&self) -> u64 {
+        self.sum
+    }
+
+    fn min(&self) -> Option<u64> {
+        self.min()
+    }
+
+    fn max(&self) -> Option<u64> {
+        self.max()
+    }
+
+    fn zero_count(&self) -> u64 {
+        self.zero_count
+    }
+
+    fn visit_positive_buckets(&self, visitor: &mut dyn FnMut(i32, u64)) {
+        visit_positive_buckets(self, visitor);
+    }
+}
+
+fn visit_positive_buckets(snapshot: &ExpBucketsSnapshot, visitor: &mut dyn FnMut(i32, u64)) {
+    for (index, count) in snapshot.positive.iter().copied().enumerate() {
+        if count > 0 {
+            visitor(index as i32, count);
+        }
     }
 }
