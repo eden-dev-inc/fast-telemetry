@@ -267,3 +267,78 @@ fn visit_positive_buckets(snapshot: &ExpBucketsSnapshot, visitor: &mut dyn FnMut
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{MetricLabel, MetricLabels};
+
+    #[test]
+    fn metric_labels_none_iterates_empty() {
+        let labels: Vec<_> = MetricLabels::none().iter().collect();
+        assert!(labels.is_empty());
+    }
+
+    #[test]
+    fn metric_labels_one_iterates_once() {
+        let label = MetricLabel {
+            name: "method",
+            value: "get",
+        };
+
+        let labels: Vec<_> = MetricLabels::one(label).iter().collect();
+        assert_eq!(labels, vec![label]);
+    }
+
+    #[test]
+    fn metric_labels_slice_iterates_borrowed_labels() {
+        let source = [
+            MetricLabel {
+                name: "method",
+                value: "get",
+            },
+            MetricLabel {
+                name: "status",
+                value: "ok",
+            },
+        ];
+
+        let labels: Vec<_> = MetricLabels::slice(&source).iter().collect();
+        assert_eq!(labels, source);
+    }
+
+    #[test]
+    fn metric_labels_dynamic_pairs_iterates_borrowed_strings() {
+        let source = vec![
+            ("endpoint_uuid".to_string(), "ep-1".to_string()),
+            ("org_id".to_string(), "org-a".to_string()),
+        ];
+
+        let labels: Vec<_> = MetricLabels::dynamic_pairs(&source).iter().collect();
+        assert_eq!(
+            labels,
+            vec![
+                MetricLabel {
+                    name: "endpoint_uuid",
+                    value: "ep-1",
+                },
+                MetricLabel {
+                    name: "org_id",
+                    value: "org-a",
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn metric_labels_iterator_reports_exact_len() {
+        let source = vec![
+            ("a".to_string(), "1".to_string()),
+            ("b".to_string(), "2".to_string()),
+        ];
+
+        let mut labels = MetricLabels::dynamic_pairs(&source).iter();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels.next().map(|label| label.name), Some("a"));
+        assert_eq!(labels.len(), 1);
+    }
+}
