@@ -102,12 +102,12 @@ impl<'a> Iterator for MetricLabelsIter<'a> {
             MetricLabelsIterInner::None => None,
             MetricLabelsIterInner::One(label) => label.take(),
             MetricLabelsIterInner::Slice(labels) => labels.next().copied(),
-            MetricLabelsIterInner::DynamicPairs(labels) => labels.next().map(|(name, value)| {
-                MetricLabel {
+            MetricLabelsIterInner::DynamicPairs(labels) => {
+                labels.next().map(|(name, value)| MetricLabel {
                     name: name.as_str(),
                     value: value.as_str(),
-                }
-            }),
+                })
+            }
         }
     }
 

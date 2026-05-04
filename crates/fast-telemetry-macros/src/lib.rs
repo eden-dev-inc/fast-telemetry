@@ -116,6 +116,30 @@ fn metric_kind(ty: &Type) -> Option<MetricKind> {
     }
 }
 
+fn visitor_meta(
+    name: &str,
+    help: &str,
+    kind: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    quote! {
+        fast_telemetry::MetricMeta {
+            name: #name,
+            help: #help,
+            kind: #kind,
+            unit: None,
+        }
+    }
+}
+
+fn visitor_label(label: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    quote! {
+        fast_telemetry::MetricLabel {
+            name: fast_telemetry::LabelEnum::label_name(&#label),
+            value: fast_telemetry::LabelEnum::variant_name(#label),
+        }
+    }
+}
+
 /// Derive macro for exporting metrics in Prometheus, DogStatsD, and OTLP formats.
 ///
 /// Generates methods:
@@ -213,6 +237,7 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
     let mut prometheus_exports = Vec::new();
     let mut dogstatsd_exports = Vec::new();
     let mut delta_exports = Vec::new();
+    let mut visitor_exports = Vec::new();
     let mut otlp_exports = Vec::new();
     let mut clickhouse_exports = Vec::new();
     let mut state_fields = Vec::new();
@@ -384,6 +409,14 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
 
         match metric_kind {
             MetricKind::Counter => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Counter },
+                );
+                visitor_exports.push(quote! {
+                    visitor.counter(#meta, fast_telemetry::MetricLabels::none(), self.#field_name.sum() as i64);
+                });
                 state_label_count_exprs.push(quote! { 0usize });
                 state_fields.push(quote! { #field_name: isize, });
                 state_inits.push(quote! { #field_name: 0, });
@@ -396,6 +429,15 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::Distribution => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Distribution },
+                );
+                visitor_exports.push(quote! {
+                    let __ft_snapshot = self.#field_name.buckets_snapshot();
+                    visitor.distribution(#meta, fast_telemetry::MetricLabels::none(), &__ft_snapshot);
+                });
                 let buckets_state_field = format_ident!("{}_buckets", field_name);
                 state_label_count_exprs.push(quote! { 0usize });
                 state_fields.push(quote! { #buckets_state_field: [u64; 65], });
@@ -408,6 +450,25 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::DynamicCounter => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Counter },
+                );
+                visitor_exports.push(quote! {
+                    let __ft_meta = #meta;
+                    let __ft_overflow = self.#field_name.overflow_count();
+                    if __ft_overflow > 0 {
+                        visitor.dynamic_overflow(__ft_meta, __ft_overflow);
+                    }
+                    self.#field_name.visit_series(|labels, current| {
+                        visitor.counter(
+                            __ft_meta,
+                            fast_telemetry::MetricLabels::dynamic_pairs(labels),
+                            current as i64,
+                        );
+                    });
+                });
                 prom_dynamic_reserve_exprs.push(quote! {
                     self.#field_name.cardinality().saturating_mul(
                         #prom_metric_name.len()
@@ -465,7 +526,26 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::DynamicDistribution => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Distribution },
+                );
                 let buckets_state_field = format_ident!("{}_buckets", field_name);
+                visitor_exports.push(quote! {
+                    let __ft_meta = #meta;
+                    let __ft_overflow = self.#field_name.overflow_count();
+                    if __ft_overflow > 0 {
+                        visitor.dynamic_overflow(__ft_meta, __ft_overflow);
+                    }
+                    self.#field_name.visit_series(|labels, _count, _sum, snapshot| {
+                        visitor.distribution(
+                            __ft_meta,
+                            fast_telemetry::MetricLabels::dynamic_pairs(labels),
+                            &snapshot,
+                        );
+                    });
+                });
                 prom_dynamic_reserve_exprs.push(quote! {
                     self.#field_name.cardinality().saturating_mul(
                         #prom_metric_name.len()
@@ -519,6 +599,25 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::DynamicGauge => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Gauge },
+                );
+                visitor_exports.push(quote! {
+                    let __ft_meta = #meta;
+                    let __ft_overflow = self.#field_name.overflow_count();
+                    if __ft_overflow > 0 {
+                        visitor.dynamic_overflow(__ft_meta, __ft_overflow);
+                    }
+                    self.#field_name.visit_series(|labels, current| {
+                        visitor.gauge_f64(
+                            __ft_meta,
+                            fast_telemetry::MetricLabels::dynamic_pairs(labels),
+                            current,
+                        );
+                    });
+                });
                 prom_dynamic_reserve_exprs.push(quote! {
                     self.#field_name.cardinality().saturating_mul(
                         #prom_metric_name.len()
@@ -558,6 +657,25 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::DynamicGaugeI64 => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Gauge },
+                );
+                visitor_exports.push(quote! {
+                    let __ft_meta = #meta;
+                    let __ft_overflow = self.#field_name.overflow_count();
+                    if __ft_overflow > 0 {
+                        visitor.dynamic_overflow(__ft_meta, __ft_overflow);
+                    }
+                    self.#field_name.visit_series(|labels, current| {
+                        visitor.gauge_i64(
+                            __ft_meta,
+                            fast_telemetry::MetricLabels::dynamic_pairs(labels),
+                            current,
+                        );
+                    });
+                });
                 prom_dynamic_reserve_exprs.push(quote! {
                     self.#field_name.cardinality().saturating_mul(
                         #prom_metric_name.len()
@@ -597,10 +715,29 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::DynamicHistogram => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Histogram },
+                );
                 let count_state_field = format_ident!("{}_count", field_name);
                 let sum_state_field = format_ident!("{}_sum", field_name);
                 let count_metric_name = format!("{}.count", statsd_metric_name);
                 let sum_metric_name = format!("{}.sum", statsd_metric_name);
+                visitor_exports.push(quote! {
+                    let __ft_meta = #meta;
+                    let __ft_overflow = self.#field_name.overflow_count();
+                    if __ft_overflow > 0 {
+                        visitor.dynamic_overflow(__ft_meta, __ft_overflow);
+                    }
+                    self.#field_name.visit_series(|labels, series| {
+                        visitor.histogram(
+                            __ft_meta,
+                            fast_telemetry::MetricLabels::dynamic_pairs(labels),
+                            &series,
+                        );
+                    });
+                });
                 prom_dynamic_reserve_exprs.push(quote! {
                     self.#field_name.cardinality().saturating_mul(
                         #prom_metric_name.len()
@@ -683,12 +820,30 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                     state.#sum_state_field.retain(|k, _| current_keys.contains(k));
                 });
             }
-            MetricKind::Gauge
-            | MetricKind::GaugeF64
-            | MetricKind::MaxGauge
-            | MetricKind::MaxGaugeF64
-            | MetricKind::MinGauge
-            | MetricKind::MinGaugeF64 => {
+            MetricKind::GaugeF64 | MetricKind::MaxGaugeF64 | MetricKind::MinGaugeF64 => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Gauge },
+                );
+                visitor_exports.push(quote! {
+                    visitor.gauge_f64(#meta, fast_telemetry::MetricLabels::none(), self.#field_name.get());
+                });
+                state_label_count_exprs.push(quote! { 0usize });
+                // Gauges are point-in-time, no delta tracking needed (always export current value)
+                delta_exports.push(quote! {
+                    fast_telemetry::DogStatsDExport::export_dogstatsd(&self.#field_name, output, #statsd_metric_name, tags);
+                });
+            }
+            MetricKind::Gauge | MetricKind::MaxGauge | MetricKind::MinGauge => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Gauge },
+                );
+                visitor_exports.push(quote! {
+                    visitor.gauge_i64(#meta, fast_telemetry::MetricLabels::none(), self.#field_name.get());
+                });
                 state_label_count_exprs.push(quote! { 0usize });
                 // Gauges are point-in-time, no delta tracking needed (always export current value)
                 delta_exports.push(quote! {
@@ -696,6 +851,14 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::Histogram => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Histogram },
+                );
+                visitor_exports.push(quote! {
+                    visitor.histogram(#meta, fast_telemetry::MetricLabels::none(), &self.#field_name);
+                });
                 let count_state_field = format_ident!("{}_count", field_name);
                 let sum_state_field = format_ident!("{}_sum", field_name);
                 let count_metric_name = format!("{}.count", statsd_metric_name);
@@ -725,12 +888,30 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::SampledTimer => {
+                let calls_metric_name = format!("{}_calls", prom_metric_name);
+                let samples_metric_name = format!("{}_samples", prom_metric_name);
+                let calls_help = format!("{} total calls", help);
+                let samples_help = format!("{} sampled latency in nanoseconds", help);
+                let calls_meta = visitor_meta(
+                    &calls_metric_name,
+                    &calls_help,
+                    quote! { fast_telemetry::MetricKind::Counter },
+                );
+                let samples_meta = visitor_meta(
+                    &samples_metric_name,
+                    &samples_help,
+                    quote! { fast_telemetry::MetricKind::Histogram },
+                );
                 let calls_state_field = format_ident!("{}_calls", field_name);
                 let count_state_field = format_ident!("{}_sample_count", field_name);
                 let sum_state_field = format_ident!("{}_sample_sum", field_name);
                 let calls_metric_name = format!("{}.calls", statsd_metric_name);
                 let count_metric_name = format!("{}.samples.count", statsd_metric_name);
                 let sum_metric_name = format!("{}.samples.sum", statsd_metric_name);
+                visitor_exports.push(quote! {
+                    visitor.counter(#calls_meta, fast_telemetry::MetricLabels::none(), self.#field_name.calls() as i64);
+                    visitor.histogram(#samples_meta, fast_telemetry::MetricLabels::none(), self.#field_name.histogram());
+                });
                 state_label_count_exprs.push(quote! { 0usize });
                 state_fields.push(quote! { #calls_state_field: u64, });
                 state_fields.push(quote! { #count_state_field: u64, });
@@ -766,6 +947,22 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::LabeledCounter(label_ty) => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Counter },
+                );
+                let label = visitor_label(quote! { label });
+                visitor_exports.push(quote! {
+                    let __ft_meta = #meta;
+                    for (label, value) in self.#field_name.iter() {
+                        visitor.counter(
+                            __ft_meta,
+                            fast_telemetry::MetricLabels::one(#label),
+                            value as i64,
+                        );
+                    }
+                });
                 state_label_count_exprs.push(quote! { 0usize });
                 state_fields.push(quote! { #field_name: Vec<isize>, });
                 state_inits.push(quote! {
@@ -790,16 +987,48 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::LabeledGauge => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Gauge },
+                );
+                let label = visitor_label(quote! { label });
+                visitor_exports.push(quote! {
+                    let __ft_meta = #meta;
+                    for (label, value) in self.#field_name.iter() {
+                        visitor.gauge_i64(
+                            __ft_meta,
+                            fast_telemetry::MetricLabels::one(#label),
+                            value,
+                        );
+                    }
+                });
                 state_label_count_exprs.push(quote! { 0usize });
                 delta_exports.push(quote! {
                     fast_telemetry::DogStatsDExport::export_dogstatsd(&self.#field_name, output, #statsd_metric_name, tags);
                 });
             }
             MetricKind::LabeledHistogram(label_ty) => {
+                let meta = visitor_meta(
+                    &prom_metric_name,
+                    &help,
+                    quote! { fast_telemetry::MetricKind::Histogram },
+                );
                 let count_state_field = format_ident!("{}_count", field_name);
                 let sum_state_field = format_ident!("{}_sum", field_name);
                 let count_metric_name = format!("{}.count", statsd_metric_name);
                 let sum_metric_name = format!("{}.sum", statsd_metric_name);
+                let label = visitor_label(quote! { label });
+                visitor_exports.push(quote! {
+                    let __ft_meta = #meta;
+                    for (label, histogram) in self.#field_name.iter() {
+                        visitor.histogram(
+                            __ft_meta,
+                            fast_telemetry::MetricLabels::one(#label),
+                            histogram,
+                        );
+                    }
+                });
                 state_label_count_exprs.push(quote! { 0usize });
                 state_fields.push(quote! { #count_state_field: Vec<u64>, });
                 state_fields.push(quote! { #sum_state_field: Vec<u64>, });
@@ -848,12 +1077,36 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
             }
             MetricKind::LabeledSampledTimer(label_ty) => {
+                let calls_prom_metric_name = format!("{}_calls", prom_metric_name);
+                let samples_prom_metric_name = format!("{}_samples", prom_metric_name);
+                let calls_help = format!("{} total calls", help);
+                let samples_help = format!("{} sampled latency in nanoseconds", help);
+                let calls_meta = visitor_meta(
+                    &calls_prom_metric_name,
+                    &calls_help,
+                    quote! { fast_telemetry::MetricKind::Counter },
+                );
+                let samples_meta = visitor_meta(
+                    &samples_prom_metric_name,
+                    &samples_help,
+                    quote! { fast_telemetry::MetricKind::Histogram },
+                );
                 let calls_state_field = format_ident!("{}_calls", field_name);
                 let count_state_field = format_ident!("{}_sample_count", field_name);
                 let sum_state_field = format_ident!("{}_sample_sum", field_name);
                 let calls_metric_name = format!("{}.calls", statsd_metric_name);
                 let count_metric_name = format!("{}.samples.count", statsd_metric_name);
                 let sum_metric_name = format!("{}.samples.sum", statsd_metric_name);
+                let label = visitor_label(quote! { label });
+                visitor_exports.push(quote! {
+                    let __ft_calls_meta = #calls_meta;
+                    let __ft_samples_meta = #samples_meta;
+                    for (label, calls, histogram) in self.#field_name.iter() {
+                        let __ft_labels = fast_telemetry::MetricLabels::one(#label);
+                        visitor.counter(__ft_calls_meta, __ft_labels, calls.sum() as i64);
+                        visitor.histogram(__ft_samples_meta, __ft_labels, histogram);
+                    }
+                });
                 state_label_count_exprs.push(quote! { 0usize });
                 state_fields.push(quote! { #calls_state_field: Vec<u64>, });
                 state_fields.push(quote! { #count_state_field: Vec<u64>, });
@@ -1049,6 +1302,11 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                     fast_telemetry::Temporality::Cumulative => self.export_dogstatsd(output, tags),
                     fast_telemetry::Temporality::Delta => self.export_dogstatsd_delta(output, tags, state),
                 }
+            }
+
+            /// Visit all metrics as structured cumulative observations.
+            pub fn visit_metrics<V: fast_telemetry::MetricVisitor + ?Sized>(&self, visitor: &mut V) {
+                #(#visitor_exports)*
             }
 
             #otlp_method

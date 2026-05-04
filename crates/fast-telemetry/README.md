@@ -6,6 +6,10 @@ Thread-sharded counters, gauges, histograms, distributions, and lightweight
 spans with Prometheus, DogStatsD, OTLP, and optional first-party ClickHouse row
 export.
 
+`#[derive(ExportMetrics)]` also generates `visit_metrics`, a structured
+in-process export path for custom `MetricVisitor` implementations that need
+typed cumulative observations instead of a wire-format string or protobuf.
+
 See the [workspace README](../../README.md) for full documentation, examples,
 and API reference.
 

@@ -228,7 +228,10 @@ impl DynamicGauge {
     ///
     /// Calls `f` with borrowed label pairs and the current value for each series.
     /// Used by exporters to avoid the intermediate `snapshot()` allocation.
-    pub(crate) fn visit_series(&self, mut f: impl FnMut(&[(String, String)], f64)) {
+    /// The callback runs while a shard read lock is held; it must be fast and
+    /// must not call back into this metric.
+    #[doc(hidden)]
+    pub fn visit_series(&self, mut f: impl FnMut(&[(String, String)], f64)) {
         for shard in &self.index_shards {
             let guard = shard.read();
             for (labels, series) in guard.iter() {

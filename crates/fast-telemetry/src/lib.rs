@@ -48,10 +48,10 @@ pub mod __macro_support {
     };
 }
 pub use metric::{
-    Counter, Distribution, DynamicCounter, DynamicCounterSeries, DynamicDistribution,
-    DynamicDistributionSeries, DynamicGauge, DynamicGaugeI64, DynamicGaugeI64Series,
-    DynamicGaugeSeries, DynamicHistogram, DynamicHistogramSeries, DynamicHistogramSeriesView,
-    DistributionSnapshot, DynamicLabelSet, Gauge, GaugeF64, Histogram, HistogramSnapshot,
+    Counter, Distribution, DistributionSnapshot, DynamicCounter, DynamicCounterSeries,
+    DynamicDistribution, DynamicDistributionSeries, DynamicGauge, DynamicGaugeI64,
+    DynamicGaugeI64Series, DynamicGaugeSeries, DynamicHistogram, DynamicHistogramSeries,
+    DynamicHistogramSeriesView, DynamicLabelSet, Gauge, GaugeF64, Histogram, HistogramSnapshot,
     LabelEnum, LabeledCounter, LabeledGauge, LabeledHistogram, LabeledSampledTimer, MaxGauge,
     MaxGaugeF64, MetricKind, MetricLabel, MetricLabels, MetricLabelsIter, MetricMeta,
     MetricVisitor, MinGauge, MinGaugeF64, SampledTimer, SampledTimerGuard,

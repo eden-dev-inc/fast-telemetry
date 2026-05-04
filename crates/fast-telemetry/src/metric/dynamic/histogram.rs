@@ -405,6 +405,8 @@ impl DynamicHistogram {
     ///
     /// Calls `f` with borrowed label pairs and a borrowed series view.
     /// Used by exporters/macros to avoid `snapshot()` and bucket vec allocations.
+    /// The callback runs while a shard read lock is held; it must be fast and
+    /// must not call back into this metric.
     #[doc(hidden)]
     pub fn visit_series<F>(&self, mut f: F)
     where

@@ -60,8 +60,8 @@ enum ErrorType {
 
 ### `#[derive(ExportMetrics)]`
 
-Auto-generates Prometheus, DogStatsD, and optional OTLP export methods for
-metric structs.
+Auto-generates structured visitor traversal plus Prometheus, DogStatsD, and
+optional OTLP export methods for metric structs.
 
 ```rust
 use fast_telemetry::{Counter, Gauge, Histogram, ExportMetrics};
@@ -82,6 +82,9 @@ struct ApiMetrics {
 let metrics = ApiMetrics { /* ... */ };
 let mut output = String::new();
 metrics.export_prometheus(&mut output);
+
+let mut visitor = MyMetricVisitor::default();
+metrics.visit_metrics(&mut visitor);
 
 // Output:
 // # HELP api_requests_total Total requests processed
@@ -110,10 +113,17 @@ Generated methods:
 - `export_dogstatsd(&self, output: &mut String, tags: &[(&str, &str)])`
 - `export_dogstatsd_delta(&self, output: &mut String, tags: &[(&str, &str)], state: &mut ...State)`
 - `export_dogstatsd_with_temporality(&self, output: &mut String, tags: &[(&str, &str)], temporality: fast_telemetry::Temporality, state: &mut ...State)`
+- `visit_metrics<V: fast_telemetry::MetricVisitor + ?Sized>(&self, visitor: &mut V)`
 - `export_otlp(&self, output: &mut Vec<fast_telemetry::otlp::pb::Metric>)` when `#[otlp]` is present
 
 The delta-capable methods use a generated state type named
 `<YourStructName>DogStatsDState`.
+
+`visit_metrics` emits cumulative typed observations with Prometheus-style metric
+names, `MetricMeta`, and borrowed `MetricLabels`. Dynamic labels are borrowed in
+canonical order. Visitor callbacks should be fast and non-reentrant because
+dynamic metric traversal may call them while holding an internal series read
+lock.
 
 #### Supported Field Types
 
