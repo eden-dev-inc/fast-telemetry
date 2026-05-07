@@ -1,5 +1,30 @@
 # Release Notes
 
+## 0.3.0 - 2026-05-07
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
+
+Why this is a 0.3.0 bump:
+
+- this release adds a new public visitor/exporter API surface in `fast-telemetry` and new generated methods from `#[derive(ExportMetrics)]` in `fast-telemetry-macros`.
+- because these crates are still pre-1.0, new public API should advance the minor version so downstream users have a clear compatibility boundary.
+- all workspace crates are aligned at `0.3.0` to keep the runtime, derive macros, and exporter adapters on the same API contract and avoid dependency skew.
+
+Highlights:
+
+- generic exporter API: added `MetricVisitor`, `MetricMeta`, `MetricKind`, `MetricLabels`, `HistogramSnapshot`, and `DistributionSnapshot` so custom exporters can consume metrics without parsing Prometheus or DogStatsD text output.
+- derive macros: `#[derive(ExportMetrics)]` now generates `visit_metrics(...)`, covering scalar metrics, labeled metrics, histograms, distributions, sampled timers, dynamic metrics, and nested metric structs.
+- dynamic metrics: visitor traversal exposes canonical borrowed labels and emits overflow notifications for evicted or dropped dynamic series.
+- documentation and tests: added visitor API examples and coverage for the generated visitor branches.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.3"
+fast-telemetry-export = "0.3"
+```
+
 ## 0.2.1 - 2026-04-29
 
 Published crates: `fast-telemetry`. (`fast-telemetry-macros` and `fast-telemetry-export` are unchanged since 0.2.0.)
