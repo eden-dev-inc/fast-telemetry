@@ -271,6 +271,8 @@ impl DynamicCounter {
     ///
     /// Calls `f` with borrowed label pairs and the current sum for each series.
     /// Used by exporters/macros to avoid the intermediate `snapshot()` allocation.
+    /// The callback runs while a shard read lock is held; it must be fast and
+    /// must not call back into this metric.
     #[doc(hidden)]
     pub fn visit_series(&self, mut f: impl FnMut(&[(String, String)], isize)) {
         for shard in &self.index_shards {

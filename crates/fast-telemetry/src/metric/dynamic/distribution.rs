@@ -291,6 +291,8 @@ impl DynamicDistribution {
     ///
     /// Calls `f` with borrowed label pairs, count, sum, and bucket snapshot
     /// for each series. Used by exporters/macros to avoid `snapshot()` cloning.
+    /// The callback runs while a shard read lock is held; it must be fast and
+    /// must not call back into this metric.
     #[doc(hidden)]
     pub fn visit_series(
         &self,
