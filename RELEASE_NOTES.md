@@ -1,5 +1,30 @@
 # Release Notes
 
+## 0.4.0 - 2026-05-16
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
+
+Why this is a 0.4.0 bump:
+
+- this release adds a new optional `monoio` exporter feature and new public exporter entry points in `fast-telemetry-export`.
+- because these crates are still pre-1.0, new public API should advance the minor version so downstream users have a clear compatibility boundary.
+- all workspace crates are aligned at `0.4.0` to keep the runtime, derive macros, and exporter adapters on the same API contract and avoid dependency skew.
+
+Highlights:
+
+- monoio export support: added `dogstatsd::run_monoio(...)`, `otlp::run_monoio(...)`, `sweeper::run_monoio(...)`, and `spans::run_local_flusher_monoio(...)` behind the optional `monoio` feature.
+- OTLP monoio transport: `otlp::run_monoio(...)` sends plaintext `http://` OTLP HTTP/protobuf over monoio TCP for monoio-native services. Keep using the default Tokio exporter for `https://` endpoints.
+- span flushing: added a per-worker monoio flusher helper so low-volume spans buffered in thread-local collectors are published for the exporter to drain.
+- benchmark validation: compared the branch against `main` with Criterion and the quick telemetry harness; no serious hot-path regressions were observed.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.4"
+fast-telemetry-export = "0.4"
+```
+
 ## 0.3.0 - 2026-05-07
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.

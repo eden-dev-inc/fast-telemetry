@@ -45,7 +45,7 @@ columns with defaults. Summary metrics are ignored.
 Enable the `monoio` feature to run exporter loops on a monoio runtime:
 
 ```toml
-fast-telemetry-export = { version = "0.3", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+fast-telemetry-export = { version = "0.4", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
 ```
 
 The monoio entry points mirror the Tokio ones:
