@@ -18,6 +18,7 @@ This crate provides:
 | `dogstatsd`  | ✓       | DogStatsD UDP exporter                                                               |
 | `otlp`       | ✓       | OTLP HTTP/protobuf metrics + span exporters                                          |
 | `clickhouse` |         | Native-TCP ClickHouse exporter — first-party rows, generic primitive, and OTel schema |
+| `monoio`     |         | Monoio-native DogStatsD, OTLP HTTP/protobuf, sweeper, and span-flush helper          |
 
 The ClickHouse exporter ships two layers:
 
@@ -38,6 +39,28 @@ The OTel-standard exporter currently writes sum, gauge, histogram, and
 exponential histogram metrics. It creates the Collector's compatibility columns
 for scope/schema/exemplar data, but flat `export_otlp()` metrics populate those
 columns with defaults. Summary metrics are ignored.
+
+## Monoio
+
+Enable the `monoio` feature to run exporter loops on a monoio runtime:
+
+```toml
+fast-telemetry-export = { version = "0.4", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+```
+
+The monoio entry points mirror the Tokio ones:
+
+- `dogstatsd::run_monoio(...)`
+- `otlp::run_monoio(...)`
+- `sweeper::run_monoio(...)`
+- `spans::run_local_flusher_monoio(...)`
+
+`otlp::run_monoio(...)` sends OTLP HTTP/protobuf over monoio TCP and currently
+supports plaintext `http://` collector endpoints. Keep using the default Tokio
+exporter for `https://` endpoints. Monoio timer APIs require a runtime with
+timers enabled, and span-heavy applications should run one local flusher task on
+each monoio worker that records spans so low-volume thread-local span buffers
+are published for the exporter to drain.
 
 Integration tests covering both layers run against a real ClickHouse via
 `testcontainers`:

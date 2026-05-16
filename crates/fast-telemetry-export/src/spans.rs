@@ -164,6 +164,41 @@ pub fn spawn(
         .ok()
 }
 
+/// Periodically flush this monoio worker's thread-local span buffer.
+///
+/// [`SpanCollector::drain_into`] can only drain spans that have already moved
+/// from a worker's thread-local buffer into the shared outbox. On long-lived
+/// monoio workers, low-volume spans may sit below the collector's automatic
+/// flush threshold for a long time, so run one of these tasks on each monoio
+/// worker that records spans.
+///
+/// The actual OTLP span exporter can remain [`spawn`], which runs on its own
+/// private Tokio runtime and drains the shared outboxes.
+#[cfg(feature = "monoio")]
+pub async fn run_local_flusher_monoio(
+    collector: Arc<SpanCollector>,
+    interval: Duration,
+    cancel: CancellationToken,
+) {
+    use monoio::time::MissedTickBehavior;
+
+    let mut interval = monoio::time::interval(interval);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    interval.tick().await;
+
+    loop {
+        monoio::select! {
+            _ = interval.tick() => {
+                collector.flush_local();
+            }
+            _ = cancel.cancelled() => {
+                collector.flush_local();
+                return;
+            }
+        }
+    }
+}
+
 /// Run the OTLP span export loop.
 ///
 /// Drains completed spans from the collector in batches and sends them to

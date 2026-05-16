@@ -13,13 +13,13 @@ High-performance, cache-friendly telemetry for Rust.
 ## Why
 
 fast-telemetry grew out of [Eden](https://eden.dev)'s observability stack. Eden was a
-heavy user of the OpenTelemetry ecosystem — we relied on the `opentelemetry`
+heavy user of the OpenTelemetry ecosystem. At Eden, we relied on the `opentelemetry`
 crate and its SDK for metrics across our services. That worked fine until we
 started benchmarking our high-performance Redis proxy under realistic production
 load.
 
 The proxy handles millions of operations per second across many cores, and we
-care about per-request, per-endpoint, and per-organization telemetry -- a lot of
+care about telemetry per-request, per-endpoint, per-organization, and used lot of
 counters, which led to a lot of contention. Under benchmark loads, the metrics layer
 itself became a clear bottleneck.
 
@@ -98,7 +98,7 @@ dynamic metric types. Without it, these APIs are not available.
 
 ```toml
 [dependencies]
-fast-telemetry = "0.2"
+fast-telemetry = "0.4"
 ```
 
 ### Define Metrics
@@ -370,7 +370,7 @@ batching, compression, backoff, and graceful shutdown.
 
 ```toml
 [dependencies]
-fast-telemetry-export = "0.2"
+fast-telemetry-export = "0.4"
 ```
 
 ### DogStatsD
@@ -568,6 +568,22 @@ tokio::spawn(run(SweepConfig::default (), cancel, move | threshold| {
 
 If you wrap your metrics in a helper method, call `advance_cycle()` once per
 sweep and then sum each dynamic metric's `evict_stale(...)` result.
+
+### Monoio Exporters
+
+`fast-telemetry` recording is runtime-agnostic. If your service runs monoio,
+enable the export crate's `monoio` feature for monoio-native loops:
+
+```toml
+fast-telemetry-export = { version = "0.4", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+```
+
+Use `dogstatsd::run_monoio(...)`, `otlp::run_monoio(...)`, and
+`sweeper::run_monoio(...)` inside a monoio runtime with timers enabled.
+`otlp::run_monoio(...)` currently supports plaintext `http://` collector
+endpoints. For spans, run `spans::run_local_flusher_monoio(...)` on each monoio
+worker that records spans so thread-local span buffers are published for the
+exporter to drain.
 
 ## OTLP Protobuf (Manual)
 

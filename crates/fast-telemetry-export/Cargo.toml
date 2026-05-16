@@ -1,6 +1,6 @@
 [package]
 name = "fast-telemetry-export"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors.workspace = true
 homepage.workspace = true
@@ -20,10 +20,12 @@ default = ["dogstatsd", "otlp"]
 dogstatsd = ["dep:memchr"]
 otlp = ["dep:flate2", "dep:prost", "dep:reqwest", "fast-telemetry/otlp"]
 clickhouse = ["dep:klickhouse", "dep:indexmap", "fast-telemetry/otlp", "fast-telemetry/clickhouse"]
+monoio = ["dep:monoio"]
 
 [dependencies]
 log = { workspace = true }
 memchr = { workspace = true, optional = true }
+monoio = { workspace = true, optional = true }
 fast-telemetry = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

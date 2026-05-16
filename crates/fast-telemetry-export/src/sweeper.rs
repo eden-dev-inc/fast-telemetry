@@ -111,3 +111,42 @@ where
         }
     }
 }
+
+/// Run the stale-series sweep loop on a monoio runtime.
+///
+/// This is the monoio-native counterpart to [`run`]. It uses
+/// [`monoio::time::interval`], so the caller must run it inside a monoio
+/// runtime with timers enabled.
+#[cfg(feature = "monoio")]
+pub async fn run_monoio<F>(config: SweepConfig, cancel: CancellationToken, mut sweep_fn: F)
+where
+    F: FnMut(u32) -> usize,
+{
+    use monoio::time::MissedTickBehavior;
+
+    log::info!(
+        "Starting monoio stale-series sweeper, interval={}s, eviction_threshold={}",
+        config.interval.as_secs(),
+        config.eviction_threshold
+    );
+
+    let mut interval = monoio::time::interval(config.interval);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    interval.tick().await;
+
+    loop {
+        monoio::select! {
+            _ = interval.tick() => {}
+            _ = cancel.cancelled() => {
+                log::info!("monoio stale-series sweeper shutting down");
+                return;
+            }
+        }
+
+        let evicted = sweep_fn(config.eviction_threshold);
+
+        if evicted > 0 {
+            log::debug!("Evicted {evicted} stale metric series");
+        }
+    }
+}
