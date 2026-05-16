@@ -18,6 +18,8 @@
 //! - The stale-series sweeper expects the caller to invoke
 //!   `fast_telemetry::advance_cycle()` once per sweep and then call each dynamic
 //!   metric's `evict_stale(...)` method.
+//! - The `monoio` feature adds monoio-native DogStatsD, OTLP HTTP/protobuf, and
+//!   stale-series sweep loops, plus a per-worker span flusher.
 //!
 //! # Features
 //!
@@ -25,6 +27,7 @@
 //! - `otlp` (default) — OTLP HTTP/protobuf metrics and span exporters
 //! - `clickhouse` — ClickHouse native-protocol metrics exporter, including
 //!   first-party rows and OTel-standard table support (via [`klickhouse`])
+//! - `monoio` — monoio-native exporter loops for monoio applications
 
 #[cfg(feature = "clickhouse")]
 pub mod clickhouse;

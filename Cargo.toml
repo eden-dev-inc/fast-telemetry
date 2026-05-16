@@ -34,6 +34,7 @@ syn = { version = "2", features = ["extra-traits", "full", "parsing"] }
 # --- Export: fast-telemetry-export runtime dependencies ---
 log = "0.4"
 memchr = "2"                                                              # dogstatsd feature
+monoio = "0.2.4"
 tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time", "macros"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 
