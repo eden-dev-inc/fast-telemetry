@@ -81,6 +81,7 @@ impl DogStatsDConfig {
 ///
 /// `MyMetricsExportState` is the derive-generated state type for delta
 /// DogStatsD export. Keep one state instance per export sink.
+#[cfg(feature = "tokio-runtime")]
 pub async fn run<F>(
     config: DogStatsDConfig,
     cancel: tokio_util::sync::CancellationToken,
@@ -356,6 +357,160 @@ pub async fn run_monoio<F>(
     }
 }
 
+/// Run the DogStatsD export loop on a compio runtime.
+///
+/// This is the compio-native counterpart to `run`. It uses
+/// [`compio::net::UdpSocket`] and [`compio::time`], so the caller must run it
+/// inside a compio runtime. `cancel` may be any future that completes when the
+/// exporter should shut down.
+#[cfg(feature = "compio")]
+pub async fn run_compio<F>(
+    config: DogStatsDConfig,
+    cancel: impl std::future::Future<Output = ()>,
+    mut export_fn: F,
+) where
+    F: FnMut(&mut String),
+{
+    use std::net::{SocketAddr, ToSocketAddrs};
+
+    use compio::net::UdpSocket;
+    use futures_util::{FutureExt as _, select};
+
+    log::info!(
+        "Starting compio DogStatsD exporter, endpoint={}",
+        config.endpoint
+    );
+
+    let endpoint = match config.endpoint.to_socket_addrs() {
+        Ok(mut addrs) => match addrs.next() {
+            Some(addr) => addr,
+            None => {
+                log::error!("DogStatsD endpoint resolved to no addresses");
+                return;
+            }
+        },
+        Err(e) => {
+            log::error!(
+                "Failed to resolve DogStatsD endpoint {}: {e}",
+                config.endpoint
+            );
+            return;
+        }
+    };
+
+    let bind_addr: SocketAddr = if endpoint.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    }
+    .parse()
+    .expect("valid UDP bind address");
+
+    let socket = match UdpSocket::bind(bind_addr).await {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("Failed to bind compio UDP socket for DogStatsD export: {e}");
+            return;
+        }
+    };
+
+    if let Err(e) = socket.connect(endpoint).await {
+        log::error!("Failed to connect compio UDP socket to {endpoint}: {e}");
+        return;
+    }
+
+    let max_packet_size = config.max_packet_size;
+    let mut output = String::with_capacity(16384);
+    let mut batch = Vec::<u8>::with_capacity(max_packet_size);
+    let mut interval = compio::time::interval(config.interval);
+    interval.tick().await;
+    let cancel = cancel.fuse();
+    let mut cancel = std::pin::pin!(cancel);
+
+    loop {
+        let tick = interval.tick();
+        let tick = std::pin::pin!(tick);
+
+        select! {
+            _ = tick.fuse() => {},
+            _ = cancel.as_mut() => {
+                log::info!("compio DogStatsD exporter shutting down");
+                return;
+            }
+        }
+
+        output.clear();
+        export_fn(&mut output);
+
+        if output.is_empty() {
+            continue;
+        }
+
+        let output_bytes = output.as_bytes();
+        batch.clear();
+
+        let mut total_sent = 0usize;
+        let mut batch_count = 0usize;
+        let mut metric_count = 0usize;
+        let mut start = 0usize;
+
+        for nl in memchr::memchr_iter(b'\n', output_bytes) {
+            let end = nl + 1;
+            let line = &output_bytes[start..end];
+            let line_len = line.len();
+            metric_count += 1;
+
+            if line_len > max_packet_size {
+                log::warn!(
+                    "Dropping oversized metric line ({line_len} bytes, max {max_packet_size})"
+                );
+                start = end;
+                continue;
+            }
+
+            if !batch.is_empty() && batch.len() + line_len > max_packet_size {
+                if let Some(n) = send_compio_batch(&socket, &mut batch, "DogStatsD batch").await {
+                    total_sent += n;
+                    batch_count += 1;
+                }
+            }
+
+            batch.extend_from_slice(line);
+            start = end;
+        }
+
+        if start < output_bytes.len() {
+            let line = &output_bytes[start..];
+            let line_len = line.len();
+            metric_count += 1;
+
+            if line_len <= max_packet_size {
+                if !batch.is_empty() && batch.len() + line_len > max_packet_size {
+                    if let Some(n) = send_compio_batch(&socket, &mut batch, "DogStatsD batch").await
+                    {
+                        total_sent += n;
+                        batch_count += 1;
+                    }
+                }
+                batch.extend_from_slice(line);
+            } else {
+                log::warn!("Dropping oversized trailing metric ({line_len} bytes)");
+            }
+        }
+
+        if !batch.is_empty()
+            && let Some(n) = send_compio_batch(&socket, &mut batch, "final DogStatsD batch").await
+        {
+            total_sent += n;
+            batch_count += 1;
+        }
+
+        log::debug!(
+            "compio DogStatsD export: {metric_count} metrics, {batch_count} batches, {total_sent} bytes"
+        );
+    }
+}
+
 #[cfg(feature = "monoio")]
 async fn send_monoio_batch(
     socket: &monoio::net::udp::UdpSocket,
@@ -371,6 +526,26 @@ async fn send_monoio_batch(
         Ok(n) => Some(n),
         Err(e) => {
             log::warn!("Failed to send monoio {context}: {e}");
+            None
+        }
+    }
+}
+
+#[cfg(feature = "compio")]
+async fn send_compio_batch(
+    socket: &compio::net::UdpSocket,
+    batch: &mut Vec<u8>,
+    context: &str,
+) -> Option<usize> {
+    let send_buf = std::mem::take(batch);
+    let compio::BufResult(result, mut send_buf) = socket.send(send_buf).await;
+    send_buf.clear();
+    *batch = send_buf;
+
+    match result {
+        Ok(n) => Some(n),
+        Err(e) => {
+            log::warn!("Failed to send compio {context}: {e}");
             None
         }
     }

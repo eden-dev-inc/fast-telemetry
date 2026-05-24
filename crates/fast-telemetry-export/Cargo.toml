@@ -17,18 +17,22 @@ all-features = true
 
 [features]
 default = ["dogstatsd", "otlp"]
-dogstatsd = ["dep:memchr"]
-otlp = ["dep:flate2", "dep:prost", "dep:reqwest", "fast-telemetry/otlp"]
-clickhouse = ["dep:klickhouse", "dep:indexmap", "fast-telemetry/otlp", "fast-telemetry/clickhouse"]
-monoio = ["dep:monoio"]
+tokio-runtime = ["dep:tokio", "dep:tokio-util"]
+dogstatsd = ["dep:memchr", "tokio-runtime"]
+otlp = ["dep:flate2", "dep:prost", "dep:reqwest", "fast-telemetry/otlp", "tokio-runtime"]
+clickhouse = ["dep:klickhouse", "dep:indexmap", "fast-telemetry/otlp", "fast-telemetry/clickhouse", "tokio-runtime"]
+monoio = ["dep:monoio", "tokio-runtime"]
+compio = ["dep:compio", "dep:futures-util", "dep:memchr"]
 
 [dependencies]
+compio = { workspace = true, features = ["runtime", "io", "net", "time", "io-uring"], optional = true }
+futures-util = { workspace = true, optional = true }
 log = { workspace = true }
 memchr = { workspace = true, optional = true }
 monoio = { workspace = true, optional = true }
 fast-telemetry = { workspace = true }
-tokio = { workspace = true }
-tokio-util = { workspace = true }
+tokio = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
 
 # otlp
 flate2 = { workspace = true, optional = true }

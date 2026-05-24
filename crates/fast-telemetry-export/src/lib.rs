@@ -20,6 +20,8 @@
 //!   metric's `evict_stale(...)` method.
 //! - The `monoio` feature adds monoio-native DogStatsD, OTLP HTTP/protobuf, and
 //!   stale-series sweep loops, plus a per-worker span flusher.
+//! - The `compio` feature adds compio-native DogStatsD and stale-series sweep
+//!   loops, plus a per-worker span flusher when `otlp` is also enabled.
 //!
 //! # Features
 //!
@@ -28,11 +30,12 @@
 //! - `clickhouse` — ClickHouse native-protocol metrics exporter, including
 //!   first-party rows and OTel-standard table support (via [`klickhouse`])
 //! - `monoio` — monoio-native exporter loops for monoio applications
+//! - `compio` — compio-native exporter loops for compio applications
 
 #[cfg(feature = "clickhouse")]
 pub mod clickhouse;
 
-#[cfg(feature = "dogstatsd")]
+#[cfg(any(feature = "dogstatsd", feature = "compio"))]
 pub mod dogstatsd;
 
 #[cfg(feature = "otlp")]

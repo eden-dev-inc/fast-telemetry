@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+#[cfg(feature = "tokio-runtime")]
 use tokio_util::sync::CancellationToken;
 
 /// Default sweep interval.
@@ -79,6 +80,7 @@ impl SweepConfig {
 ///         + m.latency_by_endpoint.evict_stale(threshold)
 /// }));
 /// ```
+#[cfg(feature = "tokio-runtime")]
 pub async fn run<F>(config: SweepConfig, cancel: CancellationToken, mut sweep_fn: F)
 where
     F: FnMut(u32) -> usize,
@@ -139,6 +141,52 @@ where
             _ = interval.tick() => {}
             _ = cancel.cancelled() => {
                 log::info!("monoio stale-series sweeper shutting down");
+                return;
+            }
+        }
+
+        let evicted = sweep_fn(config.eviction_threshold);
+
+        if evicted > 0 {
+            log::debug!("Evicted {evicted} stale metric series");
+        }
+    }
+}
+
+/// Run the stale-series sweep loop on a compio runtime.
+///
+/// This is the compio-native counterpart to `run`. It uses
+/// [`compio::time`], so the caller must run it inside a compio runtime. `cancel`
+/// may be any future that completes when the sweeper should shut down.
+#[cfg(feature = "compio")]
+pub async fn run_compio<F>(
+    config: SweepConfig,
+    cancel: impl std::future::Future<Output = ()>,
+    mut sweep_fn: F,
+) where
+    F: FnMut(u32) -> usize,
+{
+    use futures_util::{FutureExt as _, select};
+
+    log::info!(
+        "Starting compio stale-series sweeper, interval={}s, eviction_threshold={}",
+        config.interval.as_secs(),
+        config.eviction_threshold
+    );
+
+    let mut interval = compio::time::interval(config.interval);
+    interval.tick().await;
+    let cancel = cancel.fuse();
+    let mut cancel = std::pin::pin!(cancel);
+
+    loop {
+        let tick = interval.tick();
+        let tick = std::pin::pin!(tick);
+
+        select! {
+            _ = tick.fuse() => {},
+            _ = cancel.as_mut() => {
+                log::info!("compio stale-series sweeper shutting down");
                 return;
             }
         }

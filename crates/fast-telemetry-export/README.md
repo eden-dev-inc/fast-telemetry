@@ -19,6 +19,7 @@ This crate provides:
 | `otlp`       | ✓       | OTLP HTTP/protobuf metrics + span exporters                                          |
 | `clickhouse` |         | Native-TCP ClickHouse exporter — first-party rows, generic primitive, and OTel schema |
 | `monoio`     |         | Monoio-native DogStatsD, OTLP HTTP/protobuf, sweeper, and span-flush helper          |
+| `compio`     |         | Compio-native DogStatsD and sweeper; span-flush helper with `otlp`                   |
 
 The ClickHouse exporter ships two layers:
 
@@ -61,6 +62,30 @@ exporter for `https://` endpoints. Monoio timer APIs require a runtime with
 timers enabled, and span-heavy applications should run one local flusher task on
 each monoio worker that records spans so low-volume thread-local span buffers
 are published for the exporter to drain.
+
+## Compio
+
+Enable the `compio` feature to run the DogStatsD UDP exporter and sweeper on a
+compio runtime without pulling in Tokio:
+
+```toml
+fast-telemetry-export = { version = "0.4", default-features = false, features = ["compio"] }
+```
+
+The compio entry points are:
+
+- `dogstatsd::run_compio(...)`
+- `sweeper::run_compio(...)`
+- `spans::run_local_flusher_compio(...)`, when the `otlp` feature is also enabled
+
+`dogstatsd::run_compio(...)` mirrors `dogstatsd::run(...)`, including
+newline-delimited batching and `DogStatsDConfig::max_packet_size` enforcement.
+Compio entry points accept any cancellation future with `Output = ()`, so callers
+can bridge their own shutdown model without constructing a runtime-local compio
+cancel token.
+As with the monoio span flusher, run one local flusher task on each compio worker
+that records spans so low-volume thread-local span buffers are published for the
+OTLP span exporter to drain.
 
 Integration tests covering both layers run against a real ClickHouse via
 `testcontainers`:

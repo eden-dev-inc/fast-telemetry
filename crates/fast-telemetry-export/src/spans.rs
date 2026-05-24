@@ -199,6 +199,41 @@ pub async fn run_local_flusher_monoio(
     }
 }
 
+/// Periodically flush this compio worker's thread-local span buffer.
+///
+/// This is the compio-native counterpart to [`run_local_flusher_monoio`]. Run
+/// one task on each compio worker that records spans; the OTLP span exporter can
+/// remain [`spawn`]. `cancel` may be any future that completes when the flusher
+/// should shut down.
+#[cfg(feature = "compio")]
+pub async fn run_local_flusher_compio(
+    collector: Arc<SpanCollector>,
+    interval: Duration,
+    cancel: impl std::future::Future<Output = ()>,
+) {
+    use futures_util::{FutureExt as _, select};
+
+    let mut interval = compio::time::interval(interval);
+    interval.tick().await;
+    let cancel = cancel.fuse();
+    let mut cancel = std::pin::pin!(cancel);
+
+    loop {
+        let tick = interval.tick();
+        let tick = std::pin::pin!(tick);
+
+        select! {
+            _ = tick.fuse() => {
+                collector.flush_local();
+            },
+            _ = cancel.as_mut() => {
+                collector.flush_local();
+                return;
+            }
+        }
+    }
+}
+
 /// Run the OTLP span export loop.
 ///
 /// Drains completed spans from the collector in batches and sends them to
