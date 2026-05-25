@@ -314,11 +314,12 @@ pub async fn run_monoio<F>(
                 continue;
             }
 
-            if !batch.is_empty() && batch.len() + line_len > max_packet_size {
-                if let Some(n) = send_monoio_batch(&socket, &mut batch, "DogStatsD batch").await {
-                    total_sent += n;
-                    batch_count += 1;
-                }
+            if !batch.is_empty()
+                && batch.len() + line_len > max_packet_size
+                && let Some(n) = send_monoio_batch(&socket, &mut batch, "DogStatsD batch").await
+            {
+                total_sent += n;
+                batch_count += 1;
             }
 
             batch.extend_from_slice(line);
@@ -331,12 +332,12 @@ pub async fn run_monoio<F>(
             metric_count += 1;
 
             if line_len <= max_packet_size {
-                if !batch.is_empty() && batch.len() + line_len > max_packet_size {
-                    if let Some(n) = send_monoio_batch(&socket, &mut batch, "DogStatsD batch").await
-                    {
-                        total_sent += n;
-                        batch_count += 1;
-                    }
+                if !batch.is_empty()
+                    && batch.len() + line_len > max_packet_size
+                    && let Some(n) = send_monoio_batch(&socket, &mut batch, "DogStatsD batch").await
+                {
+                    total_sent += n;
+                    batch_count += 1;
                 }
                 batch.extend_from_slice(line);
             } else {
@@ -468,11 +469,12 @@ pub async fn run_compio<F>(
                 continue;
             }
 
-            if !batch.is_empty() && batch.len() + line_len > max_packet_size {
-                if let Some(n) = send_compio_batch(&socket, &mut batch, "DogStatsD batch").await {
-                    total_sent += n;
-                    batch_count += 1;
-                }
+            if !batch.is_empty()
+                && batch.len() + line_len > max_packet_size
+                && let Some(n) = send_compio_batch(&socket, &mut batch, "DogStatsD batch").await
+            {
+                total_sent += n;
+                batch_count += 1;
             }
 
             batch.extend_from_slice(line);
@@ -485,12 +487,12 @@ pub async fn run_compio<F>(
             metric_count += 1;
 
             if line_len <= max_packet_size {
-                if !batch.is_empty() && batch.len() + line_len > max_packet_size {
-                    if let Some(n) = send_compio_batch(&socket, &mut batch, "DogStatsD batch").await
-                    {
-                        total_sent += n;
-                        batch_count += 1;
-                    }
+                if !batch.is_empty()
+                    && batch.len() + line_len > max_packet_size
+                    && let Some(n) = send_compio_batch(&socket, &mut batch, "DogStatsD batch").await
+                {
+                    total_sent += n;
+                    batch_count += 1;
                 }
                 batch.extend_from_slice(line);
             } else {

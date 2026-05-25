@@ -100,10 +100,10 @@ where
         metric_id: usize,
         labels: &[(&str, &str)],
     ) -> Option<<T as CacheValue>::Strong> {
-        if let Some(index) = self.last {
-            if let Some(value) = self.get_at(index, metric_id, labels) {
-                return Some(value);
-            }
+        if let Some(index) = self.last
+            && let Some(value) = self.get_at(index, metric_id, labels)
+        {
+            return Some(value);
         }
 
         let fingerprint = label_fingerprint(labels);
