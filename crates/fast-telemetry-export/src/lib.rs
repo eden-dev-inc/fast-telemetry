@@ -28,7 +28,7 @@
 //! - `dogstatsd` (default) — DogStatsD UDP exporter
 //! - `otlp` (default) — OTLP HTTP/protobuf metrics and span exporters
 //! - `clickhouse` — ClickHouse native-protocol metrics exporter, including
-//!   first-party rows and OTel-standard table support (via [`klickhouse`])
+//!   first-party rows and OTel-standard table support (via `klickhouse`)
 //! - `monoio` — monoio-native exporter loops for monoio applications
 //! - `compio` — compio-native exporter loops for compio applications
 

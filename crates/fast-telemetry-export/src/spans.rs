@@ -201,7 +201,7 @@ pub async fn run_local_flusher_monoio(
 
 /// Periodically flush this compio worker's thread-local span buffer.
 ///
-/// This is the compio-native counterpart to [`run_local_flusher_monoio`]. Run
+/// This is the compio-native counterpart to `run_local_flusher_monoio`. Run
 /// one task on each compio worker that records spans; the OTLP span exporter can
 /// remain [`spawn`]. `cancel` may be any future that completes when the flusher
 /// should shut down.

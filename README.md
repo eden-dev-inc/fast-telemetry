@@ -575,7 +575,7 @@ sweep and then sum each dynamic metric's `evict_stale(...)` result.
 enable the export crate's `monoio` feature for monoio-native loops:
 
 ```toml
-fast-telemetry-export = { version = "0.4", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+fast-telemetry-export = { version = "0.5", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
 ```
 
 Use `dogstatsd::run_monoio(...)`, `otlp::run_monoio(...)`, and
