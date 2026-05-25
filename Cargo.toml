@@ -11,13 +11,13 @@ authors = [
 homepage = "https://github.com/eden-dev-inc/fast-telemetry"
 license = "Apache-2.0"
 repository = "https://github.com/eden-dev-inc/fast-telemetry"
-rust-version = "1.85"
+rust-version = "1.90.0"
 
 [workspace.dependencies]
 # Local crates
-fast-telemetry = { path = "crates/fast-telemetry", version = "0.4.0" }
-fast-telemetry-macros = { path = "crates/fast-telemetry-macros", version = "0.4.0" }
-fast-telemetry-export = { path = "crates/fast-telemetry-export", version = "0.4.0" }
+fast-telemetry = { path = "crates/fast-telemetry", version = "0.5.0" }
+fast-telemetry-macros = { path = "crates/fast-telemetry-macros", version = "0.5.0" }
+fast-telemetry-export = { path = "crates/fast-telemetry-export", version = "0.5.0" }
 
 # --- Core: fast-telemetry runtime dependencies ---
 crossbeam-utils = "0.8"
@@ -33,6 +33,8 @@ syn = { version = "2", features = ["extra-traits", "full", "parsing"] }
 
 # --- Export: fast-telemetry-export runtime dependencies ---
 log = "0.4"
+compio = { version = "0.18", default-features = false }
+futures-util = "0.3"
 memchr = "2"                                                              # dogstatsd feature
 monoio = "0.2.4"
 tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time", "macros"] }
