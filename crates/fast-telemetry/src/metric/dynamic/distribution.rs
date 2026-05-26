@@ -7,13 +7,11 @@
 use super::cache::{CacheValue, LabelCache, SERIES_CACHE_SIZE};
 #[cfg(feature = "eviction")]
 use super::current_cycle;
-use super::{DISTRIBUTION_IDS, DynamicLabelSet};
+use super::{DISTRIBUTION_IDS, DynamicIndexMap, DynamicLabelSet, dynamic_index_map};
 use crate::exp_buckets::{ExpBuckets, ExpBucketsSnapshot};
 use crossbeam_utils::CachePadded;
 use parking_lot::{Mutex, RwLock};
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::Weak;
 #[cfg(feature = "eviction")]
@@ -23,8 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 const DEFAULT_MAX_SERIES: usize = 2000;
 const OVERFLOW_LABEL_KEY: &str = "__ft_overflow";
 const OVERFLOW_LABEL_VALUE: &str = "true";
-type DistributionIndexShard =
-    CachePadded<RwLock<HashMap<DynamicLabelSet, Arc<DistributionSeries>>>>;
+type DistributionIndexShard = CachePadded<RwLock<DynamicIndexMap<Arc<DistributionSeries>>>>;
 type DistributionSnapshotEntry = (DynamicLabelSet, u64, u64, ExpBucketsSnapshot);
 static SERIES_IDS: AtomicUsize = AtomicUsize::new(1);
 
@@ -202,7 +199,7 @@ impl DynamicDistribution {
             max_series,
             shard_mask: shard_count - 1,
             index_shards: (0..shard_count)
-                .map(|_| CachePadded::new(RwLock::new(HashMap::new())))
+                .map(|_| CachePadded::new(RwLock::new(dynamic_index_map())))
                 .collect(),
             series_count: AtomicUsize::new(0),
             overflow_count: AtomicU64::new(0),
@@ -394,9 +391,7 @@ impl DynamicDistribution {
     }
 
     fn index_shard_for(&self, key: &DynamicLabelSet) -> usize {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        key.hash(&mut hasher);
-        (hasher.finish() as usize) & self.shard_mask
+        key.shard_index(self.shard_mask)
     }
 
     fn cached_series(

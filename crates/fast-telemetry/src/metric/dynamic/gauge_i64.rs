@@ -7,12 +7,10 @@
 use super::cache::{CacheableSeries, LabelCache, SERIES_CACHE_SIZE};
 #[cfg(feature = "eviction")]
 use super::current_cycle;
-use super::{DynamicLabelSet, thread_id};
+use super::{DynamicIndexMap, DynamicLabelSet, dynamic_index_map, thread_id};
 use crossbeam_utils::CachePadded;
 use parking_lot::RwLock;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 #[cfg(feature = "eviction")]
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
@@ -22,7 +20,7 @@ static GAUGE_I64_IDS: AtomicUsize = AtomicUsize::new(1);
 const DEFAULT_MAX_SERIES: usize = 2000;
 const OVERFLOW_LABEL_KEY: &str = "__ft_overflow";
 const OVERFLOW_LABEL_VALUE: &str = "true";
-type GaugeI64IndexShard = CachePadded<RwLock<HashMap<DynamicLabelSet, Arc<GaugeI64Series>>>>;
+type GaugeI64IndexShard = CachePadded<RwLock<DynamicIndexMap<Arc<GaugeI64Series>>>>;
 
 struct GaugeI64Series {
     cells: Vec<CachePadded<AtomicI64>>,
@@ -205,7 +203,7 @@ impl DynamicGaugeI64 {
             max_series,
             shard_mask: shard_count - 1,
             index_shards: (0..shard_count)
-                .map(|_| CachePadded::new(RwLock::new(HashMap::new())))
+                .map(|_| CachePadded::new(RwLock::new(dynamic_index_map())))
                 .collect(),
             series_count: AtomicUsize::new(0),
             overflow_count: AtomicU64::new(0),
@@ -283,7 +281,13 @@ impl DynamicGaugeI64 {
 
     /// Sums all series.
     pub fn sum_all(&self) -> i64 {
-        self.snapshot().into_iter().map(|(_, value)| value).sum()
+        self.index_shards
+            .iter()
+            .map(|shard| {
+                let guard = shard.read();
+                guard.values().map(|series| series.sum()).sum::<i64>()
+            })
+            .sum()
     }
 
     /// Returns a snapshot of all label-set/value pairs.
@@ -417,9 +421,7 @@ impl DynamicGaugeI64 {
     }
 
     fn index_shard_for(&self, key: &DynamicLabelSet) -> usize {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        key.hash(&mut hasher);
-        (hasher.finish() as usize) & self.shard_mask
+        key.shard_index(self.shard_mask)
     }
 
     fn cached_series(&self, labels: &[(&str, &str)]) -> Option<Arc<GaugeI64Series>> {
@@ -443,7 +445,7 @@ impl DynamicGaugeI64 {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "eviction")]
-    use super::super::advance_cycle;
+    use super::super::{advance_cycle, lock_eviction_cycle_for_test};
     use super::*;
 
     #[test]
@@ -489,6 +491,7 @@ mod tests {
     #[cfg(feature = "eviction")]
     #[test]
     fn test_evict_stale() {
+        let _cycle_guard = lock_eviction_cycle_for_test();
         let gauge = DynamicGaugeI64::new(4);
         let labels = &[("endpoint_id", "evict_i64")];
 
@@ -511,6 +514,7 @@ mod tests {
     #[cfg(feature = "eviction")]
     #[test]
     fn test_series_handle_protects_from_eviction() {
+        let _cycle_guard = lock_eviction_cycle_for_test();
         let gauge = DynamicGaugeI64::new(4);
         let labels = &[("endpoint_id", "tombstone_i64")];
 
