@@ -17,7 +17,7 @@ use std::sync::Arc;
 /// Number of per-thread cache slots used by dynamic metrics.
 ///
 /// This must remain a power of two because slot selection is mask-based.
-pub(crate) const SERIES_CACHE_SIZE: usize = 16;
+pub(crate) const SERIES_CACHE_SIZE: usize = 64;
 
 /// Payload contract for entries stored in [`LabelCache`].
 ///
@@ -44,6 +44,15 @@ pub(crate) struct LabelCacheEntry<T> {
 }
 
 impl<T> LabelCacheEntry<T> {
+    #[inline]
+    fn replace(&mut self, metric_id: usize, fingerprint: u64, labels: &[(&str, &str)], value: T) {
+        self.metric_id = metric_id;
+        self.fingerprint = fingerprint;
+        update_ordered_labels(&mut self.ordered_labels, labels);
+        self.value = value;
+    }
+
+    #[inline]
     fn matches_ordered(&self, metric_id: usize, labels: &[(&str, &str)]) -> bool {
         if self.metric_id != metric_id || self.ordered_labels.len() != labels.len() {
             return false;
@@ -55,6 +64,7 @@ impl<T> LabelCacheEntry<T> {
         })
     }
 
+    #[inline]
     fn matches(&self, metric_id: usize, fingerprint: u64, labels: &[(&str, &str)]) -> bool {
         if self.metric_id != metric_id
             || self.fingerprint != fingerprint
@@ -117,19 +127,23 @@ where
     pub(crate) fn insert(&mut self, metric_id: usize, labels: &[(&str, &str)], value: T) {
         let fingerprint = label_fingerprint(labels);
         let index = cache_index::<N>(fingerprint);
-        let ordered_labels = labels
-            .iter()
-            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-            .collect();
-        self.entries[index] = Some(LabelCacheEntry {
-            metric_id,
-            fingerprint,
-            ordered_labels,
-            value,
-        });
+        match &mut self.entries[index] {
+            Some(entry) => entry.replace(metric_id, fingerprint, labels, value),
+            None => {
+                let mut ordered_labels = Vec::with_capacity(labels.len());
+                update_ordered_labels(&mut ordered_labels, labels);
+                self.entries[index] = Some(LabelCacheEntry {
+                    metric_id,
+                    fingerprint,
+                    ordered_labels,
+                    value,
+                });
+            }
+        }
         self.last = Some(index);
     }
 
+    #[inline]
     fn get_at(
         &self,
         index: usize,
@@ -147,6 +161,7 @@ where
         Some(strong)
     }
 
+    #[inline]
     fn get_at_with_fingerprint(
         &self,
         index: usize,
@@ -166,6 +181,7 @@ where
     }
 }
 
+#[inline]
 fn cache_index<const N: usize>(fingerprint: u64) -> usize {
     debug_assert!(N.is_power_of_two());
     (fingerprint as usize) & (N - 1)
@@ -196,6 +212,21 @@ pub(crate) fn label_fingerprint(labels: &[(&str, &str)]) -> u64 {
         hash = hash.wrapping_mul(FNV_PRIME);
     }
     hash
+}
+
+#[inline]
+fn update_ordered_labels(ordered_labels: &mut Vec<(String, String)>, labels: &[(&str, &str)]) {
+    ordered_labels.truncate(labels.len());
+    for (index, (key, value)) in labels.iter().enumerate() {
+        if let Some((stored_key, stored_value)) = ordered_labels.get_mut(index) {
+            stored_key.clear();
+            stored_key.push_str(key);
+            stored_value.clear();
+            stored_value.push_str(value);
+        } else {
+            ordered_labels.push(((*key).to_string(), (*value).to_string()));
+        }
+    }
 }
 
 impl<T> CacheValue for std::sync::Weak<T>

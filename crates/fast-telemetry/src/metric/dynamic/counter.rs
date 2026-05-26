@@ -3,12 +3,10 @@
 use super::cache::{CacheableSeries, LabelCache, SERIES_CACHE_SIZE};
 #[cfg(feature = "eviction")]
 use super::current_cycle;
-use super::{COUNTER_IDS, DynamicLabelSet, thread_id};
+use super::{COUNTER_IDS, DynamicIndexMap, DynamicLabelSet, dynamic_index_map, thread_id};
 use crossbeam_utils::CachePadded;
 use parking_lot::RwLock;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 #[cfg(feature = "eviction")]
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, AtomicUsize, Ordering};
@@ -29,7 +27,7 @@ struct CounterSeries {
     last_accessed_cycle: AtomicU32,
 }
 
-type CounterIndexShard = CachePadded<RwLock<HashMap<DynamicLabelSet, Arc<CounterSeries>>>>;
+type CounterIndexShard = CachePadded<RwLock<DynamicIndexMap<Arc<CounterSeries>>>>;
 
 impl CounterSeries {
     #[cfg(feature = "eviction")]
@@ -177,7 +175,7 @@ impl DynamicCounter {
             max_series,
             shard_mask: shard_count - 1,
             index_shards: (0..shard_count)
-                .map(|_| CachePadded::new(RwLock::new(HashMap::new())))
+                .map(|_| CachePadded::new(RwLock::new(dynamic_index_map())))
                 .collect(),
             series_count: AtomicUsize::new(0),
             overflow_count: AtomicU64::new(0),
@@ -236,7 +234,13 @@ impl DynamicCounter {
 
     /// Sums all series.
     pub fn sum_all(&self) -> isize {
-        self.snapshot().into_iter().map(|(_, value)| value).sum()
+        self.index_shards
+            .iter()
+            .map(|shard| {
+                let guard = shard.read();
+                guard.values().map(|series| series.sum()).sum::<isize>()
+            })
+            .sum()
     }
 
     /// Returns a snapshot of all label-set/count pairs.
@@ -374,9 +378,7 @@ impl DynamicCounter {
     }
 
     fn index_shard_for(&self, key: &DynamicLabelSet) -> usize {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        key.hash(&mut hasher);
-        (hasher.finish() as usize) & self.shard_mask
+        key.shard_index(self.shard_mask)
     }
 
     fn cached_series(&self, labels: &[(&str, &str)]) -> Option<Arc<CounterSeries>> {
@@ -400,7 +402,7 @@ impl DynamicCounter {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "eviction")]
-    use super::super::advance_cycle;
+    use super::super::{advance_cycle, lock_eviction_cycle_for_test};
     use super::*;
 
     #[test]
@@ -466,6 +468,7 @@ mod tests {
     #[cfg(feature = "eviction")]
     #[test]
     fn test_evict_stale() {
+        let _cycle_guard = lock_eviction_cycle_for_test();
         let counter = DynamicCounter::new(4);
         let labels = &[("org_id", "42")];
 
@@ -498,6 +501,7 @@ mod tests {
     #[cfg(feature = "eviction")]
     #[test]
     fn test_evict_stale_keeps_active() {
+        let _cycle_guard = lock_eviction_cycle_for_test();
         let counter = DynamicCounter::new(4);
         let active = &[("status", "active")];
         let stale = &[("status", "stale")];
@@ -527,6 +531,7 @@ mod tests {
     #[cfg(feature = "eviction")]
     #[test]
     fn test_eviction_tombstone_invalidates_cache() {
+        let _cycle_guard = lock_eviction_cycle_for_test();
         let counter = DynamicCounter::new(4);
         let labels = &[("org_id", "evict_test")];
 
@@ -552,6 +557,7 @@ mod tests {
     #[cfg(feature = "eviction")]
     #[test]
     fn test_series_handle_protects_from_eviction() {
+        let _cycle_guard = lock_eviction_cycle_for_test();
         let counter = DynamicCounter::new(4);
         let labels = &[("org_id", "handle_test")];
 
@@ -579,6 +585,7 @@ mod tests {
     #[cfg(feature = "eviction")]
     #[test]
     fn test_series_evicted_after_handle_dropped() {
+        let _cycle_guard = lock_eviction_cycle_for_test();
         let counter = DynamicCounter::new(4);
         let labels = &[("org_id", "handle_drop_test")];
 
@@ -666,6 +673,7 @@ mod tests {
     #[cfg(feature = "eviction")]
     #[test]
     fn test_eviction_and_reinsertion_bookkeeping() {
+        let _cycle_guard = lock_eviction_cycle_for_test();
         let counter = DynamicCounter::with_max_series(4, 3);
 
         counter.inc(&[("k", "a")]);

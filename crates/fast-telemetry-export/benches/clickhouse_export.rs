@@ -7,11 +7,11 @@
 //! - ClickHouse `first_party_direct_rows` uses `fast-telemetry/clickhouse` to
 //!   build rows directly from primitives, skipping `pb::Metric`.
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use fast_telemetry::otlp::{OtlpExport, build_export_request, build_resource, now_nanos};
 use fast_telemetry::{
-    ClickHouseExport, ClickHouseMetricBatch, Counter, DogStatsDExport, DynamicCounter, Gauge,
-    Histogram,
+    ClickHouseExport, ClickHouseMetricBatch, Counter, DogStatsDExport, DynamicCounter,
+    DynamicGauge, DynamicGaugeI64, Gauge, Histogram,
 };
 use prost::Message;
 use std::hint::black_box;
@@ -166,5 +166,50 @@ fn bench_clickhouse_export(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(clickhouse_export, bench_clickhouse_export);
+fn bench_clickhouse_dynamic_gauge_export(c: &mut Criterion) {
+    let ts = now_nanos();
+    let mut group = c.benchmark_group("export/clickhouse_dynamic_gauge");
+
+    for cardinality in [10usize, 50, 200] {
+        let gauge = DynamicGauge::new(4);
+        let gauge_i64 = DynamicGaugeI64::new(4);
+        for i in 0..cardinality {
+            let endpoint = format!("ep{i}");
+            gauge.set(&[("endpoint", endpoint.as_str())], i as f64 * 1.5);
+            gauge_i64.add(&[("endpoint", endpoint.as_str())], i as i64);
+        }
+
+        group.bench_with_input(
+            BenchmarkId::new("f64", cardinality),
+            &cardinality,
+            |b, _| {
+                b.iter(|| {
+                    let mut batch = ClickHouseMetricBatch::new("bench");
+                    gauge.export_clickhouse(&mut batch, "queue_depth", "", ts);
+                    black_box(batch.total_rows());
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("i64", cardinality),
+            &cardinality,
+            |b, _| {
+                b.iter(|| {
+                    let mut batch = ClickHouseMetricBatch::new("bench");
+                    gauge_i64.export_clickhouse(&mut batch, "active_connections", "", ts);
+                    black_box(batch.total_rows());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(
+    clickhouse_export,
+    bench_clickhouse_export,
+    bench_clickhouse_dynamic_gauge_export
+);
 criterion_main!(clickhouse_export);

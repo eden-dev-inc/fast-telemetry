@@ -16,8 +16,8 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use fast_telemetry::{
     Counter, Distribution, DogStatsDExport, DynamicCounter, DynamicDistribution, DynamicHistogram,
-    Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledHistogram, PrometheusExport,
-    SpanAttribute, SpanCollector, SpanKind, SpanStatus,
+    DynamicLabelSet, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledHistogram,
+    PrometheusExport, SpanAttribute, SpanCollector, SpanKind, SpanStatus,
 };
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::{KeyValue, metrics as otel_metrics};
@@ -439,6 +439,84 @@ fn bench_record_dynamic_counter_cache_pattern(c: &mut Criterion) {
             i = i.wrapping_add(1);
         });
     });
+
+    group.finish();
+}
+
+fn bench_record_dynamic_counter_label_count(c: &mut Criterion) {
+    let mut group = c.benchmark_group("record/dynamic_counter_label_count");
+
+    for label_count in [1usize, 2, 4, 8, 12, 16] {
+        let counter = DynamicCounter::new(8);
+        let label_sets: Vec<Vec<(String, String)>> = (0..64)
+            .map(|series_idx| {
+                (0..label_count)
+                    .map(|label_idx| {
+                        (
+                            format!("key_{label_idx:02}"),
+                            format!("value_{series_idx:02}_{label_idx:02}"),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        let borrowed_label_sets: Vec<Vec<(&str, &str)>> = label_sets
+            .iter()
+            .map(|labels| {
+                labels
+                    .iter()
+                    .map(|(key, value)| (key.as_str(), value.as_str()))
+                    .collect()
+            })
+            .collect();
+        for labels in &borrowed_label_sets {
+            counter.inc(labels);
+        }
+
+        group.bench_with_input(
+            BenchmarkId::new("rotating_hot_set_64", label_count),
+            &borrowed_label_sets,
+            |b, label_sets| {
+                let mut i = 0usize;
+                b.iter(|| {
+                    counter.inc(black_box(label_sets[i % label_sets.len()].as_slice()));
+                    i = i.wrapping_add(1);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+fn bench_dynamic_label_canonicalization(c: &mut Criterion) {
+    let mut group = c.benchmark_group("record/dynamic_label_canonicalization");
+
+    for label_count in [0usize, 1, 2, 4, 8, 12, 16, 32, 64] {
+        let keys: Vec<String> = (0..label_count)
+            .rev()
+            .map(|i| format!("key_{i:02}"))
+            .collect();
+        let values: Vec<String> = (0..label_count)
+            .rev()
+            .map(|i| format!("value_{i:02}"))
+            .collect();
+        let labels: Vec<(&str, &str)> = keys
+            .iter()
+            .zip(values.iter())
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        group.bench_with_input(
+            BenchmarkId::new("unique_reversed", label_count),
+            &labels,
+            |b, labels| {
+                b.iter(|| {
+                    black_box(DynamicLabelSet::from_pairs(black_box(labels)));
+                });
+            },
+        );
+    }
 
     group.finish();
 }
@@ -1354,6 +1432,8 @@ criterion_group!(
     bench_record_labeled_histogram,
     bench_record_dynamic_counter,
     bench_record_dynamic_counter_cache_pattern,
+    bench_record_dynamic_counter_label_count,
+    bench_dynamic_label_canonicalization,
     bench_record_dynamic_distribution,
     bench_record_dynamic_counter_first_touch,
 );

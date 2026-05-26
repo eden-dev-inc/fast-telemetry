@@ -1,5 +1,71 @@
 # Release Notes
 
+## 0.5.1 - 2026-05-26
+
+Published crates: `fast-telemetry`, `fast-telemetry-export`. (`fast-telemetry-macros` is unchanged since 0.5.0.)
+
+Highlights:
+
+- dynamic metric internals: runtime-labeled metrics keep deterministic `BTreeMap` indexes while using a larger per-thread series cache, cache-entry reuse, and a hybrid label canonicalization path that keeps small label sets on a sorted vector and falls back to `BTreeMap` for larger sets.
+- dynamic counter export overlap: `DynamicCounter::sum_all()` now sums series values directly from shards instead of cloning a full dynamic-label snapshot before aggregation.
+- export internals: DogStatsD distribution export now walks exponential bucket snapshots directly instead of allocating an intermediate sample iterator, and dynamic DogStatsD tag rendering avoids extra branch work for each label.
+- benchmark coverage: added microbenchmark cases for dynamic label cardinality/canonicalization and ClickHouse dynamic gauge export at multiple cardinalities; release-note percentages below are from the script-driven production harness rather than Criterion.
+
+Harness comparison against the 0.5.0 baseline on the same machine. Both sides used the same corrected harness and all runs reported `verified=true`:
+
+```text
+./crates/fast-telemetry/bench/run-cache-bench.sh \
+  --threads 8 \
+  --iters 50000000 \
+  --runs 9 \
+  --modes fast \
+  --entity dynamic_counter \
+  --labels 256 \
+  --profile hotspot \
+  --export-interval-ms 1
+```
+
+| Harness Metric | 0.5.0 | 0.5.1 | Change |
+| --- | ---: | ---: | ---: |
+| `trimmed_export_avg_ms` | 0.043257 ms | 0.006025 ms | 86.1% lower |
+| `trimmed_cpu_ns_per_op` | 1.18 ns | 1.20 ns | 1.7% higher, within harness noise |
+| `trimmed_total_ops_per_sec` | 6.396B/s | 6.163B/s | 3.6% lower, wall-time informational |
+
+The table uses the low-CV hotspot run (`cpu_ns_per_op_cv_pct`: 3.60% on 0.5.0, 3.50% on 0.5.1); exploratory profiles remain benchmark artifacts rather than release-note claims.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.5.1"
+fast-telemetry-export = "0.5.1"
+```
+
+## 0.5.0 - 2026-05-25
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
+
+Why this is a 0.5.0 bump:
+
+- this release adds a new optional `compio` exporter feature and new public exporter entry points in `fast-telemetry-export`.
+- because these crates are still pre-1.0, new public API should advance the minor version so downstream users have a clear compatibility boundary.
+- all workspace crates are aligned at `0.5.0` to keep the runtime, derive macros, and exporter adapters on the same API contract and avoid dependency skew.
+
+Highlights:
+
+- compio export support: added `dogstatsd::run_compio(...)`, `sweeper::run_compio(...)`, and `spans::run_local_flusher_compio(...)` behind the optional `compio` feature.
+- DogStatsD compio transport: `dogstatsd::run_compio(...)` mirrors the Tokio DogStatsD exporter, including newline-delimited batching and `DogStatsDConfig::max_packet_size` enforcement.
+- span flushing: added a compio local flusher helper so low-volume spans buffered in thread-local collectors can be published for the OTLP span exporter to drain.
+- release metadata: raised the workspace Rust version to `1.90.0` and stabilized the published compio dependency on `compio` `0.18`.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.5"
+fast-telemetry-export = "0.5"
+```
+
 ## 0.4.0 - 2026-05-16
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.

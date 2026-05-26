@@ -35,6 +35,7 @@ fn write_gauge_f64_value(output: &mut String, value: f64) {
 }
 
 /// Helper to append tags in DogStatsD format: `|#tag1:value1,tag2:value2`
+#[inline]
 fn append_tags(output: &mut String, tags: &[(&str, &str)]) {
     if !tags.is_empty() {
         output.push_str("|#");
@@ -50,6 +51,7 @@ fn append_tags(output: &mut String, tags: &[(&str, &str)]) {
 }
 
 /// Helper to append tags with an additional label prepended.
+#[inline]
 fn append_tags_with_label(
     output: &mut String,
     label_name: &str,
@@ -68,27 +70,29 @@ fn append_tags_with_label(
     }
 }
 
+#[inline]
 fn append_tags_with_dynamic_label_pairs(
     output: &mut String,
     labels: &[(String, String)],
     tags: &[(&str, &str)],
 ) {
+    let Some((first_key, first_value)) = labels.first() else {
+        append_tags(output, tags);
+        return;
+    };
+
     output.push_str("|#");
-    let mut first = true;
-    for (k, v) in labels {
-        if !first {
-            output.push(',');
-        }
-        first = false;
+    output.push_str(first_key);
+    output.push(':');
+    output.push_str(first_value);
+    for (k, v) in &labels[1..] {
+        output.push(',');
         output.push_str(k);
         output.push(':');
         output.push_str(v);
     }
     for (k, v) in tags {
-        if !first {
-            output.push(',');
-        }
-        first = false;
+        output.push(',');
         output.push_str(k);
         output.push(':');
         output.push_str(v);
@@ -190,6 +194,21 @@ fn write_distribution_sample(output: &mut String, name: &str, value: u64, count:
     }
 }
 
+#[inline]
+fn write_distribution_samples<F>(snap: &ExpBucketsSnapshot, mut write_sample: F)
+where
+    F: FnMut(u64, u64),
+{
+    if snap.zero_count > 0 {
+        write_sample(0, snap.zero_count);
+    }
+    for (i, &count) in snap.positive.iter().enumerate() {
+        if count > 0 {
+            write_sample(ExpBucketsSnapshot::bucket_midpoint(i), count);
+        }
+    }
+}
+
 /// Write DogStatsD `|d` distribution lines from an [`ExpBucketsSnapshot`].
 ///
 /// Emits one line per non-zero bucket using the bucket midpoint as the
@@ -202,11 +221,11 @@ pub fn __write_dogstatsd_distribution(
     snap: &ExpBucketsSnapshot,
     tags: &[(&str, &str)],
 ) {
-    for (value, count) in snap.iter_samples() {
+    write_distribution_samples(snap, |value, count| {
         write_distribution_sample(output, name, value, count);
         append_tags(output, tags);
         output.push('\n');
-    }
+    });
 }
 
 /// Write DogStatsD `|d` distribution lines with dynamic labels.
@@ -218,11 +237,11 @@ pub fn __write_dogstatsd_distribution_dynamic(
     labels: &DynamicLabelSet,
     tags: &[(&str, &str)],
 ) {
-    for (value, count) in snap.iter_samples() {
+    write_distribution_samples(snap, |value, count| {
         write_distribution_sample(output, name, value, count);
         append_tags_with_dynamic_labels(output, labels, tags);
         output.push('\n');
-    }
+    });
 }
 
 fn write_dogstatsd_distribution_dynamic_pairs(
@@ -232,11 +251,11 @@ fn write_dogstatsd_distribution_dynamic_pairs(
     labels: &[(String, String)],
     tags: &[(&str, &str)],
 ) {
-    for (value, count) in snap.iter_samples() {
+    write_distribution_samples(snap, |value, count| {
         write_distribution_sample(output, name, value, count);
         append_tags_with_dynamic_label_pairs(output, labels, tags);
         output.push('\n');
-    }
+    });
 }
 
 /// Write DogStatsD `|d` distribution lines for the **delta** between the current
@@ -750,6 +769,17 @@ mod tests {
         assert!(output.contains("endpoint:ep1"));
         assert!(output.contains("method:GET"));
         assert!(output.contains("env:prod"));
+    }
+
+    #[test]
+    fn test_dogstatsd_dynamic_counter_empty_labels() {
+        let counter = DynamicCounter::new(4);
+        counter.add(&[], 3);
+
+        let mut output = String::new();
+        counter.export_dogstatsd(&mut output, "requests", &[]);
+
+        assert_eq!(output, "requests:3|c\n");
     }
 
     #[test]

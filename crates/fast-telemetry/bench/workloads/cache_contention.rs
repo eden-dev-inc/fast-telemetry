@@ -7,18 +7,23 @@
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity dynamic_counter --threads 16 --iters 10000000 --labels 64
 
 use fast_telemetry::{
-    Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64, DynamicHistogram, LabelEnum, LabeledCounter,
-    LabeledGauge, LabeledHistogram,
+    Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
+    DynamicHistogram, LabelEnum, LabeledCounter, LabeledGauge, LabeledHistogram,
 };
 use metrics::atomics::AtomicU64 as MetricsAtomicU64;
-use metrics::{Counter as MetricsCounter, Gauge as MetricsGauge, Histogram as MetricsHistogram, Key, Label};
+use metrics::{
+    Counter as MetricsCounter, Gauge as MetricsGauge, Histogram as MetricsHistogram, Key, Label,
+};
 use metrics_util::registry::{AtomicStorage as MetricsAtomicStorage, Registry as MetricsRegistry};
 use metrics_util::storage::AtomicBucket as MetricsAtomicBucket;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::{KeyValue, metrics::Counter as OTelCounter, metrics::Gauge as OTelGauge, metrics::Histogram as OTelHistogram};
+use opentelemetry::{
+    metrics::Counter as OTelCounter, metrics::Gauge as OTelGauge,
+    metrics::Histogram as OTelHistogram, KeyValue,
+};
 use opentelemetry_sdk::metrics::{InMemoryMetricExporter, SdkMeterProvider};
-use std::sync::mpsc;
 use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
@@ -28,7 +33,7 @@ mod thread_affinity {
 mod process_usage {
     include!("process_usage.rs");
 }
-use process_usage::ProcessCpuSnapshot;
+use process_usage::{ProcessCpuSnapshot, ProcessCpuUsage};
 use thread_affinity::ThreadAffinityMode;
 
 #[derive(Copy, Clone)]
@@ -98,6 +103,7 @@ struct RunResult {
     total_seconds: f64,
     export_count: u64,
     export_seconds: f64,
+    cpu_usage: Option<ProcessCpuUsage>,
 }
 
 fn parse_args() -> Config {
@@ -154,9 +160,13 @@ fn parse_args() -> Config {
                 i += 2;
             }
             "--thread-affinity" if i + 1 < args.len() => {
-                thread_affinity = ThreadAffinityMode::parse(args[i + 1].as_str()).unwrap_or_else(|| {
-                    panic!("invalid --thread-affinity: {} (expected off|round_robin|rr)", args[i + 1])
-                });
+                thread_affinity =
+                    ThreadAffinityMode::parse(args[i + 1].as_str()).unwrap_or_else(|| {
+                        panic!(
+                            "invalid --thread-affinity: {} (expected off|round_robin|rr)",
+                            args[i + 1]
+                        )
+                    });
                 i += 2;
             }
             "--threads" if i + 1 < args.len() => {
@@ -177,7 +187,9 @@ fn parse_args() -> Config {
                 i += 2;
             }
             "--export-interval-ms" if i + 1 < args.len() => {
-                export_interval_ms = args[i + 1].parse().expect("--export-interval-ms must be an integer");
+                export_interval_ms = args[i + 1]
+                    .parse()
+                    .expect("--export-interval-ms must be an integer");
                 i += 2;
             }
             "--help" => {
@@ -197,7 +209,11 @@ fn parse_args() -> Config {
     }
 
     assert!(labels >= 1, "--labels must be >= 1");
-    assert!(labels <= BenchLabel::CARDINALITY, "--labels must be <= {}", BenchLabel::CARDINALITY);
+    assert!(
+        labels <= BenchLabel::CARDINALITY,
+        "--labels must be <= {}",
+        BenchLabel::CARDINALITY
+    );
 
     Config {
         mode,
@@ -235,7 +251,12 @@ struct MetricsHistogramEntry {
 }
 
 #[inline]
-fn profile_index(profile: WorkloadProfile, thread: usize, iter: usize, cardinality: usize) -> usize {
+fn profile_index(
+    profile: WorkloadProfile,
+    thread: usize,
+    iter: usize,
+    cardinality: usize,
+) -> usize {
     debug_assert!(cardinality > 0);
     match profile {
         WorkloadProfile::Uniform => (iter + thread) % cardinality,
@@ -247,7 +268,9 @@ fn profile_index(profile: WorkloadProfile, thread: usize, iter: usize, cardinali
                 (iter + thread) % hot
             }
         }
-        WorkloadProfile::Churn => (iter.wrapping_mul(17).wrapping_add(thread.wrapping_mul(131))) % cardinality,
+        WorkloadProfile::Churn => {
+            (iter.wrapping_mul(17).wrapping_add(thread.wrapping_mul(131))) % cardinality
+        }
     }
 }
 
@@ -258,19 +281,22 @@ fn run_with_threads<E, W, X>(
     export_interval_ms: u64,
     worker: W,
     exporter: X,
-) -> (f64, f64, u64, f64)
+) -> (f64, f64, u64, f64, Option<ProcessCpuUsage>)
 where
     E: Send + 'static,
     W: Fn(usize, usize) + Send + Sync + 'static,
     X: Fn() -> E + Send + Sync + 'static,
 {
     let interval = Duration::from_millis(export_interval_ms.max(1));
-    let barrier = Arc::new(Barrier::new(threads + 2));
+    let ready_barrier = Arc::new(Barrier::new(threads + 2));
+    let start_barrier = Arc::new(Barrier::new(threads + 2));
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
 
-    let exporter_barrier = Arc::clone(&barrier);
+    let exporter_ready_barrier = Arc::clone(&ready_barrier);
+    let exporter_start_barrier = Arc::clone(&start_barrier);
     let exporter = std::thread::spawn(move || {
-        exporter_barrier.wait();
+        exporter_ready_barrier.wait();
+        exporter_start_barrier.wait();
         let mut export_count = 0u64;
         let mut export_seconds = 0.0f64;
         loop {
@@ -290,20 +316,24 @@ where
     let mut workers = Vec::with_capacity(threads);
     for t in 0..threads {
         let worker_fn = Arc::clone(&worker);
-        let worker_barrier = Arc::clone(&barrier);
+        let worker_ready_barrier = Arc::clone(&ready_barrier);
+        let worker_start_barrier = Arc::clone(&start_barrier);
         workers.push(std::thread::spawn(move || {
             thread_affinity::pin_worker_thread(t, thread_affinity);
             // Warmup pass: warms up the dynamic-metric cache, branch predictor,
             // page tables, and JIT'd inline paths. Discarded from measurement
             // because it runs before the barrier release.
             worker_fn(t, warmup_iters);
-            worker_barrier.wait();
+            worker_ready_barrier.wait();
+            worker_start_barrier.wait();
             worker_fn(t, iters);
         }));
     }
 
-    barrier.wait();
+    ready_barrier.wait();
+    let cpu_start = ProcessCpuSnapshot::capture().ok();
     let record_start = Instant::now();
+    start_barrier.wait();
     for worker_thread in workers {
         worker_thread.join().expect("worker thread panicked");
     }
@@ -313,8 +343,19 @@ where
     let _ = stop_tx.send(());
     let (export_count, export_seconds) = exporter.join().expect("exporter thread panicked");
     let total_seconds = record_seconds + total_start.elapsed().as_secs_f64();
+    let cpu_usage = cpu_start.and_then(|start| {
+        ProcessCpuSnapshot::capture()
+            .ok()
+            .map(|end| end.elapsed_since(start))
+    });
 
-    (record_seconds, total_seconds, export_count, export_seconds)
+    (
+        record_seconds,
+        total_seconds,
+        export_count,
+        export_seconds,
+        cpu_usage,
+    )
 }
 
 fn metrics_key(name: &'static str, labels: Vec<Label>) -> Key {
@@ -349,9 +390,11 @@ fn metrics_histogram_entry(
     registry: &MetricsRegistry<Key, MetricsAtomicStorage>,
     key: Key,
 ) -> MetricsHistogramEntry {
-    registry.get_or_create_histogram(&key, |histogram: &MetricsHistogramCell| MetricsHistogramEntry {
-        handle: MetricsHistogram::from_arc(Arc::clone(histogram)),
-        cell: Arc::clone(histogram),
+    registry.get_or_create_histogram(&key, |histogram: &MetricsHistogramCell| {
+        MetricsHistogramEntry {
+            handle: MetricsHistogram::from_arc(Arc::clone(histogram)),
+            cell: Arc::clone(histogram),
+        }
     })
 }
 
@@ -368,10 +411,7 @@ fn export_metrics_histogram(cell: &MetricsHistogramCell) -> u64 {
     total
 }
 
-fn run_fast(
-    entity: Entity,
-    cfg: &Config,
-) -> RunResult {
+fn run_fast(entity: Entity, cfg: &Config) -> RunResult {
     let threads = cfg.threads;
     let iters = cfg.iters;
     let shards = cfg.shards;
@@ -384,18 +424,19 @@ fn run_fast(
             let counter = Arc::new(Counter::new(shards));
             let worker_counter = Arc::clone(&counter);
             let exporter_counter = Arc::clone(&counter);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |_, n| {
-                    for _ in 0..n {
-                        worker_counter.inc();
-                    }
-                },
-                move || exporter_counter.sum(),
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |_, n| {
+                        for _ in 0..n {
+                            worker_counter.inc();
+                        }
+                    },
+                    move || exporter_counter.sum(),
+                );
 
             RunResult {
                 final_count: counter.sum(),
@@ -403,25 +444,27 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::Distribution => {
             let dist = Arc::new(Distribution::new(shards));
             let worker_dist = Arc::clone(&dist);
             let exporter_dist = Arc::clone(&dist);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |_, n| {
-                    for i in 0..n {
-                        let value = 10 + ((i % 10_000) as u64);
-                        worker_dist.record(value);
-                    }
-                },
-                move || exporter_dist.count(),
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |_, n| {
+                        for i in 0..n {
+                            let value = 10 + ((i % 10_000) as u64);
+                            worker_dist.record(value);
+                        }
+                    },
+                    move || exporter_dist.count(),
+                );
 
             RunResult {
                 final_count: dist.count() as isize,
@@ -429,36 +472,42 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicCounter => {
             let metric = Arc::new(DynamicCounter::new(shards));
-            let endpoint_values: Arc<Vec<String>> = Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
+            let endpoint_values: Arc<Vec<String>> =
+                Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
             let org_cardinality = usize::max(1, labels / 4);
-            let org_values: Arc<Vec<String>> = Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
+            let org_values: Arc<Vec<String>> =
+                Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
             let worker_metric = Arc::clone(&metric);
             let worker_endpoints = Arc::clone(&endpoint_values);
             let worker_orgs = Arc::clone(&org_values);
             let exporter_metric = Arc::clone(&metric);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    let mut series_handles = Vec::with_capacity(worker_endpoints.len());
-                    for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
-                        let org_idx = endpoint_idx % worker_orgs.len();
-                        series_handles
-                            .push(worker_metric.series(&[("endpoint_uuid", endpoint.as_str()), ("org_id", worker_orgs[org_idx].as_str())]));
-                    }
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, series_handles.len());
-                        series_handles[idx].inc();
-                    }
-                },
-                move || exporter_metric.sum_all(),
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        let mut series_handles = Vec::with_capacity(worker_endpoints.len());
+                        for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % worker_orgs.len();
+                            series_handles.push(worker_metric.series(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", worker_orgs[org_idx].as_str()),
+                            ]));
+                        }
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, series_handles.len());
+                            series_handles[idx].inc();
+                        }
+                    },
+                    move || exporter_metric.sum_all(),
+                );
 
             RunResult {
                 final_count: metric.sum_all(),
@@ -466,52 +515,63 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicDistribution => {
             let metric = Arc::new(DynamicDistribution::new(shards));
-            let endpoint_values: Arc<Vec<String>> = Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
+            let endpoint_values: Arc<Vec<String>> =
+                Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
             let org_cardinality = usize::max(1, labels / 4);
-            let org_values: Arc<Vec<String>> = Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
+            let org_values: Arc<Vec<String>> =
+                Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
             let worker_metric = Arc::clone(&metric);
             let worker_endpoints = Arc::clone(&endpoint_values);
             let worker_orgs = Arc::clone(&org_values);
             let exporter_metric = Arc::clone(&metric);
             let exporter_endpoints = Arc::clone(&endpoint_values);
             let exporter_orgs = Arc::clone(&org_values);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    let mut series_handles = Vec::with_capacity(worker_endpoints.len());
-                    for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
-                        let org_idx = endpoint_idx % worker_orgs.len();
-                        series_handles
-                            .push(worker_metric.series(&[("endpoint_uuid", endpoint.as_str()), ("org_id", worker_orgs[org_idx].as_str())]));
-                    }
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, series_handles.len());
-                        let value = 10 + ((i % 10_000) as u64);
-                        series_handles[idx].record(value);
-                    }
-                },
-                move || {
-                    let mut total = 0u64;
-                    for (endpoint_idx, endpoint) in exporter_endpoints.iter().enumerate() {
-                        let org_idx = endpoint_idx % exporter_orgs.len();
-                        total +=
-                            exporter_metric.count(&[("endpoint_uuid", endpoint.as_str()), ("org_id", exporter_orgs[org_idx].as_str())]);
-                    }
-                    total
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        let mut series_handles = Vec::with_capacity(worker_endpoints.len());
+                        for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % worker_orgs.len();
+                            series_handles.push(worker_metric.series(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", worker_orgs[org_idx].as_str()),
+                            ]));
+                        }
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, series_handles.len());
+                            let value = 10 + ((i % 10_000) as u64);
+                            series_handles[idx].record(value);
+                        }
+                    },
+                    move || {
+                        let mut total = 0u64;
+                        for (endpoint_idx, endpoint) in exporter_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % exporter_orgs.len();
+                            total += exporter_metric.count(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", exporter_orgs[org_idx].as_str()),
+                            ]);
+                        }
+                        total
+                    },
+                );
 
             let mut final_count = 0u64;
             for (endpoint_idx, endpoint) in endpoint_values.iter().enumerate() {
                 let org_idx = endpoint_idx % org_values.len();
-                final_count += metric.count(&[("endpoint_uuid", endpoint.as_str()), ("org_id", org_values[org_idx].as_str())]);
+                final_count += metric.count(&[
+                    ("endpoint_uuid", endpoint.as_str()),
+                    ("org_id", org_values[org_idx].as_str()),
+                ]);
             }
             RunResult {
                 final_count: final_count as isize,
@@ -519,45 +579,54 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicGauge => {
             let metric = Arc::new(DynamicGauge::new(shards));
-            let endpoint_values: Arc<Vec<String>> = Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
+            let endpoint_values: Arc<Vec<String>> =
+                Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
             let org_cardinality = usize::max(1, labels / 4);
-            let org_values: Arc<Vec<String>> = Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
+            let org_values: Arc<Vec<String>> =
+                Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
             let worker_metric = Arc::clone(&metric);
             let worker_endpoints = Arc::clone(&endpoint_values);
             let worker_orgs = Arc::clone(&org_values);
             let exporter_metric = Arc::clone(&metric);
             let exporter_endpoints = Arc::clone(&endpoint_values);
             let exporter_orgs = Arc::clone(&org_values);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    let mut series_handles = Vec::with_capacity(worker_endpoints.len());
-                    for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
-                        let org_idx = endpoint_idx % worker_orgs.len();
-                        series_handles
-                            .push(worker_metric.series(&[("endpoint_uuid", endpoint.as_str()), ("org_id", worker_orgs[org_idx].as_str())]));
-                    }
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, series_handles.len());
-                        series_handles[idx].set(i as f64);
-                    }
-                },
-                move || {
-                    let mut total = 0.0f64;
-                    for (endpoint_idx, endpoint) in exporter_endpoints.iter().enumerate() {
-                        let org_idx = endpoint_idx % exporter_orgs.len();
-                        total += exporter_metric.get(&[("endpoint_uuid", endpoint.as_str()), ("org_id", exporter_orgs[org_idx].as_str())]);
-                    }
-                    total as u64
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        let mut series_handles = Vec::with_capacity(worker_endpoints.len());
+                        for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % worker_orgs.len();
+                            series_handles.push(worker_metric.series(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", worker_orgs[org_idx].as_str()),
+                            ]));
+                        }
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, series_handles.len());
+                            series_handles[idx].set(i as f64);
+                        }
+                    },
+                    move || {
+                        let mut total = 0.0f64;
+                        for (endpoint_idx, endpoint) in exporter_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % exporter_orgs.len();
+                            total += exporter_metric.get(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", exporter_orgs[org_idx].as_str()),
+                            ]);
+                        }
+                        total as u64
+                    },
+                );
 
             RunResult {
                 final_count: (threads * iters) as isize,
@@ -565,45 +634,54 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicGaugeI64 => {
             let metric = Arc::new(DynamicGaugeI64::new(shards));
-            let endpoint_values: Arc<Vec<String>> = Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
+            let endpoint_values: Arc<Vec<String>> =
+                Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
             let org_cardinality = usize::max(1, labels / 4);
-            let org_values: Arc<Vec<String>> = Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
+            let org_values: Arc<Vec<String>> =
+                Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
             let worker_metric = Arc::clone(&metric);
             let worker_endpoints = Arc::clone(&endpoint_values);
             let worker_orgs = Arc::clone(&org_values);
             let exporter_metric = Arc::clone(&metric);
             let exporter_endpoints = Arc::clone(&endpoint_values);
             let exporter_orgs = Arc::clone(&org_values);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    let mut series_handles = Vec::with_capacity(worker_endpoints.len());
-                    for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
-                        let org_idx = endpoint_idx % worker_orgs.len();
-                        series_handles
-                            .push(worker_metric.series(&[("endpoint_uuid", endpoint.as_str()), ("org_id", worker_orgs[org_idx].as_str())]));
-                    }
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, series_handles.len());
-                        series_handles[idx].set(i as i64);
-                    }
-                },
-                move || {
-                    let mut total = 0i64;
-                    for (endpoint_idx, endpoint) in exporter_endpoints.iter().enumerate() {
-                        let org_idx = endpoint_idx % exporter_orgs.len();
-                        total += exporter_metric.get(&[("endpoint_uuid", endpoint.as_str()), ("org_id", exporter_orgs[org_idx].as_str())]);
-                    }
-                    total
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        let mut series_handles = Vec::with_capacity(worker_endpoints.len());
+                        for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % worker_orgs.len();
+                            series_handles.push(worker_metric.series(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", worker_orgs[org_idx].as_str()),
+                            ]));
+                        }
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, series_handles.len());
+                            series_handles[idx].set(i as i64);
+                        }
+                    },
+                    move || {
+                        let mut total = 0i64;
+                        for (endpoint_idx, endpoint) in exporter_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % exporter_orgs.len();
+                            total += exporter_metric.get(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", exporter_orgs[org_idx].as_str()),
+                            ]);
+                        }
+                        total
+                    },
+                );
 
             RunResult {
                 final_count: (threads * iters) as isize,
@@ -611,52 +689,63 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicHistogram => {
             let metric = Arc::new(DynamicHistogram::with_latency_buckets(shards));
-            let endpoint_values: Arc<Vec<String>> = Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
+            let endpoint_values: Arc<Vec<String>> =
+                Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
             let org_cardinality = usize::max(1, labels / 4);
-            let org_values: Arc<Vec<String>> = Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
+            let org_values: Arc<Vec<String>> =
+                Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
             let worker_metric = Arc::clone(&metric);
             let worker_endpoints = Arc::clone(&endpoint_values);
             let worker_orgs = Arc::clone(&org_values);
             let exporter_metric = Arc::clone(&metric);
             let exporter_endpoints = Arc::clone(&endpoint_values);
             let exporter_orgs = Arc::clone(&org_values);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    let mut series_handles = Vec::with_capacity(worker_endpoints.len());
-                    for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
-                        let org_idx = endpoint_idx % worker_orgs.len();
-                        series_handles
-                            .push(worker_metric.series(&[("endpoint_uuid", endpoint.as_str()), ("org_id", worker_orgs[org_idx].as_str())]));
-                    }
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, series_handles.len());
-                        let value = 10 + ((i % 10_000) as u64);
-                        series_handles[idx].record(value);
-                    }
-                },
-                move || {
-                    let mut total = 0u64;
-                    for (endpoint_idx, endpoint) in exporter_endpoints.iter().enumerate() {
-                        let org_idx = endpoint_idx % exporter_orgs.len();
-                        total +=
-                            exporter_metric.count(&[("endpoint_uuid", endpoint.as_str()), ("org_id", exporter_orgs[org_idx].as_str())]);
-                    }
-                    total
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        let mut series_handles = Vec::with_capacity(worker_endpoints.len());
+                        for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % worker_orgs.len();
+                            series_handles.push(worker_metric.series(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", worker_orgs[org_idx].as_str()),
+                            ]));
+                        }
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, series_handles.len());
+                            let value = 10 + ((i % 10_000) as u64);
+                            series_handles[idx].record(value);
+                        }
+                    },
+                    move || {
+                        let mut total = 0u64;
+                        for (endpoint_idx, endpoint) in exporter_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % exporter_orgs.len();
+                            total += exporter_metric.count(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", exporter_orgs[org_idx].as_str()),
+                            ]);
+                        }
+                        total
+                    },
+                );
 
             let mut final_count = 0u64;
             for (endpoint_idx, endpoint) in endpoint_values.iter().enumerate() {
                 let org_idx = endpoint_idx % org_values.len();
-                final_count += metric.count(&[("endpoint_uuid", endpoint.as_str()), ("org_id", org_values[org_idx].as_str())]);
+                final_count += metric.count(&[
+                    ("endpoint_uuid", endpoint.as_str()),
+                    ("org_id", org_values[org_idx].as_str()),
+                ]);
             }
             RunResult {
                 final_count: final_count as isize,
@@ -664,31 +753,33 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::LabeledCounter => {
             let metric = Arc::new(LabeledCounter::<BenchLabel>::new(shards));
             let worker_metric = Arc::clone(&metric);
             let exporter_metric = Arc::clone(&metric);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, labels);
-                        worker_metric.inc(BenchLabel(idx));
-                    }
-                },
-                move || {
-                    let mut total = 0isize;
-                    for idx in 0..labels {
-                        total += exporter_metric.get(BenchLabel(idx));
-                    }
-                    total
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, labels);
+                            worker_metric.inc(BenchLabel(idx));
+                        }
+                    },
+                    move || {
+                        let mut total = 0isize;
+                        for idx in 0..labels {
+                            total += exporter_metric.get(BenchLabel(idx));
+                        }
+                        total
+                    },
+                );
 
             let mut final_count = 0isize;
             for idx in 0..labels {
@@ -700,31 +791,33 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::LabeledGauge => {
             let metric = Arc::new(LabeledGauge::<BenchLabel>::new());
             let worker_metric = Arc::clone(&metric);
             let exporter_metric = Arc::clone(&metric);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, labels);
-                        worker_metric.set(BenchLabel(idx), i as i64);
-                    }
-                },
-                move || {
-                    let mut total = 0i64;
-                    for idx in 0..labels {
-                        total += exporter_metric.get(BenchLabel(idx));
-                    }
-                    total
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, labels);
+                            worker_metric.set(BenchLabel(idx), i as i64);
+                        }
+                    },
+                    move || {
+                        let mut total = 0i64;
+                        for idx in 0..labels {
+                            total += exporter_metric.get(BenchLabel(idx));
+                        }
+                        total
+                    },
+                );
 
             RunResult {
                 final_count: (threads * iters) as isize,
@@ -732,34 +825,36 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::LabeledHistogram => {
             let metric = Arc::new(LabeledHistogram::<BenchLabel>::with_latency_buckets(shards));
             let worker_metric = Arc::clone(&metric);
             let exporter_metric = Arc::clone(&metric);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, labels);
-                        let value = 10 + ((i % 10_000) as u64);
-                        worker_metric.record(BenchLabel(idx), value);
-                    }
-                },
-                move || {
-                    let mut total = 0u64;
-                    for idx in 0..labels {
-                        let h = exporter_metric.get(BenchLabel(idx));
-                        total += h.count();
-                        total += h.sum();
-                    }
-                    total
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, labels);
+                            let value = 10 + ((i % 10_000) as u64);
+                            worker_metric.record(BenchLabel(idx), value);
+                        }
+                    },
+                    move || {
+                        let mut total = 0u64;
+                        for idx in 0..labels {
+                            let h = exporter_metric.get(BenchLabel(idx));
+                            total += h.count();
+                            total += h.sum();
+                        }
+                        total
+                    },
+                );
 
             let mut final_count = 0u64;
             for idx in 0..labels {
@@ -771,24 +866,25 @@ fn run_fast(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
     }
 }
 
-fn run_atomic(
-    entity: Entity,
-    cfg: &Config,
-) -> RunResult {
+fn run_atomic(entity: Entity, cfg: &Config) -> RunResult {
     let threads = cfg.threads;
     let iters = cfg.iters;
     let thread_affinity = cfg.thread_affinity;
     let export_interval_ms = cfg.export_interval_ms;
-    assert!(matches!(entity, Entity::Counter), "atomic mode only supports entity=counter");
+    assert!(
+        matches!(entity, Entity::Counter),
+        "atomic mode only supports entity=counter"
+    );
     let counter = Arc::new(std::sync::atomic::AtomicIsize::new(0));
     let worker_counter = Arc::clone(&counter);
     let exporter_counter = Arc::clone(&counter);
-    let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
+    let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) = run_with_threads(
         threads,
         iters,
         thread_affinity,
@@ -807,13 +903,11 @@ fn run_atomic(
         total_seconds,
         export_count,
         export_seconds,
+        cpu_usage,
     }
 }
 
-fn run_metrics(
-    entity: Entity,
-    cfg: &Config,
-) -> RunResult {
+fn run_metrics(entity: Entity, cfg: &Config) -> RunResult {
     let threads = cfg.threads;
     let iters = cfg.iters;
     let labels = cfg.labels;
@@ -825,21 +919,23 @@ fn run_metrics(
 
     match entity {
         Entity::Counter => {
-            let entry = metrics_counter_entry(&registry, metrics_key("contention_counter", Vec::new()));
+            let entry =
+                metrics_counter_entry(&registry, metrics_key("contention_counter", Vec::new()));
             let worker_counter = entry.handle.clone();
             let exporter_cell = Arc::clone(&entry.cell);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |_, n| {
-                    for _ in 0..n {
-                        worker_counter.increment(1);
-                    }
-                },
-                move || exporter_cell.load(Ordering::Relaxed),
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |_, n| {
+                        for _ in 0..n {
+                            worker_counter.increment(1);
+                        }
+                    },
+                    move || exporter_cell.load(Ordering::Relaxed),
+                );
 
             RunResult {
                 final_count: entry.cell.load(Ordering::Relaxed) as isize,
@@ -847,6 +943,7 @@ fn run_metrics(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::Distribution | Entity::DynamicDistribution => {
@@ -873,26 +970,36 @@ fn run_metrics(
             );
             let worker_entries = Arc::clone(&entries);
             let exporter_entries = Arc::clone(&entries);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_entries.len());
-                        worker_entries[idx].handle.increment(1);
-                    }
-                },
-                move || exporter_entries.iter().map(|entry| entry.cell.load(Ordering::Relaxed)).sum::<u64>(),
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_entries.len());
+                            worker_entries[idx].handle.increment(1);
+                        }
+                    },
+                    move || {
+                        exporter_entries
+                            .iter()
+                            .map(|entry| entry.cell.load(Ordering::Relaxed))
+                            .sum::<u64>()
+                    },
+                );
 
             RunResult {
-                final_count: entries.iter().map(|entry| entry.cell.load(Ordering::Relaxed) as isize).sum(),
+                final_count: entries
+                    .iter()
+                    .map(|entry| entry.cell.load(Ordering::Relaxed) as isize)
+                    .sum(),
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicGauge => {
@@ -916,19 +1023,25 @@ fn run_metrics(
             );
             let worker_entries = Arc::clone(&entries);
             let exporter_entries = Arc::clone(&entries);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_entries.len());
-                        worker_entries[idx].handle.set(i as f64);
-                    }
-                },
-                move || exporter_entries.iter().map(|entry| metrics_gauge_value(&entry.cell)).sum::<f64>() as u64,
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_entries.len());
+                            worker_entries[idx].handle.set(i as f64);
+                        }
+                    },
+                    move || {
+                        exporter_entries
+                            .iter()
+                            .map(|entry| metrics_gauge_value(&entry.cell))
+                            .sum::<f64>() as u64
+                    },
+                );
 
             RunResult {
                 final_count: (threads * iters) as isize,
@@ -936,6 +1049,7 @@ fn run_metrics(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicGaugeI64 => {
@@ -959,19 +1073,25 @@ fn run_metrics(
             );
             let worker_entries = Arc::clone(&entries);
             let exporter_entries = Arc::clone(&entries);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_entries.len());
-                        worker_entries[idx].handle.set(i as f64);
-                    }
-                },
-                move || exporter_entries.iter().map(|entry| metrics_gauge_value(&entry.cell)).sum::<f64>() as u64,
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_entries.len());
+                            worker_entries[idx].handle.set(i as f64);
+                        }
+                    },
+                    move || {
+                        exporter_entries
+                            .iter()
+                            .map(|entry| metrics_gauge_value(&entry.cell))
+                            .sum::<f64>() as u64
+                    },
+                );
 
             RunResult {
                 final_count: (threads * iters) as isize,
@@ -979,6 +1099,7 @@ fn run_metrics(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicHistogram => {
@@ -1004,21 +1125,27 @@ fn run_metrics(
             let worker_entries = Arc::clone(&entries);
             let worker_count = Arc::clone(&observed_count);
             let exporter_entries = Arc::clone(&entries);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_entries.len());
-                        let value = 10 + ((i % 10_000) as u64);
-                        worker_entries[idx].handle.record(value as f64);
-                        worker_count.fetch_add(1, Ordering::Relaxed);
-                    }
-                },
-                move || exporter_entries.iter().map(|entry| export_metrics_histogram(&entry.cell)).sum::<u64>(),
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_entries.len());
+                            let value = 10 + ((i % 10_000) as u64);
+                            worker_entries[idx].handle.record(value as f64);
+                            worker_count.fetch_add(1, Ordering::Relaxed);
+                        }
+                    },
+                    move || {
+                        exporter_entries
+                            .iter()
+                            .map(|entry| export_metrics_histogram(&entry.cell))
+                            .sum::<u64>()
+                    },
+                );
 
             RunResult {
                 final_count: observed_count.load(Ordering::Relaxed) as isize,
@@ -1026,6 +1153,7 @@ fn run_metrics(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::LabeledCounter => {
@@ -1034,33 +1162,46 @@ fn run_metrics(
                     .map(|i| {
                         metrics_counter_entry(
                             &registry,
-                            metrics_key("contention_labeled_counter", vec![Label::new("label", format!("v{i}"))]),
+                            metrics_key(
+                                "contention_labeled_counter",
+                                vec![Label::new("label", format!("v{i}"))],
+                            ),
                         )
                     })
                     .collect(),
             );
             let worker_entries = Arc::clone(&entries);
             let exporter_entries = Arc::clone(&entries);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_entries.len());
-                        worker_entries[idx].handle.increment(1);
-                    }
-                },
-                move || exporter_entries.iter().map(|entry| entry.cell.load(Ordering::Relaxed)).sum::<u64>(),
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_entries.len());
+                            worker_entries[idx].handle.increment(1);
+                        }
+                    },
+                    move || {
+                        exporter_entries
+                            .iter()
+                            .map(|entry| entry.cell.load(Ordering::Relaxed))
+                            .sum::<u64>()
+                    },
+                );
 
             RunResult {
-                final_count: entries.iter().map(|entry| entry.cell.load(Ordering::Relaxed) as isize).sum(),
+                final_count: entries
+                    .iter()
+                    .map(|entry| entry.cell.load(Ordering::Relaxed) as isize)
+                    .sum(),
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::LabeledGauge => {
@@ -1069,26 +1210,35 @@ fn run_metrics(
                     .map(|i| {
                         metrics_gauge_entry(
                             &registry,
-                            metrics_key("contention_labeled_gauge", vec![Label::new("label", format!("v{i}"))]),
+                            metrics_key(
+                                "contention_labeled_gauge",
+                                vec![Label::new("label", format!("v{i}"))],
+                            ),
                         )
                     })
                     .collect(),
             );
             let worker_entries = Arc::clone(&entries);
             let exporter_entries = Arc::clone(&entries);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_entries.len());
-                        worker_entries[idx].handle.set(i as f64);
-                    }
-                },
-                move || exporter_entries.iter().map(|entry| metrics_gauge_value(&entry.cell)).sum::<f64>() as u64,
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_entries.len());
+                            worker_entries[idx].handle.set(i as f64);
+                        }
+                    },
+                    move || {
+                        exporter_entries
+                            .iter()
+                            .map(|entry| metrics_gauge_value(&entry.cell))
+                            .sum::<f64>() as u64
+                    },
+                );
 
             RunResult {
                 final_count: (threads * iters) as isize,
@@ -1096,6 +1246,7 @@ fn run_metrics(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::LabeledHistogram => {
@@ -1104,7 +1255,10 @@ fn run_metrics(
                     .map(|i| {
                         metrics_histogram_entry(
                             &registry,
-                            metrics_key("contention_labeled_histogram", vec![Label::new("label", format!("v{i}"))]),
+                            metrics_key(
+                                "contention_labeled_histogram",
+                                vec![Label::new("label", format!("v{i}"))],
+                            ),
                         )
                     })
                     .collect(),
@@ -1113,21 +1267,27 @@ fn run_metrics(
             let worker_entries = Arc::clone(&entries);
             let worker_count = Arc::clone(&observed_count);
             let exporter_entries = Arc::clone(&entries);
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_entries.len());
-                        let value = 10 + ((i % 10_000) as u64);
-                        worker_entries[idx].handle.record(value as f64);
-                        worker_count.fetch_add(1, Ordering::Relaxed);
-                    }
-                },
-                move || exporter_entries.iter().map(|entry| export_metrics_histogram(&entry.cell)).sum::<u64>(),
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_entries.len());
+                            let value = 10 + ((i % 10_000) as u64);
+                            worker_entries[idx].handle.record(value as f64);
+                            worker_count.fetch_add(1, Ordering::Relaxed);
+                        }
+                    },
+                    move || {
+                        exporter_entries
+                            .iter()
+                            .map(|entry| export_metrics_histogram(&entry.cell))
+                            .sum::<u64>()
+                    },
+                );
 
             RunResult {
                 final_count: observed_count.load(Ordering::Relaxed) as isize,
@@ -1135,6 +1295,7 @@ fn run_metrics(
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
     }
@@ -1148,84 +1309,100 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
     let thread_affinity = cfg.thread_affinity;
     let export_interval_ms = cfg.export_interval_ms;
     let exporter = InMemoryMetricExporter::default();
-    let provider = Arc::new(SdkMeterProvider::builder().with_periodic_exporter(exporter.clone()).build());
+    let provider = Arc::new(
+        SdkMeterProvider::builder()
+            .with_periodic_exporter(exporter.clone())
+            .build(),
+    );
     let meter = provider.meter("fast-telemetry.bench_cache_contention");
+    let expected_final_count = (threads * (iters + (iters / 10).max(1))) as isize;
 
-    let attrs: Arc<Vec<KeyValue>> = Arc::new((0..labels).map(|i| KeyValue::new("label", format!("v{i}"))).collect());
+    let attrs: Arc<Vec<KeyValue>> = Arc::new(
+        (0..labels)
+            .map(|i| KeyValue::new("label", format!("v{i}")))
+            .collect(),
+    );
 
     match entity {
         Entity::Counter => {
-            let counter: Arc<OTelCounter<u64>> = Arc::new(meter.u64_counter("contention_counter").build());
+            let counter: Arc<OTelCounter<u64>> =
+                Arc::new(meter.u64_counter("contention_counter").build());
             let worker_counter = Arc::clone(&counter);
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |_, n| {
-                    for _ in 0..n {
-                        worker_counter.add(1, &[]);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |_, n| {
+                        for _ in 0..n {
+                            worker_counter.add(1, &[]);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::Distribution => {
             // OTel histogram as the closest equivalent to Distribution
-            let histogram: Arc<OTelHistogram<u64>> = Arc::new(meter.u64_histogram("contention_distribution").build());
+            let histogram: Arc<OTelHistogram<u64>> =
+                Arc::new(meter.u64_histogram("contention_distribution").build());
             let worker_hist = Arc::clone(&histogram);
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |_, n| {
-                    for i in 0..n {
-                        let value = 10 + ((i % 10_000) as u64);
-                        worker_hist.record(value, &[]);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |_, n| {
+                        for i in 0..n {
+                            let value = 10 + ((i % 10_000) as u64);
+                            worker_hist.record(value, &[]);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicCounter => {
-            let counter: Arc<OTelCounter<u64>> = Arc::new(meter.u64_counter("contention_dynamic_counter").build());
+            let counter: Arc<OTelCounter<u64>> =
+                Arc::new(meter.u64_counter("contention_dynamic_counter").build());
             let org_cardinality = usize::max(1, labels / 4);
             let attrs: Arc<Vec<Vec<KeyValue>>> = Arc::new(
                 (0..labels)
@@ -1243,38 +1420,44 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_attrs.len());
-                        worker_counter.add(1, &worker_attrs[idx]);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_attrs.len());
+                            worker_counter.add(1, &worker_attrs[idx]);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicDistribution => {
             // OTel histogram as the closest equivalent
-            let histogram: Arc<OTelHistogram<u64>> = Arc::new(meter.u64_histogram("contention_dynamic_distribution").build());
+            let histogram: Arc<OTelHistogram<u64>> = Arc::new(
+                meter
+                    .u64_histogram("contention_dynamic_distribution")
+                    .build(),
+            );
             let org_cardinality = usize::max(1, labels / 4);
             let attrs: Arc<Vec<Vec<KeyValue>>> = Arc::new(
                 (0..labels)
@@ -1292,38 +1475,41 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_attrs.len());
-                        let value = 10 + ((i % 10_000) as u64);
-                        worker_hist.record(value, &worker_attrs[idx]);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_attrs.len());
+                            let value = 10 + ((i % 10_000) as u64);
+                            worker_hist.record(value, &worker_attrs[idx]);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicGauge => {
-            let gauge: Arc<OTelGauge<f64>> = Arc::new(meter.f64_gauge("contention_dynamic_gauge").build());
+            let gauge: Arc<OTelGauge<f64>> =
+                Arc::new(meter.f64_gauge("contention_dynamic_gauge").build());
             let org_cardinality = usize::max(1, labels / 4);
             let attrs: Arc<Vec<Vec<KeyValue>>> = Arc::new(
                 (0..labels)
@@ -1341,37 +1527,40 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_attrs.len());
-                        worker_gauge.record(i as f64, &worker_attrs[idx]);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_attrs.len());
+                            worker_gauge.record(i as f64, &worker_attrs[idx]);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicGaugeI64 => {
-            let gauge: Arc<OTelGauge<i64>> = Arc::new(meter.i64_gauge("contention_dynamic_gauge_i64").build());
+            let gauge: Arc<OTelGauge<i64>> =
+                Arc::new(meter.i64_gauge("contention_dynamic_gauge_i64").build());
             let org_cardinality = usize::max(1, labels / 4);
             let attrs: Arc<Vec<Vec<KeyValue>>> = Arc::new(
                 (0..labels)
@@ -1389,37 +1578,40 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_attrs.len());
-                        worker_gauge.record(i as i64, &worker_attrs[idx]);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_attrs.len());
+                            worker_gauge.record(i as i64, &worker_attrs[idx]);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::DynamicHistogram => {
-            let histogram: Arc<OTelHistogram<u64>> = Arc::new(meter.u64_histogram("contention_dynamic_histogram").build());
+            let histogram: Arc<OTelHistogram<u64>> =
+                Arc::new(meter.u64_histogram("contention_dynamic_histogram").build());
             let org_cardinality = usize::max(1, labels / 4);
             let attrs: Arc<Vec<Vec<KeyValue>>> = Arc::new(
                 (0..labels)
@@ -1437,146 +1629,157 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_attrs.len());
-                        let value = 10 + ((i % 10_000) as u64);
-                        worker_hist.record(value, &worker_attrs[idx]);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_attrs.len());
+                            let value = 10 + ((i % 10_000) as u64);
+                            worker_hist.record(value, &worker_attrs[idx]);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::LabeledCounter => {
-            let counter: Arc<OTelCounter<u64>> = Arc::new(meter.u64_counter("contention_labeled_counter").build());
+            let counter: Arc<OTelCounter<u64>> =
+                Arc::new(meter.u64_counter("contention_labeled_counter").build());
             let worker_counter = Arc::clone(&counter);
             let worker_attrs = Arc::clone(&attrs);
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_attrs.len());
-                        let kv = std::slice::from_ref(&worker_attrs[idx]);
-                        worker_counter.add(1, kv);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_attrs.len());
+                            let kv = std::slice::from_ref(&worker_attrs[idx]);
+                            worker_counter.add(1, kv);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::LabeledGauge => {
-            let gauge: Arc<OTelGauge<i64>> = Arc::new(meter.i64_gauge("contention_labeled_gauge").build());
+            let gauge: Arc<OTelGauge<i64>> =
+                Arc::new(meter.i64_gauge("contention_labeled_gauge").build());
             let worker_gauge = Arc::clone(&gauge);
             let worker_attrs = Arc::clone(&attrs);
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_attrs.len());
-                        let kv = std::slice::from_ref(&worker_attrs[idx]);
-                        worker_gauge.record(i as i64, kv);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_attrs.len());
+                            let kv = std::slice::from_ref(&worker_attrs[idx]);
+                            worker_gauge.record(i as i64, kv);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
         Entity::LabeledHistogram => {
-            let histogram: Arc<OTelHistogram<u64>> = Arc::new(meter.u64_histogram("contention_labeled_histogram").build());
+            let histogram: Arc<OTelHistogram<u64>> =
+                Arc::new(meter.u64_histogram("contention_labeled_histogram").build());
             let worker_hist = Arc::clone(&histogram);
             let worker_attrs = Arc::clone(&attrs);
             let exporter_provider = Arc::clone(&provider);
             let exporter_exporter = exporter.clone();
 
-            let (record_seconds, total_seconds, export_count, export_seconds) = run_with_threads(
-                threads,
-                iters,
-                thread_affinity,
-                export_interval_ms,
-                move |t, n| {
-                    for i in 0..n {
-                        let idx = profile_index(profile, t, i, worker_attrs.len());
-                        let kv = std::slice::from_ref(&worker_attrs[idx]);
-                        let value = 10 + ((i % 10_000) as u64);
-                        worker_hist.record(value, kv);
-                    }
-                },
-                move || {
-                    let _ = exporter_provider.force_flush();
-                    let _ = exporter_exporter.get_finished_metrics();
-                    exporter_exporter.reset();
-                    0usize
-                },
-            );
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_attrs.len());
+                            let kv = std::slice::from_ref(&worker_attrs[idx]);
+                            let value = 10 + ((i % 10_000) as u64);
+                            worker_hist.record(value, kv);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
 
             let _ = provider.force_flush();
             let _ = exporter.get_finished_metrics();
             RunResult {
-                final_count: (threads * iters) as isize,
+                final_count: expected_final_count,
                 record_seconds,
                 total_seconds,
                 export_count,
                 export_seconds,
+                cpu_usage,
             }
         }
     }
@@ -1585,7 +1788,6 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
 fn main() {
     let cfg = parse_args();
     let total_ops = cfg.threads * cfg.iters;
-    let cpu_start = ProcessCpuSnapshot::capture().ok();
 
     let result = match cfg.mode {
         Mode::Fast => run_fast(cfg.entity, &cfg),
@@ -1593,7 +1795,7 @@ fn main() {
         Mode::Metrics => run_metrics(cfg.entity, &cfg),
         Mode::Otel => run_otel(cfg.entity, &cfg),
     };
-    let cpu_usage = cpu_start.and_then(|start| ProcessCpuSnapshot::capture().ok().map(|end| end.elapsed_since(start)));
+    let cpu_usage = result.cpu_usage;
 
     let record_ops_per_sec = (total_ops as f64) / result.record_seconds;
     let total_ops_per_sec = (total_ops as f64) / result.total_seconds;
@@ -1627,7 +1829,8 @@ fn main() {
         WorkloadProfile::Churn => "churn",
     };
 
-    let expected_count = (cfg.threads * cfg.iters) as isize;
+    let warmup_ops = cfg.threads * (cfg.iters / 10).max(1);
+    let expected_count = (total_ops + warmup_ops) as isize;
     let verify_count = matches!(
         cfg.entity,
         Entity::Counter
