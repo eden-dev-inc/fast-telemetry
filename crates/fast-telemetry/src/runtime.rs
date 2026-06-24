@@ -1,10 +1,13 @@
-//! Runtime registry for sharing pre-built metric groups.
+//! Runtime service for sharing telemetry across crate boundaries.
 //!
-//! The runtime owns metric groups for export/snapshot traversal. Recording
-//! remains a direct call on metric handles owned by the registered metric type.
+//! The runtime owns metric groups for export/snapshot traversal and one shared
+//! span collector. Recording remains a direct call on metric handles owned by
+//! the registered metric type, and span recording forwards to the embedded
+//! collector without a registry lookup.
 
-use crate::{ExportMetrics, MetricVisitor};
+use crate::{CompletedSpan, ExportMetrics, MetricVisitor, Span, SpanCollector, SpanKind};
 use parking_lot::RwLock;
+use std::borrow::Cow;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -51,11 +54,14 @@ impl From<String> for MetricScope {
 
 /// Shared telemetry runtime.
 ///
-/// Register metric groups once during construction, then keep updating the
-/// returned metric handles directly on hot paths.
+/// Share one runtime across crate boundaries so metric registration, span
+/// collection, and export setup are owned once per service. Register metric
+/// groups during construction, then keep updating the returned metric handles
+/// directly on hot paths.
 pub struct Runtime {
     config: RuntimeConfig,
     registry: RwLock<Vec<RegisteredMetricGroup>>,
+    span_collector: Arc<SpanCollector>,
 }
 
 impl Runtime {
@@ -64,12 +70,53 @@ impl Runtime {
         Arc::new(Self {
             config,
             registry: RwLock::new(Vec::new()),
+            span_collector: Arc::new(SpanCollector::new(8, 4096)),
         })
     }
 
     /// Return this runtime's configuration.
     pub fn config(&self) -> &RuntimeConfig {
         &self.config
+    }
+
+    /// Return the shared span collector owned by this runtime.
+    ///
+    /// Clone this once when wiring exporters. Hot-path span creation should use
+    /// [`start_span`](Self::start_span) or keep this borrowed through the
+    /// shared runtime rather than cloning an [`Arc`] per operation.
+    pub fn span_collector(&self) -> &Arc<SpanCollector> {
+        &self.span_collector
+    }
+
+    /// Create a new root span with a fresh trace ID.
+    ///
+    /// This forwards to the runtime's shared [`SpanCollector`], keeping the
+    /// collector service shared across crate boundaries.
+    pub fn start_span(&self, name: impl Into<Cow<'static, str>>, kind: SpanKind) -> Span {
+        self.span_collector.start_span(name, kind)
+    }
+
+    /// Create a root span from an incoming W3C `traceparent` header.
+    ///
+    /// This forwards to the runtime's shared [`SpanCollector`].
+    pub fn start_span_from_traceparent(
+        &self,
+        traceparent: Option<&str>,
+        name: impl Into<Cow<'static, str>>,
+        kind: SpanKind,
+    ) -> Span {
+        self.span_collector
+            .start_span_from_traceparent(traceparent, name, kind)
+    }
+
+    /// Flush spans recorded on the current thread into the shared collector.
+    pub fn flush_local_spans(&self) {
+        self.span_collector.flush_local();
+    }
+
+    /// Drain completed spans from the shared collector into `buf`.
+    pub fn drain_spans_into(&self, buf: &mut Vec<CompletedSpan>) {
+        self.span_collector.drain_into(buf);
     }
 
     /// Register a metric group and return direct handles to it.

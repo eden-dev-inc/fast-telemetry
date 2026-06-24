@@ -2,8 +2,9 @@
 
 use fast_telemetry::{
     Counter, ExportMetrics, HistogramSnapshot, MetricKind, MetricLabels, MetricMeta, MetricScope,
-    MetricVisitor, Runtime, RuntimeConfig,
+    MetricVisitor, Runtime, RuntimeConfig, SpanKind,
 };
+use std::sync::Arc;
 
 #[derive(ExportMetrics)]
 #[metric_prefix = "cache"]
@@ -74,4 +75,31 @@ fn runtime_registers_metrics_and_returns_direct_handles() {
     let mut missing_scope_visitor = CounterVisitor::default();
     runtime.visit_metrics_for_scope(&MetricScope::new("other"), &mut missing_scope_visitor);
     assert!(missing_scope_visitor.counters.is_empty());
+}
+
+#[test]
+fn runtime_owns_shared_span_collector() {
+    let runtime = Runtime::new(RuntimeConfig::default());
+    let exporter_collector = Arc::clone(runtime.span_collector());
+
+    {
+        let mut span = runtime.start_span("cache_lookup", SpanKind::Internal);
+        span.set_attribute("component", "shardmap");
+    }
+
+    {
+        let mut span = runtime.start_span("index_probe", SpanKind::Internal);
+        span.set_attribute("hit", true);
+    }
+
+    runtime.flush_local_spans();
+
+    let mut spans = Vec::new();
+    exporter_collector.drain_into(&mut spans);
+
+    assert!(Arc::ptr_eq(runtime.span_collector(), &exporter_collector));
+    assert_eq!(runtime.span_collector().recorded_count(), 2);
+    assert_eq!(spans.len(), 2);
+    assert!(spans.iter().any(|span| span.name == "cache_lookup"));
+    assert!(spans.iter().any(|span| span.name == "index_probe"));
 }

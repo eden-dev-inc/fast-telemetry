@@ -226,26 +226,33 @@ metric names and borrowed `MetricLabels`, including borrowed canonical dynamic
 label pairs, so custom exporters can collect report frames or UI models without
 parsing Prometheus, DogStatsD, OTLP, or ClickHouse output.
 
-### Runtime Registry
+### Runtime
 
 Enable the `runtime` feature when a parent service should own telemetry and pass
-the same concrete runtime type into child crates.
+the same concrete runtime type into child crates. The runtime owns metric
+registration and a shared span collector so export setup happens once.
 
 ```rust
-use fast_telemetry::{MetricScope, Runtime, RuntimeConfig};
+use fast_telemetry::{MetricScope, Runtime, RuntimeConfig, SpanKind};
 use std::sync::Arc;
 
 pub type TelemetryRuntime = fast_telemetry::Runtime;
 
 let runtime: Arc<TelemetryRuntime> = Runtime::new(RuntimeConfig::default());
 let metrics = runtime.register_metrics(MetricScope::new("myapp"), AppMetrics::new());
+let span_collector = Arc::clone(runtime.span_collector());
 
 metrics.requests.inc();
+
+let span = runtime.start_span("handle_request", SpanKind::Server);
+drop(span);
 ```
 
 Registration is construction-time work. Keep hot paths on direct metric handles
 from the returned `RegisteredMetrics<M>` value, or on handles pre-resolved inside
-your telemetry struct; do not perform registry lookup per operation.
+your telemetry struct; do not perform registry lookup per operation. Clone the
+runtime's span collector once when wiring exporters, and start spans through the
+shared runtime or collector.
 
 ### Extrema Gauges
 
