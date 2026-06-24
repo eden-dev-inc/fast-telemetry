@@ -15,7 +15,7 @@ service for metric registration, span collection, and export setup while child
 crates keep hot paths on direct metric handles.
 
 See the [workspace README](../../README.md) for full documentation, examples,
-and API reference.
+runtime integration rules, and API reference.
 
 ## Companion Crates
 
