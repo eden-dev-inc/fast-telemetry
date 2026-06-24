@@ -29,6 +29,8 @@
 mod export;
 pub(crate) mod internal;
 mod metric;
+#[cfg(feature = "runtime")]
+mod runtime;
 pub mod span;
 mod temporality;
 
@@ -47,6 +49,7 @@ pub mod __macro_support {
         FastFormat,
     };
 }
+pub use metric::ExportMetrics;
 pub use metric::{
     Counter, Distribution, DistributionSnapshot, DynamicCounter, DynamicCounterSeries,
     DynamicDistribution, DynamicDistributionSeries, DynamicGauge, DynamicGaugeI64,
@@ -58,6 +61,8 @@ pub use metric::{
 };
 #[cfg(feature = "eviction")]
 pub use metric::{advance_cycle, current_cycle};
+#[cfg(feature = "runtime")]
+pub use runtime::{MetricScope, RegisteredMetrics, Runtime, RuntimeConfig};
 pub use span::{
     CompletedSpan, Span, SpanAttribute, SpanCollector, SpanEvent, SpanId, SpanKind, SpanStatus,
     SpanValue, TraceId, current_span_id, current_trace_id,

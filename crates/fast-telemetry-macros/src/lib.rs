@@ -1236,6 +1236,12 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
             }
         }
 
+        impl fast_telemetry::ExportMetrics for #name {
+            fn visit_metrics<V: fast_telemetry::MetricVisitor + ?Sized>(&self, visitor: &mut V) {
+                #(#visitor_exports)*
+            }
+        }
+
         impl #name {
             /// Export all metrics in Prometheus text exposition format.
             pub fn export_prometheus(&self, output: &mut String) {
@@ -1306,7 +1312,7 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
 
             /// Visit all metrics as structured cumulative observations.
             pub fn visit_metrics<V: fast_telemetry::MetricVisitor + ?Sized>(&self, visitor: &mut V) {
-                #(#visitor_exports)*
+                fast_telemetry::ExportMetrics::visit_metrics(self, visitor);
             }
 
             #otlp_method

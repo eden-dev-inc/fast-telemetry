@@ -10,8 +10,12 @@ export.
 in-process export path for custom `MetricVisitor` implementations that need
 typed cumulative observations instead of a wire-format string or protobuf.
 
+Enable the `runtime` feature when a parent crate should own one shared telemetry
+service for metric registration, span collection, and export setup while child
+crates keep hot paths on direct metric handles.
+
 See the [workspace README](../../README.md) for full documentation, examples,
-and API reference.
+runtime integration rules, and API reference.
 
 ## Companion Crates
 

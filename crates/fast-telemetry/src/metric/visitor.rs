@@ -176,6 +176,14 @@ pub trait MetricVisitor {
     }
 }
 
+/// Structured export surface implemented by metric groups.
+///
+/// `#[derive(ExportMetrics)]` implements this trait and also keeps generating
+/// the inherent `visit_metrics(...)` convenience method.
+pub trait ExportMetrics {
+    fn visit_metrics<V: MetricVisitor + ?Sized>(&self, visitor: &mut V);
+}
+
 impl HistogramSnapshot for Histogram {
     fn count(&self) -> u64 {
         self.count()
