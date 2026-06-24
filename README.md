@@ -231,6 +231,8 @@ parsing Prometheus, DogStatsD, OTLP, or ClickHouse output.
 Enable the `runtime` feature when a parent service should own telemetry and pass
 the same concrete runtime type into child crates. The runtime owns metric
 registration and a shared span collector so export setup happens once.
+`RuntimeConfig` is currently reserved for future runtime tuning; use
+`RuntimeConfig::default()` when creating a runtime.
 
 ```toml
 [dependencies]
@@ -281,6 +283,17 @@ let _span_exporter = spans::spawn(
 let cache = shardmap::ShardMap::with_parent_telemetry(Some(Arc::clone(&runtime)));
 ```
 
+Metric export and span export use different surfaces from the same runtime:
+
+```rust
+let mut visitor = MyMetricVisitor::default();
+runtime.visit_metrics(&mut visitor);
+
+let mut completed_spans = Vec::new();
+runtime.flush_local_spans();
+runtime.drain_spans_into(&mut completed_spans);
+```
+
 #### Child Crates
 
 Child crates should re-export the exact runtime type they accept, register their
@@ -328,6 +341,15 @@ impl CacheTelemetry {
 
         let _span = self.runtime.start_span("shardmap.cache.lookup", SpanKind::Internal);
         // lookup work
+    }
+
+    pub fn record_inbound_lookup(&self, traceparent: Option<&str>) {
+        let _span = self.runtime.start_span_from_traceparent(
+            traceparent,
+            "shardmap.cache.inbound_lookup",
+            SpanKind::Server,
+        );
+        // inbound lookup work
     }
 }
 ```

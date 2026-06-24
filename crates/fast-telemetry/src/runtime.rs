@@ -12,6 +12,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 /// Configuration for [`Runtime`].
+///
+/// This is currently reserved for future runtime tuning. Use
+/// [`RuntimeConfig::default`] when creating a runtime.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 pub struct RuntimeConfig {}
