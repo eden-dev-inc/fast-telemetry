@@ -87,6 +87,7 @@ For detailed benchmark results and methodology, see
 | Feature      | Default | Description                                      |
 | ------------ | ------- | ------------------------------------------------ |
 | `macros`     | ✓       | `ExportMetrics` and `LabelEnum` derive macros    |
+| `runtime`    |         | Shared metric runtime/registry API               |
 | `otlp`       |         | OTLP protobuf export support                     |
 | `clickhouse` |         | First-party ClickHouse row export support        |
 | `eviction`   |         | Enable stale-series eviction for dynamic metrics |
@@ -224,6 +225,27 @@ metrics.visit_metrics(&mut visitor);
 metric names and borrowed `MetricLabels`, including borrowed canonical dynamic
 label pairs, so custom exporters can collect report frames or UI models without
 parsing Prometheus, DogStatsD, OTLP, or ClickHouse output.
+
+### Runtime Registry
+
+Enable the `runtime` feature when a parent service should own telemetry and pass
+the same concrete runtime type into child crates.
+
+```rust
+use fast_telemetry::{MetricScope, Runtime, RuntimeConfig};
+use std::sync::Arc;
+
+pub type TelemetryRuntime = fast_telemetry::Runtime;
+
+let runtime: Arc<TelemetryRuntime> = Runtime::new(RuntimeConfig::default());
+let metrics = runtime.register_metrics(MetricScope::new("myapp"), AppMetrics::new());
+
+metrics.requests.inc();
+```
+
+Registration is construction-time work. Keep hot paths on direct metric handles
+from the returned `RegisteredMetrics<M>` value, or on handles pre-resolved inside
+your telemetry struct; do not perform registry lookup per operation.
 
 ### Extrema Gauges
 

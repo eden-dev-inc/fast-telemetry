@@ -37,6 +37,6 @@ pub use min_gauge::MinGauge;
 pub use min_gauge_f64::MinGaugeF64;
 pub use sampled_timer::{LabeledSampledTimer, SampledTimer, SampledTimerGuard};
 pub use visitor::{
-    DistributionSnapshot, HistogramSnapshot, MetricKind, MetricLabel, MetricLabels,
+    DistributionSnapshot, ExportMetrics, HistogramSnapshot, MetricKind, MetricLabel, MetricLabels,
     MetricLabelsIter, MetricMeta, MetricVisitor,
 };

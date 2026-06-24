@@ -18,6 +18,7 @@ all-features = true
 [features]
 default = ["macros"]
 macros = ["dep:fast-telemetry-macros"]
+runtime = []
 otlp = ["dep:opentelemetry-proto", "dep:prost"]
 clickhouse = ["dep:indexmap", "dep:klickhouse"]
 shuttle-tests = ["dep:shuttle"]
