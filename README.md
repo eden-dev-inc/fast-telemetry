@@ -38,19 +38,30 @@ added export adapters for the backends we actually use (Prometheus, DogStatsD,
 OTLP). At that point we'd fully replaced the `opentelemetry` crate on the hot
 path and decided to open-source the result.
 
-We shard counting events across cache-line-padded atomic cells per
-thread. The common write path is effectively thread-local, minimizing cross-core
-contention. _Reads_ aggregate all shards, but this is fine because export is
-infrequent relative to increments.
+We shard counting events across cache-line-padded atomic cells per thread. The
+common write path is effectively thread-local, minimizing cross-core contention.
+_Reads_ aggregate all shards, but this is fine because export is infrequent
+relative to increments.
 
-| Operation                               | Latency       |
-| --------------------------------------- | ------------- |
-| Thread-local increment (fast-telemetry) | ~2 ns         |
-| Uncontended atomic                      | ~10 ns        |
-| **Contended atomic (16 cores)**         | **40-400 ns** |
+Representative counter costs:
 
-The difference is important when you're incrementing counters millions of times per
-second and don't want your telemetry to be the thing that slows you down or pollutes your numbers.
+| Operation | Cost |
+| --- | ---: |
+| Grouped buffered fast-telemetry counter, 6-counter group | 0.19 CPU ns/incr, ~0.88 estimated cycles/incr |
+| Independent fast-telemetry counter, 6-counter group workload | 0.73 CPU ns/incr, ~3.37 estimated cycles/incr |
+| Uncontended atomic | ~10 ns |
+| Contended atomic (16 cores) | 40-400 ns |
+| OpenTelemetry Rust `u64_counter`, 6-counter group workload | 254.91 CPU ns/incr, ~1175.14 estimated cycles/incr |
+
+In that 6-counter harness row, grouped buffered counters measured 45.77B
+counters/s versus 18.72B counters/s for independent fast counters and 60.87M
+counters/s for OpenTelemetry Rust. The cycle numbers are estimated from the mac
+CPU-time result; Linux `--perf-stat` runs record measured `*_cycles_per_write`
+fields.
+
+The difference is important when you're incrementing counters millions of times
+per second and don't want your telemetry to be the thing that slows you down or
+pollutes your numbers.
 
 ## When to use this (and when not to)
 
