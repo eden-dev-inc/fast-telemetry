@@ -99,7 +99,7 @@ dynamic metric types. Without it, these APIs are not available.
 
 ```toml
 [dependencies]
-fast-telemetry = "0.6"
+fast-telemetry = "0.7"
 ```
 
 ### Define Metrics
@@ -236,7 +236,7 @@ registration and a shared span collector so export setup happens once.
 
 ```toml
 [dependencies]
-fast-telemetry = { version = "0.6", features = ["runtime"] }
+fast-telemetry = { version = "0.7", features = ["runtime"] }
 ```
 
 ```rust
@@ -715,7 +715,7 @@ sweep and then sum each dynamic metric's `evict_stale(...)` result.
 enable the export crate's `monoio` feature for monoio-native loops:
 
 ```toml
-fast-telemetry-export = { version = "0.6", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+fast-telemetry-export = { version = "0.7", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
 ```
 
 Use `dogstatsd::run_monoio(...)`, `otlp::run_monoio(...)`, and

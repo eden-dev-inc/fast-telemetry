@@ -1,5 +1,48 @@
 # Release Notes
 
+## 0.7.0 - 2026-06-29
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
+
+Why this is a 0.7.0 bump:
+
+- this release adds bench-only public grouped-counter helpers behind the `bench-tools` feature while evaluating a possible production batching API.
+- all workspace crates are aligned at `0.7.0` so downstream services can keep `fast-telemetry` and `fast-telemetry-export` on the same runtime and metric type boundary.
+
+Highlights:
+
+- grouped counter buffering: added a bench-only `CounterSetBuffer` prototype that accumulates related counter deltas locally and flushes shared atomics every configurable number of logical operations.
+- individual grouped updates: added indexed `CounterSet::inc(...)` and `CounterSet::add(...)` helpers so grouped counters can still be updated one at a time when only part of the group changes.
+- benchmark coverage: added `counter_buffered`, `counter_buffered_indexed`, and `counter_buffered_lookup` harness entities plus `--flush-every` controls to measure direct grouped increments, pre-resolved index updates, and per-op name lookup separately.
+
+Focused mac harness comparison, all runs with verified final counts:
+
+```text
+./crates/fast-telemetry/bench/run-counter-batch-bench.sh \
+  --threads 16 \
+  --runs 7 \
+  --target-writes 512000000 \
+  --batch-sizes 3,4,5,6 \
+  --flush-every 64
+```
+
+| Counters per Op | `counter_multi` | `counter_buffered` | Change |
+| ---: | ---: | ---: | ---: |
+| 3 | 0.92 CPU ns/write | 0.38 CPU ns/write | 58.7% lower |
+| 4 | 0.76 CPU ns/write | 0.27 CPU ns/write | 64.5% lower |
+| 5 | 0.72 CPU ns/write | 0.23 CPU ns/write | 68.1% lower |
+| 6 | 0.69 CPU ns/write | 0.20 CPU ns/write | 71.0% lower |
+
+The name-lookup control confirms that registry lookup should stay out of the hot path. With 128 registered metric names and 6 active counters per operation, direct buffered updates measured 0.19 CPU ns/write, pre-resolved indexed updates measured 0.82 CPU ns/write, and per-op `BTreeMap` name lookup measured 30.15 CPU ns/write.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.7"
+fast-telemetry-export = "0.7"
+```
+
 ## 0.5.1 - 2026-05-26
 
 Published crates: `fast-telemetry`, `fast-telemetry-export`. (`fast-telemetry-macros` is unchanged since 0.5.0.)

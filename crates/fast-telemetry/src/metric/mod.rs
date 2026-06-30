@@ -17,7 +17,7 @@ mod visitor;
 
 pub use counter::Counter;
 #[cfg(feature = "bench-tools")]
-pub use counter::CounterSet;
+pub use counter::{CounterSet, CounterSetBuffer};
 pub use distribution::Distribution;
 pub use dynamic::{
     DynamicCounter, DynamicCounterSeries, DynamicDistribution, DynamicDistributionSeries,

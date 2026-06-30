@@ -9,6 +9,7 @@ RUNS="7"
 TARGET_WRITES="512000000"
 BATCH_SIZES_CSV="1,2,4,8,16,32,64,128"
 EXPORT_INTERVAL_MS="10"
+FLUSH_EVERY="64"
 PIN=0
 CPU_LIST=""
 
@@ -19,14 +20,16 @@ while [[ $# -gt 0 ]]; do
     --target-writes) TARGET_WRITES="$2"; shift 2 ;;
     --batch-sizes) BATCH_SIZES_CSV="$2"; shift 2 ;;
     --export-interval-ms) EXPORT_INTERVAL_MS="$2"; shift 2 ;;
+    --flush-every) FLUSH_EVERY="$2"; shift 2 ;;
     --pin) PIN=1; shift ;;
     --cpu-list) CPU_LIST="$2"; shift 2 ;;
     --help)
-      echo "Usage: $0 [--threads N] [--runs N] [--target-writes N] [--batch-sizes list] [--export-interval-ms N] [--pin] [--cpu-list list]"
+      echo "Usage: $0 [--threads N] [--runs N] [--target-writes N] [--batch-sizes list] [--flush-every N] [--export-interval-ms N] [--pin] [--cpu-list list]"
       echo ""
-      echo "Compares counter_multi against counter_batch and counter_set across batch sizes."
-      echo "Defaults: threads=logical CPUs, runs=7, target-writes=512000000, batch-sizes=1,2,4,8,16,32,64,128"
+      echo "Compares counter_multi against counter_batch, counter_set, and counter_buffered across batch sizes."
+      echo "Defaults: threads=logical CPUs, runs=7, target-writes=512000000, batch-sizes=1,2,4,8,16,32,64,128, flush-every=64"
       echo "--target-writes is total counter writes per run, not outer benchmark ops."
+      echo "--flush-every is local operations per atomic flush for counter_buffered."
       echo "--pin forwards taskset pinning to run-cache-bench.sh on Linux."
       exit 0
       ;;
@@ -49,7 +52,7 @@ RUN_DIR="$RESULTS_DIR/counter_batch_${TIMESTAMP}_$$"
 mkdir -p "$RUN_DIR"
 SUMMARY_CSV="$RUN_DIR/counter-batch-summary.csv"
 
-echo "batch_size,iters_per_thread,target_counter_writes,multi_cpu_ns_per_write,batch_cpu_ns_per_write,set_cpu_ns_per_write,multi_total_ns_per_op,batch_total_ns_per_op,set_total_ns_per_op,batch_delta_pct,set_delta_pct,multi_counter_writes_per_sec,batch_counter_writes_per_sec,set_counter_writes_per_sec,multi_cv_pct,batch_cv_pct,set_cv_pct,multi_cpu_total_seconds,batch_cpu_total_seconds,set_cpu_total_seconds,multi_avg_cores,batch_avg_cores,set_avg_cores,multi_dir,batch_dir,set_dir" > "$SUMMARY_CSV"
+echo "batch_size,iters_per_thread,target_counter_writes,flush_every,multi_cpu_ns_per_write,batch_cpu_ns_per_write,set_cpu_ns_per_write,buffered_cpu_ns_per_write,multi_total_ns_per_op,batch_total_ns_per_op,set_total_ns_per_op,buffered_total_ns_per_op,batch_delta_pct,set_delta_pct,buffered_delta_pct,multi_counter_writes_per_sec,batch_counter_writes_per_sec,set_counter_writes_per_sec,buffered_counter_writes_per_sec,multi_cv_pct,batch_cv_pct,set_cv_pct,buffered_cv_pct,multi_cpu_total_seconds,batch_cpu_total_seconds,set_cpu_total_seconds,buffered_cpu_total_seconds,multi_avg_cores,batch_avg_cores,set_avg_cores,buffered_avg_cores,multi_dir,batch_dir,set_dir,buffered_dir" > "$SUMMARY_CSV"
 
 read_summary_field() {
   local dir="$1"
@@ -75,6 +78,7 @@ run_case() {
     --iters "$iters"
     --runs "$RUNS"
     --batch-size "$batch_size"
+    --flush-every "$FLUSH_EVERY"
     --export-interval-ms "$EXPORT_INTERVAL_MS"
   )
 
@@ -97,7 +101,7 @@ run_case() {
 
 printf "\n=== counter batch benchmark harness ===\n"
 printf "threads=%s runs=%s target_writes=%s batch_sizes=%s\n" "$THREADS" "$RUNS" "$TARGET_WRITES" "$BATCH_SIZES_CSV"
-printf "export_interval_ms=%s pin=%s\n" "$EXPORT_INTERVAL_MS" "$PIN"
+printf "flush_every=%s export_interval_ms=%s pin=%s\n" "$FLUSH_EVERY" "$EXPORT_INTERVAL_MS" "$PIN"
 printf "results=%s\n\n" "$RUN_DIR"
 
 for batch_size in "${BATCH_SIZES[@]}"; do
@@ -115,29 +119,37 @@ for batch_size in "${BATCH_SIZES[@]}"; do
   multi_dir="$(run_case counter_multi "$batch_size" "$iters")"
   batch_dir="$(run_case counter_batch "$batch_size" "$iters")"
   set_dir="$(run_case counter_set "$batch_size" "$iters")"
+  buffered_dir="$(run_case counter_buffered "$batch_size" "$iters")"
 
   multi_ns="$(read_summary_field "$multi_dir" 20)"
   batch_ns="$(read_summary_field "$batch_dir" 20)"
   set_ns="$(read_summary_field "$set_dir" 20)"
+  buffered_ns="$(read_summary_field "$buffered_dir" 20)"
   multi_total_ns_per_op="$(read_summary_field "$multi_dir" 25)"
   batch_total_ns_per_op="$(read_summary_field "$batch_dir" 25)"
   set_total_ns_per_op="$(read_summary_field "$set_dir" 25)"
+  buffered_total_ns_per_op="$(read_summary_field "$buffered_dir" 25)"
   multi_writes="$(read_summary_field "$multi_dir" 5)"
   batch_writes="$(read_summary_field "$batch_dir" 5)"
   set_writes="$(read_summary_field "$set_dir" 5)"
+  buffered_writes="$(read_summary_field "$buffered_dir" 5)"
   multi_cv="$(read_summary_field "$multi_dir" 23)"
   batch_cv="$(read_summary_field "$batch_dir" 23)"
   set_cv="$(read_summary_field "$set_dir" 23)"
+  buffered_cv="$(read_summary_field "$buffered_dir" 23)"
   multi_cpu="$(read_summary_field "$multi_dir" 13)"
   batch_cpu="$(read_summary_field "$batch_dir" 13)"
   set_cpu="$(read_summary_field "$set_dir" 13)"
+  buffered_cpu="$(read_summary_field "$buffered_dir" 13)"
   multi_cores="$(read_summary_field "$multi_dir" 14)"
   batch_cores="$(read_summary_field "$batch_dir" 14)"
   set_cores="$(read_summary_field "$set_dir" 14)"
+  buffered_cores="$(read_summary_field "$buffered_dir" 14)"
   batch_delta_pct="$(awk -v multi="$multi_ns" -v candidate="$batch_ns" 'BEGIN { if (multi == 0) print "0.00"; else printf "%.2f", ((multi - candidate) / multi) * 100.0 }')"
   set_delta_pct="$(awk -v multi="$multi_ns" -v candidate="$set_ns" 'BEGIN { if (multi == 0) print "0.00"; else printf "%.2f", ((multi - candidate) / multi) * 100.0 }')"
+  buffered_delta_pct="$(awk -v multi="$multi_ns" -v candidate="$buffered_ns" 'BEGIN { if (multi == 0) print "0.00"; else printf "%.2f", ((multi - candidate) / multi) * 100.0 }')"
 
-  echo "$batch_size,$iters,$TARGET_WRITES,$multi_ns,$batch_ns,$set_ns,$multi_total_ns_per_op,$batch_total_ns_per_op,$set_total_ns_per_op,$batch_delta_pct,$set_delta_pct,$multi_writes,$batch_writes,$set_writes,$multi_cv,$batch_cv,$set_cv,$multi_cpu,$batch_cpu,$set_cpu,$multi_cores,$batch_cores,$set_cores,$multi_dir,$batch_dir,$set_dir" >> "$SUMMARY_CSV"
+  echo "$batch_size,$iters,$TARGET_WRITES,$FLUSH_EVERY,$multi_ns,$batch_ns,$set_ns,$buffered_ns,$multi_total_ns_per_op,$batch_total_ns_per_op,$set_total_ns_per_op,$buffered_total_ns_per_op,$batch_delta_pct,$set_delta_pct,$buffered_delta_pct,$multi_writes,$batch_writes,$set_writes,$buffered_writes,$multi_cv,$batch_cv,$set_cv,$buffered_cv,$multi_cpu,$batch_cpu,$set_cpu,$buffered_cpu,$multi_cores,$batch_cores,$set_cores,$buffered_cores,$multi_dir,$batch_dir,$set_dir,$buffered_dir" >> "$SUMMARY_CSV"
 done
 
 printf "\nSummary (positive delta means the candidate was faster than counter_multi):\n"
@@ -146,8 +158,8 @@ awk -F, '
     next
   }
   {
-    printf "  batch_size=%-4s cpu_ns/write multi=%6.2f batch=%6.2f set=%6.2f total_ns/op multi=%6.2f batch=%6.2f set=%6.2f delta batch=%7.2f%% set=%7.2f%% cv=%s/%s/%s\n",
-      $1, $4, $5, $6, $7, $8, $9, $10, $11, $15, $16, $17
+    printf "  batch_size=%-4s cpu_ns/write multi=%6.2f batch=%6.2f set=%6.2f buffered=%6.2f total_ns/op multi=%6.2f batch=%6.2f set=%6.2f buffered=%6.2f delta batch=%7.2f%% set=%7.2f%% buffered=%7.2f%% cv=%s/%s/%s/%s\n",
+      $1, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $20, $21, $22, $23
   }
 ' "$SUMMARY_CSV"
 
