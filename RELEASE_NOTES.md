@@ -15,7 +15,7 @@ Highlights:
 - individual grouped updates: added indexed `CounterSet::inc(...)` and `CounterSet::add(...)` helpers so grouped counters can still be updated one at a time when only part of the group changes.
 - benchmark coverage: added `counter_buffered`, `counter_buffered_indexed`, and `counter_buffered_lookup` harness entities plus `--flush-every` controls to measure direct grouped increments, pre-resolved index updates, per-op name lookup, and an OpenTelemetry Rust multi-counter handle loop separately.
 
-Focused mac harness comparison, all runs with verified final counts:
+Focused mac harness comparison, averaged across three full matrix runs with verified final counts:
 
 ```text
 ./crates/fast-telemetry/bench/run-counter-batch-bench.sh \
@@ -28,12 +28,12 @@ Focused mac harness comparison, all runs with verified final counts:
 
 | Counters | Fast counters | Grouped counters | OTel Rust |
 | ---: | ---: | ---: | ---: |
-| 3 | 0.92 CPU ns/write | 0.39 CPU ns/write | 232.83 CPU ns/write |
-| 4 | 0.78 CPU ns/write | 0.29 CPU ns/write | 297.33 CPU ns/write |
-| 5 | 0.73 CPU ns/write | 0.22 CPU ns/write | 196.25 CPU ns/write |
-| 6 | 0.76 CPU ns/write | 0.20 CPU ns/write | 258.61 CPU ns/write |
+| 3 | 0.92 CPU ns/write | 0.38 CPU ns/write | 244.61 CPU ns/write |
+| 4 | 0.78 CPU ns/write | 0.28 CPU ns/write | 256.75 CPU ns/write |
+| 5 | 0.75 CPU ns/write | 0.24 CPU ns/write | 190.47 CPU ns/write |
+| 6 | 0.73 CPU ns/write | 0.19 CPU ns/write | 254.91 CPU ns/write |
 
-Fast counters use independent fast-telemetry `Counter` handles, grouped counters use the buffered `CounterSet` prototype, and OpenTelemetry uses pre-built Rust `u64_counter` handles. Each row records the same number of counter writes per logical operation. Grouped counters were 57.61% to 73.68% lower than independent fast counters and 597.00x to 1293.05x lower than OpenTelemetry Rust in trimmed CPU ns/write. The OTel rows had higher CPU-time variance (`cpu_ns_per_counter_write_cv_pct`: 12.66% to 26.12%), but the gap remained multiple orders of magnitude in the trimmed results.
+Fast counters use independent fast-telemetry `Counter` handles, grouped counters use the buffered `CounterSet` prototype, and OpenTelemetry uses pre-built Rust `u64_counter` handles. Each row records the same number of counter writes per logical operation and reports the mean of three full matrix summaries. Grouped counters were 58.84% to 73.39% lower than independent fast counters and 643.72x to 1318.50x lower than OpenTelemetry Rust in trimmed CPU ns/write. The OTel rows had higher CPU-time variance (`cpu_ns_per_counter_write_cv_pct`: 13.19% to 27.79% averaged across the matrix summaries), but the gap remained multiple orders of magnitude in the trimmed results.
 
 The name-lookup control confirms that registry lookup should stay out of the hot path. With 128 registered metric names and 6 active counters per operation, direct buffered updates measured 0.19 CPU ns/write, pre-resolved indexed updates measured 0.82 CPU ns/write, and per-op `BTreeMap` name lookup measured 30.15 CPU ns/write.
 
