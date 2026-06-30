@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
       echo "  span scenarios: root,lifecycle,pipeline"
       echo "  default iters: cache=50000000 span=1000000"
       echo "Preset full:"
-      echo "  cache entities: all cache benchmark entities"
+      echo "  cache entities: core cache benchmark entities"
       echo "  cache profiles: uniform,hotspot,churn"
       echo "  span scenarios: root,lifecycle,pipeline"
       echo "  default iters: cache=200000000 span=5000000"

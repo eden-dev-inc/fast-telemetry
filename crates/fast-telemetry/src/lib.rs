@@ -59,6 +59,9 @@ pub use metric::{
     MaxGaugeF64, MetricKind, MetricLabel, MetricLabels, MetricLabelsIter, MetricMeta,
     MetricVisitor, MinGauge, MinGaugeF64, SampledTimer, SampledTimerGuard,
 };
+#[cfg(feature = "bench-tools")]
+#[doc(hidden)]
+pub use metric::{CounterSet, CounterSetBuffer};
 #[cfg(feature = "eviction")]
 pub use metric::{advance_cycle, current_cycle};
 #[cfg(feature = "runtime")]

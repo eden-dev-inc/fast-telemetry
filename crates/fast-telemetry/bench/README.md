@@ -67,6 +67,60 @@ Each `*-run-*.txt` file and the generated `summary.csv` will include the CPU fie
 so you can compare throughput and CPU cost together on macOS or Linux without
 requiring `perf`.
 
+## Counter Batch Probe
+
+The cache harness includes a focused probe for counter batching:
+
+```bash
+# Current shape: one logical op updates N counters with N independent Counter::inc calls.
+./bench/run-cache-bench.sh --entity counter_multi --modes fast --batch-size 8 --threads 16 --runs 5
+
+# OpenTelemetry Rust shape: one logical op updates N pre-built OTel u64_counter handles.
+./bench/run-cache-bench.sh --entity counter_multi --modes otel --batch-size 8 --threads 16 --runs 5
+
+# Prototype shape: one logical op updates N counters through the bench-only batch helper.
+./bench/run-cache-bench.sh --entity counter_batch --modes fast --batch-size 8 --threads 16 --runs 5
+
+# Grouped shape: related counters share one row-padded sharded layout.
+./bench/run-cache-bench.sh --entity counter_set --modes fast --batch-size 8 --threads 16 --runs 5
+
+# Buffered shape: update local deltas and flush shared atomics every N operations.
+./bench/run-cache-bench.sh --entity counter_buffered --modes fast --batch-size 8 --flush-every 64 --threads 16 --runs 5
+
+# Control: pre-resolved indexes with individual buffered updates.
+./bench/run-cache-bench.sh --entity counter_buffered_indexed --modes fast --batch-size 8 --flush-every 64 --threads 16 --runs 5
+
+# Control: per-op name lookup across a larger registered metric namespace.
+./bench/run-cache-bench.sh --entity counter_buffered_lookup --modes fast --batch-size 8 --labels 128 --flush-every 64 --threads 16 --runs 5
+
+# Sweep multiple batch sizes and write one comparison summary, including OTel.
+./bench/run-counter-batch-bench.sh --threads 16 --runs 7 --flush-every 64
+
+# Linux only: include hardware-cycle counters from perf stat.
+./bench/run-counter-batch-bench.sh --threads 16 --runs 7 --flush-every 64 --perf-stat
+```
+
+Use `cpu_ns_per_counter_write` and `total_counter_writes_per_sec` when comparing
+these runs. `counter_multi` supports both `fast` and `otel` modes, so the
+summary can compare independent fast-telemetry counters against independent
+OpenTelemetry Rust counters for the same number of writes per logical operation.
+`counter_batch`, `counter_set`, and `counter_buffered` are intentionally
+`fast`-only because they compare candidate fast-telemetry batching API shapes.
+On Linux, add `--perf-stat` to collect hardware counters and populate
+`*_cycles_per_write` fields in `counter-batch-summary.csv`. macOS runs do not
+expose those hardware cycle counters through this harness, so mac comparisons
+should report CPU ns/write and counters/s unless using an explicitly labeled
+clock-rate estimate.
+
+The buffered prototype uses a bench-only grouped counter buffer. Uniform group
+increments accumulate a shared local delta before flushing; individual counters
+can still be updated with indexed buffer operations, then committed with a
+logical operation boundary and a final flush.
+
+The lookup control intentionally pays a `BTreeMap` name-to-index lookup on every
+counter update. It is a negative/control benchmark for dynamic APIs; production
+hot paths should pre-resolve indexes or typed handles during construction.
+
 ## metrics-rs Comparison
 
 `run-cache-bench.sh` also supports `mode=metrics`, backed by the
@@ -91,6 +145,7 @@ does not expose a matching distribution primitive.
 ## Entry Points
 
 - `run-cache-bench.sh` -- cache-line contention workloads across metric entities and label access profiles
+- `run-counter-batch-bench.sh` -- mac/Linux sweep comparing one-by-one counter writes against the batch prototype
 - `run-span-bench.sh` -- span creation/export contention workloads across realism scenarios
 - `run-bench-matrix.sh` -- multi-case sweep runner for publishing-ready comparison sets
 - `run-bench-suite.sh` -- full suite with HTML report generation
@@ -126,6 +181,8 @@ does not expose a matching distribution primitive.
 | `--modes <list>`           | Select modes (default: `fast,otel`; options: `fast,otel,atomic,metrics`) |
 | `--entity <name>`          | Metric entity to benchmark                                       |
 | `--labels <N>`             | Label cardinality (default: 16, max: 256)                        |
+| `--batch-size <N>`         | Counters per op for `counter_multi`/`counter_batch`/`counter_set`/`counter_buffered` variants (default: 8) |
+| `--flush-every <N>`        | Local operations per atomic flush for `counter_buffered` variants (default: 64) |
 | `--profile <name>`         | Label access pattern: `uniform`, `hotspot`, `churn`              |
 | `--pin`                    | CPU pinning via `taskset` + round-robin thread affinity          |
 | `--cpu-list <list>`        | Explicit CPU list (e.g., `0-15`)                                 |
@@ -134,9 +191,10 @@ does not expose a matching distribution primitive.
 
 ## Entities
 
-`counter`, `distribution`, `dynamic_counter`, `dynamic_distribution`,
-`dynamic_gauge`, `dynamic_gauge_i64`, `dynamic_histogram`, `labeled_counter`,
-`labeled_gauge`, `labeled_histogram`
+`counter`, `counter_multi`, `counter_batch`, `counter_set`, `counter_buffered`,
+`counter_buffered_indexed`, `counter_buffered_lookup`, `distribution`,
+`dynamic_counter`, `dynamic_distribution`, `dynamic_gauge`, `dynamic_gauge_i64`,
+`dynamic_histogram`, `labeled_counter`, `labeled_gauge`, `labeled_histogram`
 
 ## Label Access Profiles
 

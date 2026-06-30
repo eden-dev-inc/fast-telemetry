@@ -14,6 +14,11 @@ fn make_padded_counter() -> CachePadded<AtomicIsize> {
     CachePadded::new(AtomicIsize::new(0))
 }
 
+#[cfg(feature = "bench-tools")]
+fn make_counter_cell() -> AtomicIsize {
+    AtomicIsize::new(0)
+}
+
 /// A sharded atomic counter.
 ///
 /// Shards cache-line aligned AtomicIsize values across a vector for faster
@@ -55,10 +60,9 @@ impl Counter {
         self.add(1)
     }
 
-    /// Adds a value to the counter with the specified ordering.
     #[inline]
-    pub fn add_with_ordering(&self, value: isize, ordering: Ordering) {
-        let idx = thread_id() & (self.cells.len() - 1);
+    fn add_with_thread_id(&self, thread_id: usize, value: isize, ordering: Ordering) {
+        let idx = thread_id & (self.cells.len() - 1);
         // SAFETY: idx is always < cells.len() due to power-of-two masking
         let cell = if cfg!(debug_assertions) {
             self.cells.get(idx).expect("index out of bounds")
@@ -66,6 +70,39 @@ impl Counter {
             unsafe { self.cells.get_unchecked(idx) }
         };
         cell.fetch_add(value, ordering);
+    }
+
+    /// Adds a value to the counter with the specified ordering.
+    #[inline]
+    pub fn add_with_ordering(&self, value: isize, ordering: Ordering) {
+        self.add_with_thread_id(thread_id(), value, ordering);
+    }
+
+    /// Benchmark-only prototype for batching increments across multiple counters.
+    #[cfg(feature = "bench-tools")]
+    #[doc(hidden)]
+    #[inline]
+    pub fn inc_many(counters: &[Counter]) {
+        Self::add_many(counters, 1);
+    }
+
+    /// Benchmark-only prototype for batching additions across multiple counters.
+    #[cfg(feature = "bench-tools")]
+    #[doc(hidden)]
+    #[inline]
+    pub fn add_many(counters: &[Counter], value: isize) {
+        Self::add_many_with_ordering(counters, value, Ordering::Relaxed);
+    }
+
+    /// Benchmark-only prototype for batching additions across multiple counters.
+    #[cfg(feature = "bench-tools")]
+    #[doc(hidden)]
+    #[inline]
+    pub fn add_many_with_ordering(counters: &[Counter], value: isize, ordering: Ordering) {
+        let thread_id = thread_id();
+        for counter in counters {
+            counter.add_with_thread_id(thread_id, value, ordering);
+        }
     }
 
     /// Returns the sum of all shards using relaxed ordering.
@@ -104,6 +141,366 @@ impl Counter {
             .iter()
             .map(|c| c.swap(0, Ordering::Relaxed))
             .sum()
+    }
+}
+
+/// Benchmark-only prototype for grouping related counters in one sharded layout.
+#[cfg(feature = "bench-tools")]
+#[doc(hidden)]
+pub struct CounterSet {
+    cells: Vec<AtomicIsize>,
+    counters: usize,
+    stride: usize,
+    shard_mask: usize,
+}
+
+#[cfg(feature = "bench-tools")]
+impl CounterSet {
+    /// Creates a grouped counter set with `counters` counters per shard.
+    ///
+    /// Shards are padded by row instead of by cell, so related counters updated
+    /// by the same thread sit contiguously while adjacent shard rows remain
+    /// separated enough to avoid false sharing.
+    pub fn new(shards: usize, counters: usize) -> Self {
+        assert!(counters >= 1, "counters must be >= 1");
+        let shards = shards.next_power_of_two();
+        let cells_per_padded_counter =
+            std::mem::size_of::<CachePadded<AtomicIsize>>() / std::mem::size_of::<AtomicIsize>();
+        let row_padding = cells_per_padded_counter.max(1);
+        let stride = counters.div_ceil(row_padding) * row_padding;
+        let cells = (0..(shards * stride))
+            .map(|_| make_counter_cell())
+            .collect();
+
+        Self {
+            cells,
+            counters,
+            stride,
+            shard_mask: shards - 1,
+        }
+    }
+
+    /// Returns the number of counters in each shard row.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.counters
+    }
+
+    /// Returns true if there are no counters in the set.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.counters == 0
+    }
+
+    #[inline]
+    fn current_shard_offset(&self) -> usize {
+        (thread_id() & self.shard_mask) * self.stride
+    }
+
+    #[inline]
+    fn cell_at(&self, index: usize) -> &AtomicIsize {
+        if cfg!(debug_assertions) {
+            self.cells.get(index).expect("index out of bounds")
+        } else {
+            // SAFETY: callers compute indexes from checked counter indexes and
+            // row offsets derived from the shard mask.
+            unsafe { self.cells.get_unchecked(index) }
+        }
+    }
+
+    /// Increments one counter in the current thread's shard row.
+    #[inline]
+    pub fn inc(&self, counter_idx: usize) {
+        self.add(counter_idx, 1);
+    }
+
+    /// Adds a value to one counter in the current thread's shard row.
+    #[inline]
+    pub fn add(&self, counter_idx: usize, value: isize) {
+        assert!(counter_idx < self.counters, "counter index out of bounds");
+        let offset = self.current_shard_offset();
+        self.cell_at(offset + counter_idx)
+            .fetch_add(value, Ordering::Relaxed);
+    }
+
+    /// Increments all counters in the current thread's shard row.
+    #[inline]
+    pub fn inc_all(&self) {
+        self.add_all(1);
+    }
+
+    /// Adds the same value to all counters in the current thread's shard row.
+    #[inline(always)]
+    pub fn add_all(&self, value: isize) {
+        let offset = self.current_shard_offset();
+        let row = if cfg!(debug_assertions) {
+            self.cells
+                .get(offset..offset + self.counters)
+                .expect("row index out of bounds")
+        } else {
+            // SAFETY: current_shard_offset derives from shard_mask and stride,
+            // and counters <= stride by construction.
+            unsafe { std::slice::from_raw_parts(self.cells.as_ptr().add(offset), self.counters) }
+        };
+        for cell in row {
+            cell.fetch_add(value, Ordering::Relaxed);
+        }
+    }
+
+    /// Adds the same value to selected counters in the current thread's shard row.
+    #[inline]
+    pub fn add_indices(&self, indexes: &[usize], value: isize) {
+        let offset = self.current_shard_offset();
+        if cfg!(debug_assertions) {
+            for index in indexes {
+                assert!(*index < self.counters, "counter index out of bounds");
+            }
+        }
+        for index in indexes {
+            self.cell_at(offset + *index)
+                .fetch_add(value, Ordering::Relaxed);
+        }
+    }
+
+    /// Adds one value per selected counter in the current thread's shard row.
+    #[inline]
+    pub fn add_index_values(&self, updates: &[(usize, isize)]) {
+        let offset = self.current_shard_offset();
+        if cfg!(debug_assertions) {
+            for (index, _) in updates {
+                assert!(*index < self.counters, "counter index out of bounds");
+            }
+        }
+        for (index, value) in updates {
+            self.cell_at(offset + *index)
+                .fetch_add(*value, Ordering::Relaxed);
+        }
+    }
+
+    /// Adds the same value to all counters in the current thread's shard row.
+    #[inline]
+    pub fn add_all_indexed(&self, value: isize) {
+        let offset = self.current_shard_offset();
+        for counter_idx in 0..self.counters {
+            self.cell_at(offset + counter_idx)
+                .fetch_add(value, Ordering::Relaxed);
+        }
+    }
+
+    /// Adds one value per counter in the current thread's shard row.
+    #[inline(always)]
+    pub fn add_values(&self, values: &[isize]) {
+        assert_eq!(values.len(), self.counters, "values must match counters");
+        let offset = self.current_shard_offset();
+        match values {
+            [a] => {
+                self.cell_at(offset).fetch_add(*a, Ordering::Relaxed);
+            }
+            [a, b] => {
+                self.cell_at(offset).fetch_add(*a, Ordering::Relaxed);
+                self.cell_at(offset + 1).fetch_add(*b, Ordering::Relaxed);
+            }
+            [a, b, c] => {
+                self.cell_at(offset).fetch_add(*a, Ordering::Relaxed);
+                self.cell_at(offset + 1).fetch_add(*b, Ordering::Relaxed);
+                self.cell_at(offset + 2).fetch_add(*c, Ordering::Relaxed);
+            }
+            [a, b, c, d] => {
+                self.cell_at(offset).fetch_add(*a, Ordering::Relaxed);
+                self.cell_at(offset + 1).fetch_add(*b, Ordering::Relaxed);
+                self.cell_at(offset + 2).fetch_add(*c, Ordering::Relaxed);
+                self.cell_at(offset + 3).fetch_add(*d, Ordering::Relaxed);
+            }
+            [a, b, c, d, e] => {
+                self.cell_at(offset).fetch_add(*a, Ordering::Relaxed);
+                self.cell_at(offset + 1).fetch_add(*b, Ordering::Relaxed);
+                self.cell_at(offset + 2).fetch_add(*c, Ordering::Relaxed);
+                self.cell_at(offset + 3).fetch_add(*d, Ordering::Relaxed);
+                self.cell_at(offset + 4).fetch_add(*e, Ordering::Relaxed);
+            }
+            [a, b, c, d, e, f] => {
+                self.cell_at(offset).fetch_add(*a, Ordering::Relaxed);
+                self.cell_at(offset + 1).fetch_add(*b, Ordering::Relaxed);
+                self.cell_at(offset + 2).fetch_add(*c, Ordering::Relaxed);
+                self.cell_at(offset + 3).fetch_add(*d, Ordering::Relaxed);
+                self.cell_at(offset + 4).fetch_add(*e, Ordering::Relaxed);
+                self.cell_at(offset + 5).fetch_add(*f, Ordering::Relaxed);
+            }
+            [a, b, c, d, e, f, g] => {
+                self.cell_at(offset).fetch_add(*a, Ordering::Relaxed);
+                self.cell_at(offset + 1).fetch_add(*b, Ordering::Relaxed);
+                self.cell_at(offset + 2).fetch_add(*c, Ordering::Relaxed);
+                self.cell_at(offset + 3).fetch_add(*d, Ordering::Relaxed);
+                self.cell_at(offset + 4).fetch_add(*e, Ordering::Relaxed);
+                self.cell_at(offset + 5).fetch_add(*f, Ordering::Relaxed);
+                self.cell_at(offset + 6).fetch_add(*g, Ordering::Relaxed);
+            }
+            [a, b, c, d, e, f, g, h] => {
+                self.cell_at(offset).fetch_add(*a, Ordering::Relaxed);
+                self.cell_at(offset + 1).fetch_add(*b, Ordering::Relaxed);
+                self.cell_at(offset + 2).fetch_add(*c, Ordering::Relaxed);
+                self.cell_at(offset + 3).fetch_add(*d, Ordering::Relaxed);
+                self.cell_at(offset + 4).fetch_add(*e, Ordering::Relaxed);
+                self.cell_at(offset + 5).fetch_add(*f, Ordering::Relaxed);
+                self.cell_at(offset + 6).fetch_add(*g, Ordering::Relaxed);
+                self.cell_at(offset + 7).fetch_add(*h, Ordering::Relaxed);
+            }
+            values => {
+                let row = if cfg!(debug_assertions) {
+                    self.cells
+                        .get(offset..offset + self.counters)
+                        .expect("row index out of bounds")
+                } else {
+                    // SAFETY: current_shard_offset derives from shard_mask and
+                    // stride, and counters <= stride by construction.
+                    unsafe {
+                        std::slice::from_raw_parts(self.cells.as_ptr().add(offset), self.counters)
+                    }
+                };
+                for (cell, value) in row.iter().zip(values.iter().copied()) {
+                    cell.fetch_add(value, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    /// Returns the sum for one counter across all shards.
+    #[inline]
+    pub fn sum(&self, counter_idx: usize) -> isize {
+        assert!(counter_idx < self.counters, "counter index out of bounds");
+        let shards = self.cells.len() / self.stride;
+        (0..shards)
+            .map(|shard| {
+                self.cell_at((shard * self.stride) + counter_idx)
+                    .load(Ordering::Relaxed)
+            })
+            .sum()
+    }
+
+    /// Returns the sum of all counters across all shards.
+    #[inline]
+    pub fn sum_all(&self) -> isize {
+        let shards = self.cells.len() / self.stride;
+        let mut total = 0isize;
+        for shard in 0..shards {
+            let offset = shard * self.stride;
+            for counter_idx in 0..self.counters {
+                total += self.cell_at(offset + counter_idx).load(Ordering::Relaxed);
+            }
+        }
+        total
+    }
+}
+
+/// Benchmark-only prototype for buffering related counter updates locally.
+#[cfg(feature = "bench-tools")]
+#[doc(hidden)]
+pub struct CounterSetBuffer<'a> {
+    counters: &'a CounterSet,
+    deltas: Vec<isize>,
+    all_delta: isize,
+    ops_since_flush: usize,
+    flush_every: usize,
+    op_dirty: bool,
+}
+
+#[cfg(feature = "bench-tools")]
+impl<'a> CounterSetBuffer<'a> {
+    /// Creates a local buffer for a grouped counter set.
+    #[inline]
+    pub fn new(counters: &'a CounterSet, flush_every: usize) -> Self {
+        assert!(flush_every >= 1, "flush_every must be >= 1");
+        Self {
+            counters,
+            deltas: vec![0; counters.len()],
+            all_delta: 0,
+            ops_since_flush: 0,
+            flush_every,
+            op_dirty: false,
+        }
+    }
+
+    /// Increments one buffered counter.
+    #[inline]
+    pub fn inc(&mut self, counter_idx: usize) {
+        self.add(counter_idx, 1);
+    }
+
+    /// Adds a value to one buffered counter.
+    #[inline]
+    pub fn add(&mut self, counter_idx: usize, value: isize) {
+        assert!(
+            counter_idx < self.deltas.len(),
+            "counter index out of bounds"
+        );
+        self.deltas[counter_idx] += value;
+        self.op_dirty = true;
+    }
+
+    /// Increments every buffered counter and marks one logical operation complete.
+    #[inline(always)]
+    pub fn inc_all(&mut self) {
+        self.all_delta += 1;
+        self.finish_group_op();
+    }
+
+    /// Adds the same value to every buffered counter and marks one logical operation complete.
+    #[inline(always)]
+    pub fn add_all(&mut self, value: isize) {
+        self.all_delta += value;
+        self.finish_group_op();
+    }
+
+    /// Adds one value per buffered counter and marks one logical operation complete.
+    #[inline]
+    pub fn add_values(&mut self, values: &[isize]) {
+        assert_eq!(
+            values.len(),
+            self.deltas.len(),
+            "values must match counters"
+        );
+        for (delta, value) in self.deltas.iter_mut().zip(values.iter().copied()) {
+            *delta += value;
+        }
+        self.finish_group_op();
+    }
+
+    /// Marks the current logical operation complete.
+    #[inline]
+    pub fn finish_op(&mut self) {
+        if !self.op_dirty {
+            return;
+        }
+
+        self.op_dirty = false;
+        self.finish_group_op();
+    }
+
+    #[inline(always)]
+    fn finish_group_op(&mut self) {
+        self.ops_since_flush += 1;
+        if self.ops_since_flush >= self.flush_every {
+            self.flush();
+        }
+    }
+
+    /// Flushes buffered deltas to the backing grouped counter set.
+    #[inline]
+    pub fn flush(&mut self) {
+        if self.ops_since_flush == 0 && !self.op_dirty {
+            return;
+        }
+
+        if self.all_delta != 0 {
+            self.counters.add_all(self.all_delta);
+            self.all_delta = 0;
+        }
+        if self.deltas.iter().any(|delta| *delta != 0) {
+            self.counters.add_values(&self.deltas);
+            self.deltas.fill(0);
+        }
+        self.ops_since_flush = 0;
+        self.op_dirty = false;
     }
 }
 
@@ -186,5 +583,67 @@ mod tests {
         let debug = format!("{counter:?}");
         assert!(debug.contains("sum: 42"));
         assert!(debug.contains("cells: 8"));
+    }
+
+    #[cfg(feature = "bench-tools")]
+    #[test]
+    fn inc_many_updates_all_counters() {
+        let counters = vec![Counter::new(4), Counter::new(4), Counter::new(4)];
+
+        Counter::inc_many(&counters);
+        Counter::add_many(&counters, 2);
+
+        for counter in &counters {
+            assert_eq!(counter.sum(), 3);
+        }
+    }
+
+    #[cfg(feature = "bench-tools")]
+    #[test]
+    fn counter_set_updates_grouped_counters() {
+        let counters = CounterSet::new(4, 3);
+
+        counters.inc(0);
+        counters.add(1, 2);
+        counters.inc_all();
+        counters.add_values(&[2, 3, 4]);
+        counters.add_indices(&[0, 2], 1);
+        counters.add_index_values(&[(1, 2), (2, 3)]);
+
+        assert_eq!(counters.len(), 3);
+        assert!(!counters.is_empty());
+        assert_eq!(counters.sum(0), 5);
+        assert_eq!(counters.sum(1), 8);
+        assert_eq!(counters.sum(2), 9);
+        assert_eq!(counters.sum_all(), 22);
+    }
+
+    #[cfg(feature = "bench-tools")]
+    #[test]
+    fn counter_set_buffer_flushes_grouped_and_individual_updates() {
+        let counters = CounterSet::new(4, 3);
+
+        {
+            let mut buffer = CounterSetBuffer::new(&counters, 2);
+
+            buffer.inc(0);
+            buffer.add(1, 2);
+            buffer.finish_op();
+            assert_eq!(counters.sum_all(), 0);
+
+            buffer.inc_all();
+            assert_eq!(counters.sum(0), 2);
+            assert_eq!(counters.sum(1), 3);
+            assert_eq!(counters.sum(2), 1);
+
+            buffer.add(2, 4);
+            buffer.finish_op();
+            buffer.flush();
+        }
+
+        assert_eq!(counters.sum(0), 2);
+        assert_eq!(counters.sum(1), 3);
+        assert_eq!(counters.sum(2), 5);
+        assert_eq!(counters.sum_all(), 10);
     }
 }

@@ -46,7 +46,7 @@ columns with defaults. Summary metrics are ignored.
 Enable the `monoio` feature to run exporter loops on a monoio runtime:
 
 ```toml
-fast-telemetry-export = { version = "0.6", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+fast-telemetry-export = { version = "0.7", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
 ```
 
 The monoio entry points mirror the Tokio ones:
@@ -69,7 +69,7 @@ Enable the `compio` feature to run the DogStatsD UDP exporter and sweeper on a
 compio runtime without pulling in Tokio:
 
 ```toml
-fast-telemetry-export = { version = "0.6", default-features = false, features = ["compio"] }
+fast-telemetry-export = { version = "0.7", default-features = false, features = ["compio"] }
 ```
 
 The compio entry points are:
