@@ -78,9 +78,6 @@ The cache harness includes a focused probe for counter batching:
 # OpenTelemetry Rust shape: one logical op updates N pre-built OTel u64_counter handles.
 ./bench/run-cache-bench.sh --entity counter_multi --modes otel --batch-size 8 --threads 16 --runs 5
 
-# Prototype shape: one logical op updates N counters through the bench-only batch helper.
-./bench/run-cache-bench.sh --entity counter_batch --modes fast --batch-size 8 --threads 16 --runs 5
-
 # Grouped shape: related counters share one row-padded sharded layout.
 ./bench/run-cache-bench.sh --entity counter_set --modes fast --batch-size 8 --threads 16 --runs 5
 
@@ -104,18 +101,19 @@ Use `cpu_ns_per_counter_write` and `total_counter_writes_per_sec` when comparing
 these runs. `counter_multi` supports both `fast` and `otel` modes, so the
 summary can compare independent fast-telemetry counters against independent
 OpenTelemetry Rust counters for the same number of writes per logical operation.
-`counter_batch`, `counter_set`, and `counter_buffered` are intentionally
-`fast`-only because they compare candidate fast-telemetry batching API shapes.
+`counter_set`, `counter_buffered`, `counter_buffered_indexed`, and
+`counter_buffered_lookup` are intentionally `fast`-only because they exercise
+fast-telemetry's grouped counter APIs.
 On Linux, add `--perf-stat` to collect hardware counters and populate
 `*_cycles_per_write` fields in `counter-batch-summary.csv`. macOS runs do not
 expose those hardware cycle counters through this harness, so mac comparisons
 should report CPU ns/write and counters/s unless using an explicitly labeled
 clock-rate estimate.
 
-The buffered prototype uses a bench-only grouped counter buffer. Uniform group
-increments accumulate a shared local delta before flushing; individual counters
-can still be updated with indexed buffer operations, then committed with a
-logical operation boundary and a final flush.
+The buffered grouped counter case uses the production `CounterSetBuffer` API.
+Uniform group increments accumulate a shared local delta before flushing;
+individual counters can still be updated with indexed buffer operations, then
+committed with a logical operation boundary and a final flush.
 
 The lookup control intentionally pays a `BTreeMap` name-to-index lookup on every
 counter update. It is a negative/control benchmark for dynamic APIs; production
@@ -145,7 +143,7 @@ does not expose a matching distribution primitive.
 ## Entry Points
 
 - `run-cache-bench.sh` -- cache-line contention workloads across metric entities and label access profiles
-- `run-counter-batch-bench.sh` -- mac/Linux sweep comparing one-by-one counter writes against the batch prototype
+- `run-counter-batch-bench.sh` -- mac/Linux sweep comparing independent counters against grouped counter APIs
 - `run-span-bench.sh` -- span creation/export contention workloads across realism scenarios
 - `run-bench-matrix.sh` -- multi-case sweep runner for publishing-ready comparison sets
 - `run-bench-suite.sh` -- full suite with HTML report generation
@@ -181,7 +179,7 @@ does not expose a matching distribution primitive.
 | `--modes <list>`           | Select modes (default: `fast,otel`; options: `fast,otel,atomic,metrics`) |
 | `--entity <name>`          | Metric entity to benchmark                                       |
 | `--labels <N>`             | Label cardinality (default: 16, max: 256)                        |
-| `--batch-size <N>`         | Counters per op for `counter_multi`/`counter_batch`/`counter_set`/`counter_buffered` variants (default: 8) |
+| `--batch-size <N>`         | Counters per op for `counter_multi`/`counter_set`/`counter_buffered` variants (default: 8) |
 | `--flush-every <N>`        | Local operations per atomic flush for `counter_buffered` variants (default: 64) |
 | `--profile <name>`         | Label access pattern: `uniform`, `hotspot`, `churn`              |
 | `--pin`                    | CPU pinning via `taskset` + round-robin thread affinity          |
@@ -191,7 +189,7 @@ does not expose a matching distribution primitive.
 
 ## Entities
 
-`counter`, `counter_multi`, `counter_batch`, `counter_set`, `counter_buffered`,
+`counter`, `counter_multi`, `counter_set`, `counter_buffered`,
 `counter_buffered_indexed`, `counter_buffered_lookup`, `distribution`,
 `dynamic_counter`, `dynamic_distribution`, `dynamic_gauge`, `dynamic_gauge_i64`,
 `dynamic_histogram`, `labeled_counter`, `labeled_gauge`, `labeled_histogram`
