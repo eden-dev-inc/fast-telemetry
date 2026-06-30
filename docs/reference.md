@@ -7,6 +7,8 @@
 | Type                 | Use Case                                 | Hot Path Cost             |
 | -------------------- | ---------------------------------------- | ------------------------- |
 | `Counter`            | Totals that only go up                   | ~2ns (thread-local write) |
+| `CounterSet`         | Fixed groups of related counters         | ~0.2-0.4ns per buffered increment in grouped workloads |
+| `CounterSetBuffer`   | Local deltas for `CounterSet`            | Flushes to shared atomics every configured operation count |
 | `Histogram`          | Latency distributions with fixed buckets | ~2ns + bucket lookup      |
 | `Distribution`       | Exponential-bucket distributions         | ~2ns + bucket lookup      |
 | `Gauge` / `GaugeF64` | Point-in-time values                     | ~2ns (single atomic)      |
@@ -49,6 +51,10 @@ Pass the number of shards to `Counter::new(n)` and other constructors:
 - **`4`** for tests
 - Must be >= 1, rounded up to power of two internally
 - One cache line (128 bytes on x86-64) per shard
+
+For `CounterSet::new(shards, counters)`, `counters` is the fixed number of
+related counter slots in each shard row. Store slot indexes as constants or enum
+discriminants so hot paths do not perform name lookup.
 
 ## Lineage
 

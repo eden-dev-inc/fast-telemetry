@@ -14,7 +14,6 @@ fn make_padded_counter() -> CachePadded<AtomicIsize> {
     CachePadded::new(AtomicIsize::new(0))
 }
 
-#[cfg(feature = "bench-tools")]
 fn make_counter_cell() -> AtomicIsize {
     AtomicIsize::new(0)
 }
@@ -144,9 +143,34 @@ impl Counter {
     }
 }
 
-/// Benchmark-only prototype for grouping related counters in one sharded layout.
-#[cfg(feature = "bench-tools")]
-#[doc(hidden)]
+/// A grouped set of related sharded counters.
+///
+/// Use `CounterSet` when one hot-path operation commonly updates several
+/// counters together, such as request count, bytes processed, and cache hits.
+/// The counters share the same shard row, so updates by the same thread touch a
+/// compact row while rows for different shards remain padded apart to avoid
+/// false sharing.
+///
+/// `CounterSet` still supports individual counter updates by index. Resolve
+/// those indexes once during construction and keep direct handles/indexes on the
+/// hot path.
+///
+/// ```
+/// use fast_telemetry::CounterSet;
+///
+/// const REQUESTS: usize = 0;
+/// const BYTES: usize = 1;
+/// const HITS: usize = 2;
+///
+/// let counters = CounterSet::new(4, 3);
+/// counters.inc(REQUESTS);
+/// counters.add(BYTES, 4096);
+/// counters.inc(HITS);
+///
+/// assert_eq!(counters.sum(REQUESTS), 1);
+/// assert_eq!(counters.sum(BYTES), 4096);
+/// assert_eq!(counters.sum(HITS), 1);
+/// ```
 pub struct CounterSet {
     cells: Vec<AtomicIsize>,
     counters: usize,
@@ -154,7 +178,6 @@ pub struct CounterSet {
     shard_mask: usize,
 }
 
-#[cfg(feature = "bench-tools")]
 impl CounterSet {
     /// Creates a grouped counter set with `counters` counters per shard.
     ///
@@ -251,12 +274,8 @@ impl CounterSet {
     #[inline]
     pub fn add_indices(&self, indexes: &[usize], value: isize) {
         let offset = self.current_shard_offset();
-        if cfg!(debug_assertions) {
-            for index in indexes {
-                assert!(*index < self.counters, "counter index out of bounds");
-            }
-        }
         for index in indexes {
+            assert!(*index < self.counters, "counter index out of bounds");
             self.cell_at(offset + *index)
                 .fetch_add(value, Ordering::Relaxed);
         }
@@ -266,12 +285,8 @@ impl CounterSet {
     #[inline]
     pub fn add_index_values(&self, updates: &[(usize, isize)]) {
         let offset = self.current_shard_offset();
-        if cfg!(debug_assertions) {
-            for (index, _) in updates {
-                assert!(*index < self.counters, "counter index out of bounds");
-            }
-        }
         for (index, value) in updates {
+            assert!(*index < self.counters, "counter index out of bounds");
             self.cell_at(offset + *index)
                 .fetch_add(*value, Ordering::Relaxed);
         }
@@ -392,9 +407,46 @@ impl CounterSet {
     }
 }
 
-/// Benchmark-only prototype for buffering related counter updates locally.
-#[cfg(feature = "bench-tools")]
-#[doc(hidden)]
+/// A local write buffer for a [`CounterSet`].
+///
+/// Use one buffer per worker/thread when a hot path records several related
+/// counters per logical operation. The buffer accumulates deltas locally and
+/// flushes them to the backing `CounterSet` every `flush_every` completed
+/// operations, reducing shared atomic writes on very hot paths.
+///
+/// Individual updates are supported with [`CounterSetBuffer::inc`] and
+/// [`CounterSetBuffer::add`]. Call [`CounterSetBuffer::finish_op`] once after
+/// recording all updates for a logical operation. Full-group updates such as
+/// [`CounterSetBuffer::inc_all`] and [`CounterSetBuffer::add_values`] already
+/// finish the operation.
+///
+/// The buffer also flushes on drop, but long-lived services should still flush
+/// at request or task boundaries when they need prompt visibility to exporters.
+///
+/// ```
+/// use fast_telemetry::{CounterSet, CounterSetBuffer};
+///
+/// const REQUESTS: usize = 0;
+/// const BYTES: usize = 1;
+/// const ERRORS: usize = 2;
+///
+/// let counters = CounterSet::new(4, 3);
+/// let mut buffer = CounterSetBuffer::new(&counters, 64);
+///
+/// buffer.inc(REQUESTS);
+/// buffer.add(BYTES, 4096);
+/// buffer.finish_op();
+///
+/// buffer.inc(REQUESTS);
+/// buffer.inc(ERRORS);
+/// buffer.finish_op();
+///
+/// buffer.flush();
+///
+/// assert_eq!(counters.sum(REQUESTS), 2);
+/// assert_eq!(counters.sum(BYTES), 4096);
+/// assert_eq!(counters.sum(ERRORS), 1);
+/// ```
 pub struct CounterSetBuffer<'a> {
     counters: &'a CounterSet,
     deltas: Vec<isize>,
@@ -404,7 +456,6 @@ pub struct CounterSetBuffer<'a> {
     op_dirty: bool,
 }
 
-#[cfg(feature = "bench-tools")]
 impl<'a> CounterSetBuffer<'a> {
     /// Creates a local buffer for a grouped counter set.
     #[inline]
@@ -504,6 +555,12 @@ impl<'a> CounterSetBuffer<'a> {
     }
 }
 
+impl Drop for CounterSetBuffer<'_> {
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,7 +655,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "bench-tools")]
     #[test]
     fn counter_set_updates_grouped_counters() {
         let counters = CounterSet::new(4, 3);
@@ -618,7 +674,6 @@ mod tests {
         assert_eq!(counters.sum_all(), 22);
     }
 
-    #[cfg(feature = "bench-tools")]
     #[test]
     fn counter_set_buffer_flushes_grouped_and_individual_updates() {
         let counters = CounterSet::new(4, 3);
@@ -645,5 +700,20 @@ mod tests {
         assert_eq!(counters.sum(1), 3);
         assert_eq!(counters.sum(2), 5);
         assert_eq!(counters.sum_all(), 10);
+    }
+
+    #[test]
+    fn counter_set_buffer_flushes_on_drop() {
+        let counters = CounterSet::new(4, 2);
+
+        {
+            let mut buffer = CounterSetBuffer::new(&counters, 64);
+            buffer.inc(0);
+            buffer.add(1, 5);
+            buffer.finish_op();
+        }
+
+        assert_eq!(counters.sum(0), 1);
+        assert_eq!(counters.sum(1), 5);
     }
 }

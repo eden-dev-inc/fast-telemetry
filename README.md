@@ -48,6 +48,11 @@ Representative counter costs from the focused 6-counter harness row:
 The cycle values above are estimated from the mac CPU-time result. Linux
 `--perf-stat` benchmark runs record measured `*_cycles_per_write` fields.
 
+Grouped buffered counters use the production `CounterSet` and
+`CounterSetBuffer` APIs. Use them when one hot-path operation updates a known
+group of related counters, and resolve counter indexes once during construction
+so the hot path stays on direct indexed updates.
+
 ## Quick Start
 
 ```rust

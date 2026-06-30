@@ -1,5 +1,29 @@
 # Release Notes
 
+## 0.7.1 - 2026-06-30
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
+
+Why this is a 0.7.1 patch:
+
+- this release promotes the grouped counter API intended for 0.7.0 from `bench-tools` into the normal public `fast-telemetry` API.
+- all workspace crates are aligned at `0.7.1` so downstream services can keep `fast-telemetry`, `fast-telemetry-macros`, and `fast-telemetry-export` on the same release line.
+
+Highlights:
+
+- production grouped counters: `CounterSet` and `CounterSetBuffer` are now exported without enabling `bench-tools` and are visible in generated docs.
+- safer indexed updates: `CounterSet::add_indices(...)` and `CounterSet::add_index_values(...)` now bounds-check indexes in release builds before touching the backing row.
+- buffered flush safety: `CounterSetBuffer` now flushes pending deltas on drop, while still supporting explicit `flush()` before export or at request/task boundaries.
+- documentation: added the production grouped-counter usage pattern, including direct indexed updates and the `finish_op()` / `flush_every` lifecycle.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.7.1"
+fast-telemetry-export = "0.7.1"
+```
+
 ## 0.7.0 - 2026-06-30
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.

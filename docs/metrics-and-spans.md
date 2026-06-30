@@ -33,6 +33,49 @@ extremum across shards, and `swap_reset()` gives you the previous window's
 extremum while resetting back to the constructor's initial value. The `f64`
 variants ignore `NaN` observations.
 
+## Grouped Counters
+
+Use grouped counters when one hot-path operation records several related
+counters at the same time. `CounterSet` stores a fixed-size group of sharded
+counters together, and `CounterSetBuffer` accumulates local deltas before
+flushing them to shared atomics.
+
+Resolve indexes once during construction and keep the hot path on direct
+integer indexes. Avoid per-operation name lookup.
+
+```rust
+use fast_telemetry::{CounterSet, CounterSetBuffer};
+
+const REQUESTS: usize = 0;
+const BYTES: usize = 1;
+const ERRORS: usize = 2;
+
+let counters = CounterSet::new(4, 3);
+let mut buffer = CounterSetBuffer::new(&counters, 64);
+
+fn record_request(buffer: &mut CounterSetBuffer<'_>, bytes: isize, failed: bool) {
+    buffer.inc(REQUESTS);
+    buffer.add(BYTES, bytes);
+    if failed {
+        buffer.inc(ERRORS);
+    }
+    buffer.finish_op();
+}
+
+record_request(&mut buffer, 4096, false);
+record_request(&mut buffer, 512, true);
+buffer.flush();
+
+assert_eq!(counters.sum(REQUESTS), 2);
+assert_eq!(counters.sum(BYTES), 4608);
+assert_eq!(counters.sum(ERRORS), 1);
+```
+
+`finish_op()` marks one logical operation complete and drives the `flush_every`
+threshold. `inc_all()`, `add_all(...)`, and `add_values(...)` finish the
+operation automatically. Buffers flush on drop, but explicit `flush()` is useful
+before export or at request/task boundaries when fresh totals matter.
+
 ## Labeled Metrics
 
 ### Compile-Time Labels (O(1) array lookup)

@@ -14,6 +14,10 @@ Enable the `runtime` feature when a parent crate should own one shared telemetry
 service for metric registration, span collection, and export setup while child
 crates keep hot paths on direct metric handles.
 
+Use `CounterSet` and `CounterSetBuffer` for production grouped counters when one
+hot-path operation updates a fixed set of related counters. Resolve indexes once
+and record by index on the hot path.
+
 See the [workspace README](../../README.md) for full documentation, examples,
 runtime integration rules, and API reference.
 
