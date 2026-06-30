@@ -26,14 +26,14 @@ Focused mac harness comparison, all runs with verified final counts:
   --flush-every 64
 ```
 
-| Counters per Op | `counter_multi` | `counter_buffered` | OpenTelemetry Rust `counter_multi` | Buffered vs OTel |
-| ---: | ---: | ---: | ---: | ---: |
-| 3 | 0.92 CPU ns/write | 0.39 CPU ns/write | 232.83 CPU ns/write | 597.00x, 99.83% lower |
-| 4 | 0.78 CPU ns/write | 0.29 CPU ns/write | 297.33 CPU ns/write | 1025.28x, 99.90% lower |
-| 5 | 0.73 CPU ns/write | 0.22 CPU ns/write | 196.25 CPU ns/write | 892.05x, 99.89% lower |
-| 6 | 0.76 CPU ns/write | 0.20 CPU ns/write | 258.61 CPU ns/write | 1293.05x, 99.92% lower |
+| Counters | Grouped counters | OTel Rust |
+| ---: | ---: | ---: |
+| 3 | 0.39 CPU ns/write | 232.83 CPU ns/write |
+| 4 | 0.29 CPU ns/write | 297.33 CPU ns/write |
+| 5 | 0.22 CPU ns/write | 196.25 CPU ns/write |
+| 6 | 0.20 CPU ns/write | 258.61 CPU ns/write |
 
-The OpenTelemetry comparison uses pre-built Rust `u64_counter` handles and records the same number of counter writes per logical operation. The OTel rows had higher CPU-time variance (`cpu_ns_per_counter_write_cv_pct`: 12.66% to 26.12%), but the gap remained multiple orders of magnitude in the trimmed results.
+The OpenTelemetry comparison uses pre-built Rust `u64_counter` handles and records the same number of counter writes per logical operation. Grouped counters were 597.00x to 1293.05x lower in trimmed CPU ns/write. The OTel rows had higher CPU-time variance (`cpu_ns_per_counter_write_cv_pct`: 12.66% to 26.12%), but the gap remained multiple orders of magnitude in the trimmed results.
 
 The name-lookup control confirms that registry lookup should stay out of the hot path. With 128 registered metric names and 6 active counters per operation, direct buffered updates measured 0.19 CPU ns/write, pre-resolved indexed updates measured 0.82 CPU ns/write, and per-op `BTreeMap` name lookup measured 30.15 CPU ns/write.
 
