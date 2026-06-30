@@ -44,7 +44,7 @@ CPU-cycle equivalent, estimated from the mac CPU-time result at 4.61 cycles/ns:
 | 5 | 3.46 cycles/write | 1.11 cycles/write | 878.07 cycles/write |
 | 6 | 3.37 cycles/write | 0.88 cycles/write | 1175.14 cycles/write |
 
-Across the 3, 4, 5, and 6 counter rows, the estimated averages are 3.67 cycles/incr for independent fast counters, 1.26 cycles/incr for grouped buffered counters, and 1091.12 cycles/incr for OpenTelemetry Rust.
+The smallest and largest measured groups show the range without averaging across group widths: at 3 counters, estimated costs were 4.24 cycles/incr for independent fast counters, 1.75 cycles/incr for grouped buffered counters, and 1127.65 cycles/incr for OpenTelemetry Rust; at 6 counters, they were 3.37 cycles/incr, 0.88 cycles/incr, and 1175.14 cycles/incr respectively.
 
 Counter-write throughput:
 
