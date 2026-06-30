@@ -1,5 +1,9 @@
 # Release Notes
 
+## Unreleased
+
+- Removed the hidden `Counter::inc_many(...)` / `Counter::add_many(...)` helpers and the `counter_batch` benchmark entity so production grouping is standardized on `CounterSet` and `CounterSetBuffer`.
+
 ## 0.7.1 - 2026-06-30
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.

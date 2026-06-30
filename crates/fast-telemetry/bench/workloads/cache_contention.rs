@@ -4,7 +4,6 @@
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter --threads 16 --iters 10000000 --shards 16
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_multi --threads 16 --iters 10000000 --shards 16 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity counter_multi --threads 16 --iters 10000000 --shards 16 --batch-size 8
-// - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_batch --threads 16 --iters 10000000 --shards 16 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_set --threads 16 --iters 10000000 --shards 16 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_buffered --threads 16 --iters 10000000 --shards 16 --batch-size 8 --flush-every 64
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity labeled_counter --threads 16 --iters 10000000 --labels 64
@@ -55,7 +54,6 @@ enum Mode {
 enum Entity {
     Counter,
     CounterMulti,
-    CounterBatch,
     CounterSet,
     CounterBuffered,
     CounterBufferedIndexed,
@@ -153,7 +151,6 @@ fn parse_args() -> Config {
                 entity = match args[i + 1].as_str() {
                     "counter" => Entity::Counter,
                     "counter_multi" => Entity::CounterMulti,
-                    "counter_batch" => Entity::CounterBatch,
                     "counter_set" => Entity::CounterSet,
                     "counter_buffered" => Entity::CounterBuffered,
                     "counter_buffered_indexed" => Entity::CounterBufferedIndexed,
@@ -168,7 +165,7 @@ fn parse_args() -> Config {
                     "labeled_gauge" => Entity::LabeledGauge,
                     "labeled_histogram" => Entity::LabeledHistogram,
                     value => panic!(
-                        "invalid --entity: {value} (expected counter|counter_multi|counter_batch|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram)"
+                        "invalid --entity: {value} (expected counter|counter_multi|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram)"
                     ),
                 };
                 i += 2;
@@ -229,11 +226,11 @@ fn parse_args() -> Config {
             }
             "--help" => {
                 println!(
-                    "Usage: bench_cache_contention --mode <fast|atomic|metrics|otel> --entity <counter|counter_multi|counter_batch|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|labeled_counter|labeled_gauge|labeled_histogram> --threads <n> --iters <n> [--shards <n>] [--labels <n>] [--batch-size <n>] [--flush-every <n>] [--profile <uniform|hotspot|churn>] [--thread-affinity <off|round_robin|rr>] [--export-interval-ms <n>]"
+                    "Usage: bench_cache_contention --mode <fast|atomic|metrics|otel> --entity <counter|counter_multi|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|labeled_counter|labeled_gauge|labeled_histogram> --threads <n> --iters <n> [--shards <n>] [--labels <n>] [--batch-size <n>] [--flush-every <n>] [--profile <uniform|hotspot|churn>] [--thread-affinity <off|round_robin|rr>] [--export-interval-ms <n>]"
                 );
                 println!("  --profile <uniform|hotspot|churn> controls label access pattern");
                 println!(
-                    "  --batch-size <n> controls counters per op for counter_multi, counter_batch, counter_set, counter_buffered, counter_buffered_indexed, and counter_buffered_lookup"
+                    "  --batch-size <n> controls counters per op for counter_multi, counter_set, counter_buffered, counter_buffered_indexed, and counter_buffered_lookup"
                 );
                 println!("  --flush-every <n> controls local-delta flush cadence for counter_buffered");
                 println!("  --labels <n> controls registered metric names for counter_buffered_lookup");
@@ -446,7 +443,7 @@ fn metrics_gauge_value(cell: &MetricsGaugeCell) -> f64 {
     f64::from_bits(cell.load(Ordering::Relaxed))
 }
 
-fn counter_batch_final_count(counters: &[Counter]) -> isize {
+fn counter_multi_final_count(counters: &[Counter]) -> isize {
     counters.iter().map(Counter::sum).sum()
 }
 
@@ -515,39 +512,11 @@ fn run_fast(entity: Entity, cfg: &Config) -> RunResult {
                             }
                         }
                     },
-                    move || counter_batch_final_count(&exporter_counters),
+                    move || counter_multi_final_count(&exporter_counters),
                 );
 
             RunResult {
-                final_count: counter_batch_final_count(&counters),
-                record_seconds,
-                total_seconds,
-                export_count,
-                export_seconds,
-                cpu_usage,
-            }
-        }
-        Entity::CounterBatch => {
-            let counters: Arc<Vec<Counter>> =
-                Arc::new((0..batch_size).map(|_| Counter::new(shards)).collect());
-            let worker_counters = Arc::clone(&counters);
-            let exporter_counters = Arc::clone(&counters);
-            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
-                run_with_threads(
-                    threads,
-                    iters,
-                    thread_affinity,
-                    export_interval_ms,
-                    move |_, n| {
-                        for _ in 0..n {
-                            Counter::inc_many(worker_counters.as_slice());
-                        }
-                    },
-                    move || counter_batch_final_count(&exporter_counters),
-                );
-
-            RunResult {
-                final_count: counter_batch_final_count(&counters),
+                final_count: counter_multi_final_count(&counters),
                 record_seconds,
                 total_seconds,
                 export_count,
@@ -1200,7 +1169,6 @@ fn run_metrics(entity: Entity, cfg: &Config) -> RunResult {
             }
         }
         Entity::CounterMulti
-        | Entity::CounterBatch
         | Entity::CounterSet
         | Entity::CounterBuffered
         | Entity::CounterBufferedIndexed
@@ -1670,8 +1638,7 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
                 cpu_usage,
             }
         }
-        Entity::CounterBatch
-        | Entity::CounterSet
+        Entity::CounterSet
         | Entity::CounterBuffered
         | Entity::CounterBufferedIndexed
         | Entity::CounterBufferedLookup => {
@@ -2106,7 +2073,6 @@ fn main() {
     let total_ops = cfg.threads * cfg.iters;
     let counter_writes_per_op = match cfg.entity {
         Entity::CounterMulti
-        | Entity::CounterBatch
         | Entity::CounterSet
         | Entity::CounterBuffered
         | Entity::CounterBufferedIndexed
@@ -2149,7 +2115,6 @@ fn main() {
     let entity = match cfg.entity {
         Entity::Counter => "counter",
         Entity::CounterMulti => "counter_multi",
-        Entity::CounterBatch => "counter_batch",
         Entity::CounterSet => "counter_set",
         Entity::CounterBuffered => "counter_buffered",
         Entity::CounterBufferedIndexed => "counter_buffered_indexed",
@@ -2177,7 +2142,6 @@ fn main() {
         cfg.entity,
         Entity::Counter
             | Entity::CounterMulti
-            | Entity::CounterBatch
             | Entity::CounterSet
             | Entity::CounterBuffered
             | Entity::CounterBufferedIndexed

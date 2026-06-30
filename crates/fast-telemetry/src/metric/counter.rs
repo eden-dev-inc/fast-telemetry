@@ -77,33 +77,6 @@ impl Counter {
         self.add_with_thread_id(thread_id(), value, ordering);
     }
 
-    /// Benchmark-only prototype for batching increments across multiple counters.
-    #[cfg(feature = "bench-tools")]
-    #[doc(hidden)]
-    #[inline]
-    pub fn inc_many(counters: &[Counter]) {
-        Self::add_many(counters, 1);
-    }
-
-    /// Benchmark-only prototype for batching additions across multiple counters.
-    #[cfg(feature = "bench-tools")]
-    #[doc(hidden)]
-    #[inline]
-    pub fn add_many(counters: &[Counter], value: isize) {
-        Self::add_many_with_ordering(counters, value, Ordering::Relaxed);
-    }
-
-    /// Benchmark-only prototype for batching additions across multiple counters.
-    #[cfg(feature = "bench-tools")]
-    #[doc(hidden)]
-    #[inline]
-    pub fn add_many_with_ordering(counters: &[Counter], value: isize, ordering: Ordering) {
-        let thread_id = thread_id();
-        for counter in counters {
-            counter.add_with_thread_id(thread_id, value, ordering);
-        }
-    }
-
     /// Returns the sum of all shards using relaxed ordering.
     ///
     /// # Eventual Consistency
@@ -640,19 +613,6 @@ mod tests {
         let debug = format!("{counter:?}");
         assert!(debug.contains("sum: 42"));
         assert!(debug.contains("cells: 8"));
-    }
-
-    #[cfg(feature = "bench-tools")]
-    #[test]
-    fn inc_many_updates_all_counters() {
-        let counters = vec![Counter::new(4), Counter::new(4), Counter::new(4)];
-
-        Counter::inc_many(&counters);
-        Counter::add_many(&counters, 2);
-
-        for counter in &counters {
-            assert_eq!(counter.sum(), 3);
-        }
     }
 
     #[test]
