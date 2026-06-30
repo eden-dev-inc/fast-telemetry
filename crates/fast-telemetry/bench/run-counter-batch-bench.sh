@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
     --help)
       echo "Usage: $0 [--threads N] [--runs N] [--target-writes N] [--batch-sizes list] [--flush-every N] [--export-interval-ms N] [--pin] [--cpu-list list]"
       echo ""
-      echo "Compares counter_multi against counter_batch, counter_set, and counter_buffered across batch sizes."
+      echo "Compares fast counter_multi against counter_batch, counter_set, counter_buffered, and OpenTelemetry counter_multi across batch sizes."
       echo "Defaults: threads=logical CPUs, runs=7, target-writes=512000000, batch-sizes=1,2,4,8,16,32,64,128, flush-every=64"
       echo "--target-writes is total counter writes per run, not outer benchmark ops."
       echo "--flush-every is local operations per atomic flush for counter_buffered."
@@ -52,7 +52,7 @@ RUN_DIR="$RESULTS_DIR/counter_batch_${TIMESTAMP}_$$"
 mkdir -p "$RUN_DIR"
 SUMMARY_CSV="$RUN_DIR/counter-batch-summary.csv"
 
-echo "batch_size,iters_per_thread,target_counter_writes,flush_every,multi_cpu_ns_per_write,batch_cpu_ns_per_write,set_cpu_ns_per_write,buffered_cpu_ns_per_write,multi_total_ns_per_op,batch_total_ns_per_op,set_total_ns_per_op,buffered_total_ns_per_op,batch_delta_pct,set_delta_pct,buffered_delta_pct,multi_counter_writes_per_sec,batch_counter_writes_per_sec,set_counter_writes_per_sec,buffered_counter_writes_per_sec,multi_cv_pct,batch_cv_pct,set_cv_pct,buffered_cv_pct,multi_cpu_total_seconds,batch_cpu_total_seconds,set_cpu_total_seconds,buffered_cpu_total_seconds,multi_avg_cores,batch_avg_cores,set_avg_cores,buffered_avg_cores,multi_dir,batch_dir,set_dir,buffered_dir" > "$SUMMARY_CSV"
+echo "batch_size,iters_per_thread,target_counter_writes,flush_every,multi_cpu_ns_per_write,batch_cpu_ns_per_write,set_cpu_ns_per_write,buffered_cpu_ns_per_write,otel_cpu_ns_per_write,multi_total_ns_per_op,batch_total_ns_per_op,set_total_ns_per_op,buffered_total_ns_per_op,otel_total_ns_per_op,batch_delta_pct,set_delta_pct,buffered_delta_pct,buffered_vs_otel_speedup,buffered_vs_otel_delta_pct,multi_counter_writes_per_sec,batch_counter_writes_per_sec,set_counter_writes_per_sec,buffered_counter_writes_per_sec,otel_counter_writes_per_sec,multi_cv_pct,batch_cv_pct,set_cv_pct,buffered_cv_pct,otel_cv_pct,multi_cpu_total_seconds,batch_cpu_total_seconds,set_cpu_total_seconds,buffered_cpu_total_seconds,otel_cpu_total_seconds,multi_avg_cores,batch_avg_cores,set_avg_cores,buffered_avg_cores,otel_avg_cores,multi_dir,batch_dir,set_dir,buffered_dir,otel_dir" > "$SUMMARY_CSV"
 
 read_summary_field() {
   local dir="$1"
@@ -66,14 +66,15 @@ extract_run_dir() {
 }
 
 run_case() {
-  local entity="$1"
-  local batch_size="$2"
-  local iters="$3"
-  local log_file="$RUN_DIR/${entity}-bs${batch_size}.log"
+  local mode="$1"
+  local entity="$2"
+  local batch_size="$3"
+  local iters="$4"
+  local log_file="$RUN_DIR/${mode}-${entity}-bs${batch_size}.log"
   local cmd=(
     "$SCRIPT_DIR/run-cache-bench.sh"
     --entity "$entity"
-    --modes fast
+    --modes "$mode"
     --threads "$THREADS"
     --iters "$iters"
     --runs "$RUNS"
@@ -116,50 +117,59 @@ for batch_size in "${BATCH_SIZES[@]}"; do
   fi
 
   printf "\n[counter-batch] batch_size=%s iters_per_thread=%s\n" "$batch_size" "$iters"
-  multi_dir="$(run_case counter_multi "$batch_size" "$iters")"
-  batch_dir="$(run_case counter_batch "$batch_size" "$iters")"
-  set_dir="$(run_case counter_set "$batch_size" "$iters")"
-  buffered_dir="$(run_case counter_buffered "$batch_size" "$iters")"
+  multi_dir="$(run_case fast counter_multi "$batch_size" "$iters")"
+  batch_dir="$(run_case fast counter_batch "$batch_size" "$iters")"
+  set_dir="$(run_case fast counter_set "$batch_size" "$iters")"
+  buffered_dir="$(run_case fast counter_buffered "$batch_size" "$iters")"
+  otel_dir="$(run_case otel counter_multi "$batch_size" "$iters")"
 
   multi_ns="$(read_summary_field "$multi_dir" 20)"
   batch_ns="$(read_summary_field "$batch_dir" 20)"
   set_ns="$(read_summary_field "$set_dir" 20)"
   buffered_ns="$(read_summary_field "$buffered_dir" 20)"
+  otel_ns="$(read_summary_field "$otel_dir" 20)"
   multi_total_ns_per_op="$(read_summary_field "$multi_dir" 25)"
   batch_total_ns_per_op="$(read_summary_field "$batch_dir" 25)"
   set_total_ns_per_op="$(read_summary_field "$set_dir" 25)"
   buffered_total_ns_per_op="$(read_summary_field "$buffered_dir" 25)"
+  otel_total_ns_per_op="$(read_summary_field "$otel_dir" 25)"
   multi_writes="$(read_summary_field "$multi_dir" 5)"
   batch_writes="$(read_summary_field "$batch_dir" 5)"
   set_writes="$(read_summary_field "$set_dir" 5)"
   buffered_writes="$(read_summary_field "$buffered_dir" 5)"
+  otel_writes="$(read_summary_field "$otel_dir" 5)"
   multi_cv="$(read_summary_field "$multi_dir" 23)"
   batch_cv="$(read_summary_field "$batch_dir" 23)"
   set_cv="$(read_summary_field "$set_dir" 23)"
   buffered_cv="$(read_summary_field "$buffered_dir" 23)"
+  otel_cv="$(read_summary_field "$otel_dir" 23)"
   multi_cpu="$(read_summary_field "$multi_dir" 13)"
   batch_cpu="$(read_summary_field "$batch_dir" 13)"
   set_cpu="$(read_summary_field "$set_dir" 13)"
   buffered_cpu="$(read_summary_field "$buffered_dir" 13)"
+  otel_cpu="$(read_summary_field "$otel_dir" 13)"
   multi_cores="$(read_summary_field "$multi_dir" 14)"
   batch_cores="$(read_summary_field "$batch_dir" 14)"
   set_cores="$(read_summary_field "$set_dir" 14)"
   buffered_cores="$(read_summary_field "$buffered_dir" 14)"
+  otel_cores="$(read_summary_field "$otel_dir" 14)"
   batch_delta_pct="$(awk -v multi="$multi_ns" -v candidate="$batch_ns" 'BEGIN { if (multi == 0) print "0.00"; else printf "%.2f", ((multi - candidate) / multi) * 100.0 }')"
   set_delta_pct="$(awk -v multi="$multi_ns" -v candidate="$set_ns" 'BEGIN { if (multi == 0) print "0.00"; else printf "%.2f", ((multi - candidate) / multi) * 100.0 }')"
   buffered_delta_pct="$(awk -v multi="$multi_ns" -v candidate="$buffered_ns" 'BEGIN { if (multi == 0) print "0.00"; else printf "%.2f", ((multi - candidate) / multi) * 100.0 }')"
+  buffered_vs_otel_speedup="$(awk -v otel="$otel_ns" -v buffered="$buffered_ns" 'BEGIN { if (buffered == 0) print "0.00"; else printf "%.2f", otel / buffered }')"
+  buffered_vs_otel_delta_pct="$(awk -v otel="$otel_ns" -v buffered="$buffered_ns" 'BEGIN { if (otel == 0) print "0.00"; else printf "%.2f", ((otel - buffered) / otel) * 100.0 }')"
 
-  echo "$batch_size,$iters,$TARGET_WRITES,$FLUSH_EVERY,$multi_ns,$batch_ns,$set_ns,$buffered_ns,$multi_total_ns_per_op,$batch_total_ns_per_op,$set_total_ns_per_op,$buffered_total_ns_per_op,$batch_delta_pct,$set_delta_pct,$buffered_delta_pct,$multi_writes,$batch_writes,$set_writes,$buffered_writes,$multi_cv,$batch_cv,$set_cv,$buffered_cv,$multi_cpu,$batch_cpu,$set_cpu,$buffered_cpu,$multi_cores,$batch_cores,$set_cores,$buffered_cores,$multi_dir,$batch_dir,$set_dir,$buffered_dir" >> "$SUMMARY_CSV"
+  echo "$batch_size,$iters,$TARGET_WRITES,$FLUSH_EVERY,$multi_ns,$batch_ns,$set_ns,$buffered_ns,$otel_ns,$multi_total_ns_per_op,$batch_total_ns_per_op,$set_total_ns_per_op,$buffered_total_ns_per_op,$otel_total_ns_per_op,$batch_delta_pct,$set_delta_pct,$buffered_delta_pct,$buffered_vs_otel_speedup,$buffered_vs_otel_delta_pct,$multi_writes,$batch_writes,$set_writes,$buffered_writes,$otel_writes,$multi_cv,$batch_cv,$set_cv,$buffered_cv,$otel_cv,$multi_cpu,$batch_cpu,$set_cpu,$buffered_cpu,$otel_cpu,$multi_cores,$batch_cores,$set_cores,$buffered_cores,$otel_cores,$multi_dir,$batch_dir,$set_dir,$buffered_dir,$otel_dir" >> "$SUMMARY_CSV"
 done
 
-printf "\nSummary (positive delta means the candidate was faster than counter_multi):\n"
+printf "\nSummary (positive delta means the fast candidate was faster than fast counter_multi):\n"
 awk -F, '
   NR == 1 {
     next
   }
   {
-    printf "  batch_size=%-4s cpu_ns/write multi=%6.2f batch=%6.2f set=%6.2f buffered=%6.2f total_ns/op multi=%6.2f batch=%6.2f set=%6.2f buffered=%6.2f delta batch=%7.2f%% set=%7.2f%% buffered=%7.2f%% cv=%s/%s/%s/%s\n",
-      $1, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $20, $21, $22, $23
+    printf "  batch_size=%-4s cpu_ns/write multi=%6.2f batch=%6.2f set=%6.2f buffered=%6.2f otel=%6.2f total_ns/op multi=%6.2f batch=%6.2f set=%6.2f buffered=%6.2f otel=%6.2f delta batch=%7.2f%% set=%7.2f%% buffered=%7.2f%% buffered/otel=%6.2fx (%7.2f%% lower) cv=%s/%s/%s/%s/%s\n",
+      $1, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $25, $26, $27, $28, $29
   }
 ' "$SUMMARY_CSV"
 

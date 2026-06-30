@@ -75,6 +75,9 @@ The cache harness includes a focused probe for counter batching:
 # Current shape: one logical op updates N counters with N independent Counter::inc calls.
 ./bench/run-cache-bench.sh --entity counter_multi --modes fast --batch-size 8 --threads 16 --runs 5
 
+# OpenTelemetry Rust shape: one logical op updates N pre-built OTel u64_counter handles.
+./bench/run-cache-bench.sh --entity counter_multi --modes otel --batch-size 8 --threads 16 --runs 5
+
 # Prototype shape: one logical op updates N counters through the bench-only batch helper.
 ./bench/run-cache-bench.sh --entity counter_batch --modes fast --batch-size 8 --threads 16 --runs 5
 
@@ -90,15 +93,16 @@ The cache harness includes a focused probe for counter batching:
 # Control: per-op name lookup across a larger registered metric namespace.
 ./bench/run-cache-bench.sh --entity counter_buffered_lookup --modes fast --batch-size 8 --labels 128 --flush-every 64 --threads 16 --runs 5
 
-# Sweep multiple batch sizes and write one comparison summary.
+# Sweep multiple batch sizes and write one comparison summary, including OTel.
 ./bench/run-counter-batch-bench.sh --threads 16 --runs 7 --flush-every 64
 ```
 
 Use `cpu_ns_per_counter_write` and `total_counter_writes_per_sec` when comparing
-these runs. `counter_multi`, `counter_batch`, `counter_set`, and
-`counter_buffered` are intentionally `fast`-only because they compare
-fast-telemetry's current write path against candidate batching API shapes, not
-against OpenTelemetry or metrics-rs.
+these runs. `counter_multi` supports both `fast` and `otel` modes, so the
+summary can compare independent fast-telemetry counters against independent
+OpenTelemetry Rust counters for the same number of writes per logical operation.
+`counter_batch`, `counter_set`, and `counter_buffered` are intentionally
+`fast`-only because they compare candidate fast-telemetry batching API shapes.
 
 The buffered prototype uses a bench-only grouped counter buffer. Uniform group
 increments accumulate a shared local delta before flushing; individual counters

@@ -3,6 +3,7 @@
 // Build and run directly:
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter --threads 16 --iters 10000000 --shards 16
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_multi --threads 16 --iters 10000000 --shards 16 --batch-size 8
+// - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity counter_multi --threads 16 --iters 10000000 --shards 16 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_batch --threads 16 --iters 10000000 --shards 16 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_set --threads 16 --iters 10000000 --shards 16 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_buffered --threads 16 --iters 10000000 --shards 16 --batch-size 8 --flush-every 64
@@ -1564,6 +1565,7 @@ fn run_metrics(entity: Entity, cfg: &Config) -> RunResult {
 fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
     let threads = cfg.threads;
     let iters = cfg.iters;
+    let batch_size = cfg.batch_size;
     let labels = cfg.labels;
     let profile = cfg.profile;
     let thread_affinity = cfg.thread_affinity;
@@ -1575,7 +1577,12 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
             .build(),
     );
     let meter = provider.meter("fast-telemetry.bench_cache_contention");
-    let expected_final_count = (threads * (iters + (iters / 10).max(1))) as isize;
+    let expected_counter_writes_per_op = match entity {
+        Entity::CounterMulti => batch_size,
+        _ => 1,
+    };
+    let expected_final_count =
+        (threads * (iters + (iters / 10).max(1)) * expected_counter_writes_per_op) as isize;
 
     let attrs: Arc<Vec<KeyValue>> = Arc::new(
         (0..labels)
@@ -1621,8 +1628,49 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
                 cpu_usage,
             }
         }
-        Entity::CounterMulti
-        | Entity::CounterBatch
+        Entity::CounterMulti => {
+            let counters: Arc<Vec<OTelCounter<u64>>> = Arc::new(
+                (0..batch_size)
+                    .map(|idx| meter.u64_counter(format!("contention_counter_{idx}")).build())
+                    .collect(),
+            );
+            let worker_counters = Arc::clone(&counters);
+            let exporter_provider = Arc::clone(&provider);
+            let exporter_exporter = exporter.clone();
+
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |_, n| {
+                        for _ in 0..n {
+                            for counter in worker_counters.iter() {
+                                counter.add(1, &[]);
+                            }
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
+
+            let _ = provider.force_flush();
+            let _ = exporter.get_finished_metrics();
+            RunResult {
+                final_count: expected_final_count,
+                record_seconds,
+                total_seconds,
+                export_count,
+                export_seconds,
+                cpu_usage,
+            }
+        }
+        Entity::CounterBatch
         | Entity::CounterSet
         | Entity::CounterBuffered
         | Entity::CounterBufferedIndexed

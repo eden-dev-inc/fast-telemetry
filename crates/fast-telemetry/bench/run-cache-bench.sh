@@ -7,7 +7,7 @@ RESULTS_DIR="$SCRIPT_DIR/results"
 COLLECTOR_SCRIPT="$SCRIPT_DIR/run-dogstatsd-collector.sh"
 COLLECTOR_URL="http://127.0.0.1:9102/metrics"
 
-THREADS="$(nproc 2>/dev/null || sysctl -n hw.logicalcpu)"
+THREADS="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)"
 ITERS="10000000"
 SHARDS="${THREADS}"
 SHARDS_SET=0
@@ -74,6 +74,7 @@ while [[ $# -gt 0 ]]; do
       echo "Defaults: threads=nproc, iters=10000000, shards=threads, runs=3"
       echo "--modes comma-separated modes: fast,otel,atomic,metrics (default: fast,otel)"
       echo "--entity one of: counter,counter_multi,counter_batch,counter_set,counter_buffered,counter_buffered_indexed,counter_buffered_lookup,distribution,dynamic_counter,dynamic_distribution,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
+      echo "  otel mode supports: counter,counter_multi,distribution,dynamic_counter,dynamic_distribution,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
       echo "  metrics mode supports: counter,dynamic_counter,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
       echo "--labels label cardinality for labeled entities (default: 16)"
       echo "--batch-size counters per op for counter_multi/counter_batch/counter_set/counter_buffered/counter_buffered_indexed/counter_buffered_lookup (default: 8)"
@@ -150,7 +151,16 @@ if [[ "$ENTITY" != "counter" ]]; then
   done
 fi
 
-if [[ "$ENTITY" == "counter_multi" || "$ENTITY" == "counter_batch" || "$ENTITY" == "counter_set" || "$ENTITY" == "counter_buffered" || "$ENTITY" == "counter_buffered_indexed" || "$ENTITY" == "counter_buffered_lookup" ]]; then
+if [[ "$ENTITY" == "counter_multi" ]]; then
+  for mode in "${MODES_ARR[@]}"; do
+    if [[ "$mode" != "fast" && "$mode" != "otel" ]]; then
+      echo "ERROR: entity=$ENTITY is only valid with --modes fast or otel"
+      exit 1
+    fi
+  done
+fi
+
+if [[ "$ENTITY" == "counter_batch" || "$ENTITY" == "counter_set" || "$ENTITY" == "counter_buffered" || "$ENTITY" == "counter_buffered_indexed" || "$ENTITY" == "counter_buffered_lookup" ]]; then
   for mode in "${MODES_ARR[@]}"; do
     if [[ "$mode" != "fast" ]]; then
       echo "ERROR: entity=$ENTITY is only valid with --modes fast"
