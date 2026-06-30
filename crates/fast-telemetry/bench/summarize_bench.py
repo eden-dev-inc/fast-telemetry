@@ -41,9 +41,18 @@ def parse_mode(run_dir: pathlib.Path, mode: str):
     cpu_core_vals = []
     cpu_util_vals = []
     cpu_ns_per_op_vals = []
+    cpu_ns_per_counter_write_vals = []
+    record_ns_per_op_vals = []
+    total_ns_per_op_vals = []
+    record_ns_per_counter_write_vals = []
+    total_ns_per_counter_write_vals = []
+    record_counter_write_vals = []
+    total_counter_write_vals = []
     for path in sorted(run_dir.glob(f"{mode}-run-*.txt")):
         record = None
         total = None
+        record_counter_writes = None
+        total_counter_writes = None
         export_avg = None
         cpu_user = None
         cpu_system = None
@@ -51,11 +60,20 @@ def parse_mode(run_dir: pathlib.Path, mode: str):
         cpu_avg_cores = None
         cpu_utilization = None
         cpu_ns_per_op = None
+        cpu_ns_per_counter_write = None
+        record_ns_per_op = None
+        total_ns_per_op = None
+        record_ns_per_counter_write = None
+        total_ns_per_counter_write = None
         for line in path.read_text().splitlines():
             if line.startswith("record_ops_per_sec="):
                 record = float(line.split("=", 1)[1])
             elif line.startswith("total_ops_per_sec="):
                 total = float(line.split("=", 1)[1])
+            elif line.startswith("record_counter_writes_per_sec="):
+                record_counter_writes = float(line.split("=", 1)[1])
+            elif line.startswith("total_counter_writes_per_sec="):
+                total_counter_writes = float(line.split("=", 1)[1])
             elif line.startswith("export_avg_ms="):
                 export_avg = float(line.split("=", 1)[1])
             elif line.startswith("cpu_user_seconds="):
@@ -70,10 +88,24 @@ def parse_mode(run_dir: pathlib.Path, mode: str):
                 cpu_utilization = float(line.split("=", 1)[1])
             elif line.startswith("cpu_ns_per_op="):
                 cpu_ns_per_op = float(line.split("=", 1)[1])
+            elif line.startswith("cpu_ns_per_counter_write="):
+                cpu_ns_per_counter_write = float(line.split("=", 1)[1])
+            elif line.startswith("record_ns_per_op="):
+                record_ns_per_op = float(line.split("=", 1)[1])
+            elif line.startswith("total_ns_per_op="):
+                total_ns_per_op = float(line.split("=", 1)[1])
+            elif line.startswith("record_ns_per_counter_write="):
+                record_ns_per_counter_write = float(line.split("=", 1)[1])
+            elif line.startswith("total_ns_per_counter_write="):
+                total_ns_per_counter_write = float(line.split("=", 1)[1])
         if record is not None:
             record_vals.append(record)
         if total is not None:
             total_vals.append(total)
+        if record_counter_writes is not None:
+            record_counter_write_vals.append(record_counter_writes)
+        if total_counter_writes is not None:
+            total_counter_write_vals.append(total_counter_writes)
         if export_avg is not None:
             export_vals.append(export_avg)
         if cpu_user is not None:
@@ -88,9 +120,21 @@ def parse_mode(run_dir: pathlib.Path, mode: str):
             cpu_util_vals.append(cpu_utilization)
         if cpu_ns_per_op is not None:
             cpu_ns_per_op_vals.append(cpu_ns_per_op)
+        if cpu_ns_per_counter_write is not None:
+            cpu_ns_per_counter_write_vals.append(cpu_ns_per_counter_write)
+        if record_ns_per_op is not None:
+            record_ns_per_op_vals.append(record_ns_per_op)
+        if total_ns_per_op is not None:
+            total_ns_per_op_vals.append(total_ns_per_op)
+        if record_ns_per_counter_write is not None:
+            record_ns_per_counter_write_vals.append(record_ns_per_counter_write)
+        if total_ns_per_counter_write is not None:
+            total_ns_per_counter_write_vals.append(total_ns_per_counter_write)
     return {
         "record": record_vals,
         "total": total_vals,
+        "record_counter_writes": record_counter_write_vals,
+        "total_counter_writes": total_counter_write_vals,
         "export": export_vals,
         "cpu_user": cpu_user_vals,
         "cpu_system": cpu_system_vals,
@@ -98,6 +142,11 @@ def parse_mode(run_dir: pathlib.Path, mode: str):
         "cpu_cores": cpu_core_vals,
         "cpu_util": cpu_util_vals,
         "cpu_ns_per_op": cpu_ns_per_op_vals,
+        "cpu_ns_per_counter_write": cpu_ns_per_counter_write_vals,
+        "record_ns_per_op": record_ns_per_op_vals,
+        "total_ns_per_op": total_ns_per_op_vals,
+        "record_ns_per_counter_write": record_ns_per_counter_write_vals,
+        "total_ns_per_counter_write": total_ns_per_counter_write_vals,
     }
 
 
@@ -115,6 +164,8 @@ def main() -> int:
             "n": len(vals["total"]),
             "record_tm": trimmed_mean(vals["record"]),
             "total_tm": trimmed_mean(vals["total"]),
+            "record_counter_writes_tm": trimmed_mean(vals["record_counter_writes"]),
+            "total_counter_writes_tm": trimmed_mean(vals["total_counter_writes"]),
             "total_min": min(vals["total"]),
             "total_max": max(vals["total"]),
             # Wall-time-derived throughput is noise-contaminated by scheduler
@@ -135,23 +186,45 @@ def main() -> int:
             "cpu_ns_per_op_min": min(vals["cpu_ns_per_op"]) if vals["cpu_ns_per_op"] else 0.0,
             "cpu_ns_per_op_max": max(vals["cpu_ns_per_op"]) if vals["cpu_ns_per_op"] else 0.0,
             "cpu_ns_per_op_cv_pct": cv_pct(vals["cpu_ns_per_op"]),
+            "cpu_ns_per_counter_write_tm": trimmed_mean(vals["cpu_ns_per_counter_write"]),
+            "cpu_ns_per_counter_write_min": min(vals["cpu_ns_per_counter_write"]) if vals["cpu_ns_per_counter_write"] else 0.0,
+            "cpu_ns_per_counter_write_max": max(vals["cpu_ns_per_counter_write"]) if vals["cpu_ns_per_counter_write"] else 0.0,
+            "cpu_ns_per_counter_write_cv_pct": cv_pct(vals["cpu_ns_per_counter_write"]),
+            "record_ns_per_op_tm": trimmed_mean(vals["record_ns_per_op"]),
+            "total_ns_per_op_tm": trimmed_mean(vals["total_ns_per_op"]),
+            "record_ns_per_counter_write_tm": trimmed_mean(vals["record_ns_per_counter_write"]),
+            "total_ns_per_counter_write_tm": trimmed_mean(vals["total_ns_per_counter_write"]),
         })
 
     csv_lines = [
         "mode,runs,trimmed_record_ops_per_sec,trimmed_total_ops_per_sec,"
+        "trimmed_record_counter_writes_per_sec,trimmed_total_counter_writes_per_sec,"
         "min_total_ops_per_sec,max_total_ops_per_sec,total_cv_pct,"
         "trimmed_export_avg_ms,trimmed_cpu_user_seconds,trimmed_cpu_system_seconds,"
         "trimmed_cpu_total_seconds,trimmed_cpu_avg_cores,trimmed_cpu_utilization_pct,"
-        "trimmed_cpu_ns_per_op,min_cpu_ns_per_op,max_cpu_ns_per_op,cpu_ns_per_op_cv_pct"
+        "trimmed_cpu_ns_per_op,min_cpu_ns_per_op,max_cpu_ns_per_op,cpu_ns_per_op_cv_pct,"
+        "trimmed_cpu_ns_per_counter_write,min_cpu_ns_per_counter_write,"
+        "max_cpu_ns_per_counter_write,cpu_ns_per_counter_write_cv_pct,"
+        "trimmed_record_ns_per_op,trimmed_total_ns_per_op,"
+        "trimmed_record_ns_per_counter_write,trimmed_total_ns_per_counter_write"
     ]
     for r in rows:
         csv_lines.append(
             f"{r['mode']},{r['n']},{r['record_tm']:.2f},{r['total_tm']:.2f},"
+            f"{r['record_counter_writes_tm']:.2f},{r['total_counter_writes_tm']:.2f},"
             f"{r['total_min']:.2f},{r['total_max']:.2f},{r['total_cv_pct']:.2f},"
             f"{r['export_tm']:.6f},{r['cpu_user_tm']:.6f},{r['cpu_system_tm']:.6f},"
             f"{r['cpu_total_tm']:.6f},{r['cpu_cores_tm']:.6f},{r['cpu_util_tm']:.2f},"
             f"{r['cpu_ns_per_op_tm']:.2f},{r['cpu_ns_per_op_min']:.2f},"
-            f"{r['cpu_ns_per_op_max']:.2f},{r['cpu_ns_per_op_cv_pct']:.2f}"
+            f"{r['cpu_ns_per_op_max']:.2f},{r['cpu_ns_per_op_cv_pct']:.2f},"
+            f"{r['cpu_ns_per_counter_write_tm']:.2f},"
+            f"{r['cpu_ns_per_counter_write_min']:.2f},"
+            f"{r['cpu_ns_per_counter_write_max']:.2f},"
+            f"{r['cpu_ns_per_counter_write_cv_pct']:.2f},"
+            f"{r['record_ns_per_op_tm']:.2f},"
+            f"{r['total_ns_per_op_tm']:.2f},"
+            f"{r['record_ns_per_counter_write_tm']:.2f},"
+            f"{r['total_ns_per_counter_write_tm']:.2f}"
         )
     (run_dir / "summary.csv").write_text("\n".join(csv_lines) + "\n")
 
@@ -165,7 +238,10 @@ def main() -> int:
             f"  {r['mode']:6s} runs={r['n']} "
             f"cpu_ns_per_op={r['cpu_ns_per_op_tm']:.2f} (cv={cpu_cv:.1f}%{cpu_cv_marker}, "
             f"min={r['cpu_ns_per_op_min']:.2f} max={r['cpu_ns_per_op_max']:.2f})  "
+            f"cpu_ns_per_counter_write={r['cpu_ns_per_counter_write_tm']:.2f}  "
+            f"total_ns_per_op={r['total_ns_per_op_tm']:.2f}  "
             f"total_ops/s={r['total_tm']:,.0f} (wall_cv={wall_cv:.1f}%)  "
+            f"total_counter_writes/s={r['total_counter_writes_tm']:,.0f}  "
             f"cpu_total_s={r['cpu_total_tm']:.3f} cpu_avg_cores={r['cpu_cores_tm']:.2f} "
             f"export_avg_ms={r['export_tm']:.4f}"
         )

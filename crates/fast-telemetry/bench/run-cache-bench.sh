@@ -21,6 +21,7 @@ EXPORT_INTERVAL_MS="10"
 MODES_CSV="fast,otel"
 ENTITY="counter"
 LABELS="16"
+BATCH_SIZE="8"
 PROFILE="uniform"
 THREAD_AFFINITY="off"
 VALIDATE_EXPORT=0
@@ -37,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --modes) MODES_CSV="$2"; shift 2 ;;
     --entity) ENTITY="$2"; shift 2 ;;
     --labels) LABELS="$2"; shift 2 ;;
+    --batch-size) BATCH_SIZE="$2"; shift 2 ;;
     --profile) PROFILE="$2"; shift 2 ;;
     --validate-export) VALIDATE_EXPORT=1; shift ;;
     --collector) COLLECTOR=1; shift ;;
@@ -65,13 +67,14 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help)
-      echo "Usage: $0 [--threads N] [--iters N] [--shards N] [--runs N] [--entity name] [--labels N] [--profile name] [--export-interval-ms N] [--modes list] [--validate-export] [--collector|--collector-keep-up] [--pin] [--cpu-list list] [--perf] [--perf-stat] [--perf-record] [--perf-freq N]"
+      echo "Usage: $0 [--threads N] [--iters N] [--shards N] [--runs N] [--entity name] [--labels N] [--batch-size N] [--profile name] [--export-interval-ms N] [--modes list] [--validate-export] [--collector|--collector-keep-up] [--pin] [--cpu-list list] [--perf] [--perf-stat] [--perf-record] [--perf-freq N]"
       echo ""
       echo "Defaults: threads=nproc, iters=10000000, shards=threads, runs=3"
       echo "--modes comma-separated modes: fast,otel,atomic,metrics (default: fast,otel)"
-      echo "--entity one of: counter,distribution,dynamic_counter,dynamic_distribution,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
+      echo "--entity one of: counter,counter_multi,counter_batch,counter_set,distribution,dynamic_counter,dynamic_distribution,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
       echo "  metrics mode supports: counter,dynamic_counter,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
       echo "--labels label cardinality for labeled entities (default: 16)"
+      echo "--batch-size counters per op for counter_multi/counter_batch/counter_set (default: 8)"
       echo "--profile access pattern: uniform,hotspot,churn (default: uniform)"
       echo "--validate-export run export/parity acceptance tests before benchmark"
       echo "--collector start local DogStatsD collector and snapshot metrics"
@@ -89,7 +92,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$ENTITY" in
-  counter|distribution|dynamic_counter|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram) ;;
+  counter|counter_multi|counter_batch|counter_set|distribution|dynamic_counter|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram) ;;
   *)
     echo "ERROR: unsupported --entity '$ENTITY'"
     exit 1
@@ -143,6 +146,15 @@ if [[ "$ENTITY" != "counter" ]]; then
   done
 fi
 
+if [[ "$ENTITY" == "counter_multi" || "$ENTITY" == "counter_batch" || "$ENTITY" == "counter_set" ]]; then
+  for mode in "${MODES_ARR[@]}"; do
+    if [[ "$mode" != "fast" ]]; then
+      echo "ERROR: entity=$ENTITY is only valid with --modes fast"
+      exit 1
+    fi
+  done
+fi
+
 if [[ "$ENTITY" == "distribution" || "$ENTITY" == "dynamic_distribution" ]]; then
   for mode in "${MODES_ARR[@]}"; do
     if [[ "$mode" == "metrics" ]]; then
@@ -154,7 +166,7 @@ fi
 
 mkdir -p "$RESULTS_DIR"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-RUN_DIR="$RESULTS_DIR/cache_${TIMESTAMP}"
+RUN_DIR="$RESULTS_DIR/cache_${TIMESTAMP}_${ENTITY}_${PROFILE}_bs${BATCH_SIZE}_$$"
 mkdir -p "$RUN_DIR"
 
 if [[ "$PERF_STAT" == "1" || "$PERF_RECORD" == "1" ]]; then
@@ -164,7 +176,7 @@ fi
 
 echo "=== fast-telemetry cache contention benchmark ==="
 echo "threads=$THREADS iters=$ITERS shards=$SHARDS runs=$RUNS"
-echo "entity=$ENTITY labels=$LABELS profile=$PROFILE"
+echo "entity=$ENTITY labels=$LABELS batch_size=$BATCH_SIZE profile=$PROFILE"
 echo "thread_affinity=$THREAD_AFFINITY"
 echo "export_interval_ms=$EXPORT_INTERVAL_MS"
 echo "validate_export=$VALIDATE_EXPORT"
@@ -200,10 +212,10 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
-FAST_CMD=("$BIN" --mode fast --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --export-interval-ms "$EXPORT_INTERVAL_MS")
-ATOMIC_CMD=("$BIN" --mode atomic --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --export-interval-ms "$EXPORT_INTERVAL_MS")
-METRICS_CMD=("$BIN" --mode metrics --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --export-interval-ms "$EXPORT_INTERVAL_MS")
-OTEL_CMD=("$BIN" --mode otel --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --export-interval-ms "$EXPORT_INTERVAL_MS")
+FAST_CMD=("$BIN" --mode fast --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --batch-size "$BATCH_SIZE" --export-interval-ms "$EXPORT_INTERVAL_MS")
+ATOMIC_CMD=("$BIN" --mode atomic --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --batch-size "$BATCH_SIZE" --export-interval-ms "$EXPORT_INTERVAL_MS")
+METRICS_CMD=("$BIN" --mode metrics --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --batch-size "$BATCH_SIZE" --export-interval-ms "$EXPORT_INTERVAL_MS")
+OTEL_CMD=("$BIN" --mode otel --entity "$ENTITY" --profile "$PROFILE" --thread-affinity "$THREAD_AFFINITY" --threads "$THREADS" --iters "$ITERS" --shards "$SHARDS" --labels "$LABELS" --batch-size "$BATCH_SIZE" --export-interval-ms "$EXPORT_INTERVAL_MS")
 
 run_cmd() {
   if [[ "$PIN" == "1" ]]; then
@@ -238,6 +250,8 @@ if [[ "$COLLECTOR" == "1" ]]; then
       run_id="$(basename "$run_file" | sed -E 's/.*-run-([0-9]+)\.txt/\1/')"
       total_ops_per_sec="$(grep -E '^total_ops_per_sec=' "$run_file" | cut -d= -f2)"
       record_ops_per_sec="$(grep -E '^record_ops_per_sec=' "$run_file" | cut -d= -f2)"
+      total_counter_writes_per_sec="$(grep -E '^total_counter_writes_per_sec=' "$run_file" | cut -d= -f2)"
+      record_counter_writes_per_sec="$(grep -E '^record_counter_writes_per_sec=' "$run_file" | cut -d= -f2)"
       export_avg_ms="$(grep -E '^export_avg_ms=' "$run_file" | cut -d= -f2)"
 
       if [[ -n "$total_ops_per_sec" ]]; then
@@ -245,6 +259,12 @@ if [[ "$COLLECTOR" == "1" ]]; then
       fi
       if [[ -n "$record_ops_per_sec" ]]; then
         send_udp_line "ft.bench.record_ops_per_sec:${record_ops_per_sec}|g|#mode:${mode},entity:${ENTITY},profile:${PROFILE},run:${run_id}"
+      fi
+      if [[ -n "$total_counter_writes_per_sec" ]]; then
+        send_udp_line "ft.bench.total_counter_writes_per_sec:${total_counter_writes_per_sec}|g|#mode:${mode},entity:${ENTITY},profile:${PROFILE},run:${run_id}"
+      fi
+      if [[ -n "$record_counter_writes_per_sec" ]]; then
+        send_udp_line "ft.bench.record_counter_writes_per_sec:${record_counter_writes_per_sec}|g|#mode:${mode},entity:${ENTITY},profile:${PROFILE},run:${run_id}"
       fi
       if [[ -n "$export_avg_ms" ]]; then
         send_udp_line "ft.bench.export_avg_ms:${export_avg_ms}|g|#mode:${mode},entity:${ENTITY},profile:${PROFILE},run:${run_id}"

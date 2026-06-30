@@ -2,13 +2,16 @@
 //
 // Build and run directly:
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter --threads 16 --iters 10000000 --shards 16
+// - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_multi --threads 16 --iters 10000000 --shards 16 --batch-size 8
+// - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_batch --threads 16 --iters 10000000 --shards 16 --batch-size 8
+// - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_set --threads 16 --iters 10000000 --shards 16 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity labeled_counter --threads 16 --iters 10000000 --labels 64
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity dynamic_counter --threads 16 --iters 10000000 --labels 64 --shards 16
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity dynamic_counter --threads 16 --iters 10000000 --labels 64
 
 use fast_telemetry::{
-    Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
-    DynamicHistogram, LabelEnum, LabeledCounter, LabeledGauge, LabeledHistogram,
+    Counter, CounterSet, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge,
+    DynamicGaugeI64, DynamicHistogram, LabelEnum, LabeledCounter, LabeledGauge, LabeledHistogram,
 };
 use metrics::atomics::AtomicU64 as MetricsAtomicU64;
 use metrics::{
@@ -47,6 +50,9 @@ enum Mode {
 #[derive(Copy, Clone, Debug)]
 enum Entity {
     Counter,
+    CounterMulti,
+    CounterBatch,
+    CounterSet,
     Distribution,
     DynamicCounter,
     DynamicDistribution,
@@ -92,6 +98,7 @@ struct Config {
     iters: usize,
     shards: usize,
     labels: usize,
+    batch_size: usize,
     profile: WorkloadProfile,
     thread_affinity: ThreadAffinityMode,
     export_interval_ms: u64,
@@ -114,6 +121,7 @@ fn parse_args() -> Config {
     let mut shards = threads;
     let mut shards_set = false;
     let mut labels = 16usize;
+    let mut batch_size = 8usize;
     let mut profile = WorkloadProfile::Uniform;
     let mut thread_affinity = ThreadAffinityMode::Off;
     let mut export_interval_ms = 10u64;
@@ -135,6 +143,9 @@ fn parse_args() -> Config {
             "--entity" if i + 1 < args.len() => {
                 entity = match args[i + 1].as_str() {
                     "counter" => Entity::Counter,
+                    "counter_multi" => Entity::CounterMulti,
+                    "counter_batch" => Entity::CounterBatch,
+                    "counter_set" => Entity::CounterSet,
                     "distribution" => Entity::Distribution,
                     "dynamic_counter" => Entity::DynamicCounter,
                     "dynamic_distribution" => Entity::DynamicDistribution,
@@ -145,7 +156,7 @@ fn parse_args() -> Config {
                     "labeled_gauge" => Entity::LabeledGauge,
                     "labeled_histogram" => Entity::LabeledHistogram,
                     value => panic!(
-                        "invalid --entity: {value} (expected counter|distribution|dynamic_counter|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram)"
+                        "invalid --entity: {value} (expected counter|counter_multi|counter_batch|counter_set|distribution|dynamic_counter|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram)"
                     ),
                 };
                 i += 2;
@@ -186,6 +197,12 @@ fn parse_args() -> Config {
                 labels = args[i + 1].parse().expect("--labels must be an integer");
                 i += 2;
             }
+            "--batch-size" if i + 1 < args.len() => {
+                batch_size = args[i + 1]
+                    .parse()
+                    .expect("--batch-size must be an integer");
+                i += 2;
+            }
             "--export-interval-ms" if i + 1 < args.len() => {
                 export_interval_ms = args[i + 1]
                     .parse()
@@ -194,9 +211,12 @@ fn parse_args() -> Config {
             }
             "--help" => {
                 println!(
-                    "Usage: bench_cache_contention --mode <fast|atomic|metrics|otel> --entity <counter|distribution|dynamic_counter|labeled_counter|labeled_gauge|labeled_histogram> --threads <n> --iters <n> [--shards <n>] [--labels <n>] [--profile <uniform|hotspot|churn>] [--thread-affinity <off|round_robin|rr>] [--export-interval-ms <n>]"
+                    "Usage: bench_cache_contention --mode <fast|atomic|metrics|otel> --entity <counter|counter_multi|counter_batch|counter_set|distribution|dynamic_counter|labeled_counter|labeled_gauge|labeled_histogram> --threads <n> --iters <n> [--shards <n>] [--labels <n>] [--batch-size <n>] [--profile <uniform|hotspot|churn>] [--thread-affinity <off|round_robin|rr>] [--export-interval-ms <n>]"
                 );
                 println!("  --profile <uniform|hotspot|churn> controls label access pattern");
+                println!(
+                    "  --batch-size <n> controls counters per op for counter_multi, counter_batch, and counter_set"
+                );
                 println!("  metrics mode uses metrics + metrics-util::Registry<_, AtomicStorage>");
                 std::process::exit(0);
             }
@@ -209,6 +229,7 @@ fn parse_args() -> Config {
     }
 
     assert!(labels >= 1, "--labels must be >= 1");
+    assert!(batch_size >= 1, "--batch-size must be >= 1");
     assert!(
         labels <= BenchLabel::CARDINALITY,
         "--labels must be <= {}",
@@ -222,6 +243,7 @@ fn parse_args() -> Config {
         iters,
         shards,
         labels,
+        batch_size,
         profile,
         thread_affinity,
         export_interval_ms,
@@ -402,6 +424,10 @@ fn metrics_gauge_value(cell: &MetricsGaugeCell) -> f64 {
     f64::from_bits(cell.load(Ordering::Relaxed))
 }
 
+fn counter_batch_final_count(counters: &[Counter]) -> isize {
+    counters.iter().map(Counter::sum).sum()
+}
+
 fn export_metrics_histogram(cell: &MetricsHistogramCell) -> u64 {
     let mut total = 0u64;
     cell.clear_with(|block| {
@@ -416,6 +442,7 @@ fn run_fast(entity: Entity, cfg: &Config) -> RunResult {
     let iters = cfg.iters;
     let shards = cfg.shards;
     let labels = cfg.labels;
+    let batch_size = cfg.batch_size;
     let profile = cfg.profile;
     let thread_affinity = cfg.thread_affinity;
     let export_interval_ms = cfg.export_interval_ms;
@@ -440,6 +467,93 @@ fn run_fast(entity: Entity, cfg: &Config) -> RunResult {
 
             RunResult {
                 final_count: counter.sum(),
+                record_seconds,
+                total_seconds,
+                export_count,
+                export_seconds,
+                cpu_usage,
+            }
+        }
+        Entity::CounterMulti => {
+            let counters: Arc<Vec<Counter>> =
+                Arc::new((0..batch_size).map(|_| Counter::new(shards)).collect());
+            let worker_counters = Arc::clone(&counters);
+            let exporter_counters = Arc::clone(&counters);
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |_, n| {
+                        for _ in 0..n {
+                            for counter in worker_counters.iter() {
+                                counter.inc();
+                            }
+                        }
+                    },
+                    move || counter_batch_final_count(&exporter_counters),
+                );
+
+            RunResult {
+                final_count: counter_batch_final_count(&counters),
+                record_seconds,
+                total_seconds,
+                export_count,
+                export_seconds,
+                cpu_usage,
+            }
+        }
+        Entity::CounterBatch => {
+            let counters: Arc<Vec<Counter>> =
+                Arc::new((0..batch_size).map(|_| Counter::new(shards)).collect());
+            let worker_counters = Arc::clone(&counters);
+            let exporter_counters = Arc::clone(&counters);
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |_, n| {
+                        for _ in 0..n {
+                            Counter::inc_many(worker_counters.as_slice());
+                        }
+                    },
+                    move || counter_batch_final_count(&exporter_counters),
+                );
+
+            RunResult {
+                final_count: counter_batch_final_count(&counters),
+                record_seconds,
+                total_seconds,
+                export_count,
+                export_seconds,
+                cpu_usage,
+            }
+        }
+        Entity::CounterSet => {
+            let counters = Arc::new(CounterSet::new(shards, batch_size));
+            let values: Arc<Vec<isize>> = Arc::new(vec![1; batch_size]);
+            let worker_counters = Arc::clone(&counters);
+            let worker_values = Arc::clone(&values);
+            let exporter_counters = Arc::clone(&counters);
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |_, n| {
+                        for _ in 0..n {
+                            worker_counters.add_values(&worker_values);
+                        }
+                    },
+                    move || exporter_counters.sum_all(),
+                );
+
+            RunResult {
+                final_count: counters.sum_all(),
                 record_seconds,
                 total_seconds,
                 export_count,
@@ -946,6 +1060,9 @@ fn run_metrics(entity: Entity, cfg: &Config) -> RunResult {
                 cpu_usage,
             }
         }
+        Entity::CounterMulti | Entity::CounterBatch | Entity::CounterSet => {
+            panic!("metrics mode does not support entity={entity:?}; use mode=fast")
+        }
         Entity::Distribution | Entity::DynamicDistribution => {
             panic!("metrics mode does not support entity={entity:?}; metrics-rs exposes histograms but not a distribution primitive")
         }
@@ -1360,6 +1477,9 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
                 export_seconds,
                 cpu_usage,
             }
+        }
+        Entity::CounterMulti | Entity::CounterBatch | Entity::CounterSet => {
+            panic!("otel mode does not support entity={entity:?}; use mode=fast")
         }
         Entity::Distribution => {
             // OTel histogram as the closest equivalent to Distribution
@@ -1788,6 +1908,11 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
 fn main() {
     let cfg = parse_args();
     let total_ops = cfg.threads * cfg.iters;
+    let counter_writes_per_op = match cfg.entity {
+        Entity::CounterMulti | Entity::CounterBatch | Entity::CounterSet => cfg.batch_size,
+        _ => 1,
+    };
+    let total_counter_writes = total_ops * counter_writes_per_op;
 
     let result = match cfg.mode {
         Mode::Fast => run_fast(cfg.entity, &cfg),
@@ -1799,6 +1924,16 @@ fn main() {
 
     let record_ops_per_sec = (total_ops as f64) / result.record_seconds;
     let total_ops_per_sec = (total_ops as f64) / result.total_seconds;
+    let record_counter_writes_per_sec =
+        (total_counter_writes as f64) / result.record_seconds;
+    let total_counter_writes_per_sec =
+        (total_counter_writes as f64) / result.total_seconds;
+    let record_ns_per_op = (result.record_seconds * 1_000_000_000.0) / (total_ops as f64);
+    let total_ns_per_op = (result.total_seconds * 1_000_000_000.0) / (total_ops as f64);
+    let record_ns_per_counter_write =
+        (result.record_seconds * 1_000_000_000.0) / (total_counter_writes as f64);
+    let total_ns_per_counter_write =
+        (result.total_seconds * 1_000_000_000.0) / (total_counter_writes as f64);
     let export_avg_ms = if result.export_count == 0 {
         0.0
     } else {
@@ -1812,6 +1947,9 @@ fn main() {
     };
     let entity = match cfg.entity {
         Entity::Counter => "counter",
+        Entity::CounterMulti => "counter_multi",
+        Entity::CounterBatch => "counter_batch",
+        Entity::CounterSet => "counter_set",
         Entity::Distribution => "distribution",
         Entity::DynamicCounter => "dynamic_counter",
         Entity::DynamicDistribution => "dynamic_distribution",
@@ -1830,10 +1968,13 @@ fn main() {
     };
 
     let warmup_ops = cfg.threads * (cfg.iters / 10).max(1);
-    let expected_count = (total_ops + warmup_ops) as isize;
+    let expected_count = ((total_ops + warmup_ops) * counter_writes_per_op) as isize;
     let verify_count = matches!(
         cfg.entity,
         Entity::Counter
+            | Entity::CounterMulti
+            | Entity::CounterBatch
+            | Entity::CounterSet
             | Entity::Distribution
             | Entity::DynamicCounter
             | Entity::DynamicDistribution
@@ -1856,6 +1997,11 @@ fn main() {
     } else {
         0.0
     };
+    let cpu_ns_per_counter_write = if total_counter_writes > 0 {
+        (cpu_total_seconds * 1_000_000_000.0) / (total_counter_writes as f64)
+    } else {
+        0.0
+    };
 
     println!("mode={mode}");
     println!("entity={entity}");
@@ -1865,13 +2011,22 @@ fn main() {
     println!("iters_per_thread={}", cfg.iters);
     println!("shards={}", cfg.shards);
     println!("labels={}", cfg.labels);
+    println!("batch_size={}", cfg.batch_size);
+    println!("counter_writes_per_op={counter_writes_per_op}");
     println!("export_interval_ms={}", cfg.export_interval_ms);
     println!("total_ops={total_ops}");
+    println!("total_counter_writes={total_counter_writes}");
     println!("record_seconds={:.6}", result.record_seconds);
     println!("total_seconds={:.6}", result.total_seconds);
     println!("record_ops_per_sec={record_ops_per_sec:.2}");
     println!("total_ops_per_sec={total_ops_per_sec:.2}");
     println!("ops_per_sec={total_ops_per_sec:.2}");
+    println!("record_counter_writes_per_sec={record_counter_writes_per_sec:.2}");
+    println!("total_counter_writes_per_sec={total_counter_writes_per_sec:.2}");
+    println!("record_ns_per_op={record_ns_per_op:.2}");
+    println!("total_ns_per_op={total_ns_per_op:.2}");
+    println!("record_ns_per_counter_write={record_ns_per_counter_write:.2}");
+    println!("total_ns_per_counter_write={total_ns_per_counter_write:.2}");
     println!("export_count={}", result.export_count);
     println!("export_seconds={:.6}", result.export_seconds);
     println!("export_avg_ms={export_avg_ms:.6}");
@@ -1882,6 +2037,7 @@ fn main() {
     println!("cpu_avg_cores={cpu_avg_cores:.6}");
     println!("cpu_utilization_pct={cpu_utilization_pct:.2}");
     println!("cpu_ns_per_op={cpu_ns_per_op:.2}");
+    println!("cpu_ns_per_counter_write={cpu_ns_per_counter_write:.2}");
     println!("final_count={}", result.final_count);
     if verify_count {
         println!("expected_count={expected_count}");

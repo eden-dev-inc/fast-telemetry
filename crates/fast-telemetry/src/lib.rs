@@ -49,6 +49,9 @@ pub mod __macro_support {
         FastFormat,
     };
 }
+#[cfg(feature = "bench-tools")]
+#[doc(hidden)]
+pub use metric::CounterSet;
 pub use metric::ExportMetrics;
 pub use metric::{
     Counter, Distribution, DistributionSnapshot, DynamicCounter, DynamicCounterSeries,

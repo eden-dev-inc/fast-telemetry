@@ -67,6 +67,29 @@ Each `*-run-*.txt` file and the generated `summary.csv` will include the CPU fie
 so you can compare throughput and CPU cost together on macOS or Linux without
 requiring `perf`.
 
+## Counter Batch Probe
+
+The cache harness includes a focused probe for counter batching:
+
+```bash
+# Current shape: one logical op updates N counters with N independent Counter::inc calls.
+./bench/run-cache-bench.sh --entity counter_multi --modes fast --batch-size 8 --threads 16 --runs 5
+
+# Prototype shape: one logical op updates N counters through the bench-only batch helper.
+./bench/run-cache-bench.sh --entity counter_batch --modes fast --batch-size 8 --threads 16 --runs 5
+
+# Grouped shape: related counters share one row-padded sharded layout.
+./bench/run-cache-bench.sh --entity counter_set --modes fast --batch-size 8 --threads 16 --runs 5
+
+# Sweep multiple batch sizes and write one comparison summary.
+./bench/run-counter-batch-bench.sh --threads 16 --runs 7
+```
+
+Use `cpu_ns_per_counter_write` and `total_counter_writes_per_sec` when comparing
+these runs. `counter_multi`, `counter_batch`, and `counter_set` are intentionally
+`fast`-only because they compare fast-telemetry's current write path against
+candidate batching API shapes, not against OpenTelemetry or metrics-rs.
+
 ## metrics-rs Comparison
 
 `run-cache-bench.sh` also supports `mode=metrics`, backed by the
@@ -91,6 +114,7 @@ does not expose a matching distribution primitive.
 ## Entry Points
 
 - `run-cache-bench.sh` -- cache-line contention workloads across metric entities and label access profiles
+- `run-counter-batch-bench.sh` -- mac/Linux sweep comparing one-by-one counter writes against the batch prototype
 - `run-span-bench.sh` -- span creation/export contention workloads across realism scenarios
 - `run-bench-matrix.sh` -- multi-case sweep runner for publishing-ready comparison sets
 - `run-bench-suite.sh` -- full suite with HTML report generation
@@ -126,6 +150,7 @@ does not expose a matching distribution primitive.
 | `--modes <list>`           | Select modes (default: `fast,otel`; options: `fast,otel,atomic,metrics`) |
 | `--entity <name>`          | Metric entity to benchmark                                       |
 | `--labels <N>`             | Label cardinality (default: 16, max: 256)                        |
+| `--batch-size <N>`         | Counters per op for `counter_multi`/`counter_batch`/`counter_set` (default: 8) |
 | `--profile <name>`         | Label access pattern: `uniform`, `hotspot`, `churn`              |
 | `--pin`                    | CPU pinning via `taskset` + round-robin thread affinity          |
 | `--cpu-list <list>`        | Explicit CPU list (e.g., `0-15`)                                 |
@@ -134,9 +159,9 @@ does not expose a matching distribution primitive.
 
 ## Entities
 
-`counter`, `distribution`, `dynamic_counter`, `dynamic_distribution`,
-`dynamic_gauge`, `dynamic_gauge_i64`, `dynamic_histogram`, `labeled_counter`,
-`labeled_gauge`, `labeled_histogram`
+`counter`, `counter_multi`, `counter_batch`, `counter_set`, `distribution`,
+`dynamic_counter`, `dynamic_distribution`, `dynamic_gauge`, `dynamic_gauge_i64`,
+`dynamic_histogram`, `labeled_counter`, `labeled_gauge`, `labeled_histogram`
 
 ## Label Access Profiles
 
