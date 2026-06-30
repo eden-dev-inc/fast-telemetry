@@ -95,6 +95,9 @@ The cache harness includes a focused probe for counter batching:
 
 # Sweep multiple batch sizes and write one comparison summary, including OTel.
 ./bench/run-counter-batch-bench.sh --threads 16 --runs 7 --flush-every 64
+
+# Linux only: include hardware-cycle counters from perf stat.
+./bench/run-counter-batch-bench.sh --threads 16 --runs 7 --flush-every 64 --perf-stat
 ```
 
 Use `cpu_ns_per_counter_write` and `total_counter_writes_per_sec` when comparing
@@ -103,6 +106,11 @@ summary can compare independent fast-telemetry counters against independent
 OpenTelemetry Rust counters for the same number of writes per logical operation.
 `counter_batch`, `counter_set`, and `counter_buffered` are intentionally
 `fast`-only because they compare candidate fast-telemetry batching API shapes.
+On Linux, add `--perf-stat` to collect hardware counters and populate
+`*_cycles_per_write` fields in `counter-batch-summary.csv`. macOS runs do not
+expose those hardware cycle counters through this harness, so mac comparisons
+should report CPU ns/write and counters/s unless using an explicitly labeled
+clock-rate estimate.
 
 The buffered prototype uses a bench-only grouped counter buffer. Uniform group
 increments accumulate a shared local delta before flushing; individual counters
