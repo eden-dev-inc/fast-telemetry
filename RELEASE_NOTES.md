@@ -26,6 +26,8 @@ Focused mac harness comparison, averaged across three full matrix runs with veri
   --flush-every 64
 ```
 
+CPU time per counter write:
+
 | Counters | Fast counters | Grouped counters | OTel Rust |
 | ---: | ---: | ---: | ---: |
 | 3 | 0.92 CPU ns/write | 0.38 CPU ns/write | 244.61 CPU ns/write |
@@ -33,7 +35,16 @@ Focused mac harness comparison, averaged across three full matrix runs with veri
 | 5 | 0.75 CPU ns/write | 0.24 CPU ns/write | 190.47 CPU ns/write |
 | 6 | 0.73 CPU ns/write | 0.19 CPU ns/write | 254.91 CPU ns/write |
 
-Fast counters use independent fast-telemetry `Counter` handles, grouped counters use the buffered `CounterSet` prototype, and OpenTelemetry uses pre-built Rust `u64_counter` handles. Each row records the same number of counter writes per logical operation and reports the mean of three full matrix summaries. Grouped counters were 58.84% to 73.39% lower than independent fast counters and 643.72x to 1318.50x lower than OpenTelemetry Rust in trimmed CPU ns/write. The OTel rows had higher CPU-time variance (`cpu_ns_per_counter_write_cv_pct`: 13.19% to 27.79% averaged across the matrix summaries), but the gap remained multiple orders of magnitude in the trimmed results.
+Counter-write throughput:
+
+| Counters | Fast counters | Grouped counters | OTel Rust |
+| ---: | ---: | ---: | ---: |
+| 3 | 16.34B counters/s | 27.19B counters/s | 63.57M counters/s |
+| 4 | 18.19B counters/s | 35.84B counters/s | 63.42M counters/s |
+| 5 | 18.87B counters/s | 39.06B counters/s | 79.87M counters/s |
+| 6 | 18.72B counters/s | 45.77B counters/s | 60.87M counters/s |
+
+Fast counters use independent fast-telemetry `Counter` handles, grouped counters use the buffered `CounterSet` prototype, and OpenTelemetry uses pre-built Rust `u64_counter` handles. Each row records the same number of counter writes per logical operation and reports the mean of three full matrix summaries. Grouped counters were 58.84% to 73.39% lower than independent fast counters and 643.72x to 1318.50x lower than OpenTelemetry Rust in trimmed CPU ns/write. In wall-clock throughput, grouped counters measured 1.66x to 2.44x more counters/s than independent fast counters and 427.68x to 751.93x more counters/s than OpenTelemetry Rust. The OTel rows had higher CPU-time variance (`cpu_ns_per_counter_write_cv_pct`: 13.19% to 27.79% averaged across the matrix summaries), but the gap remained multiple orders of magnitude in the trimmed results.
 
 The name-lookup control confirms that registry lookup should stay out of the hot path. With 128 registered metric names and 6 active counters per operation, direct buffered updates measured 0.19 CPU ns/write, pre-resolved indexed updates measured 0.82 CPU ns/write, and per-op `BTreeMap` name lookup measured 30.15 CPU ns/write.
 
