@@ -2,8 +2,62 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-07-09
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
+
+Why this is a 0.8.0 bump:
+
+- this release adds the public `DynamicCounterSet` and `DynamicCounterSetSeries` API for runtime-labeled grouped counters.
+- all workspace crates are aligned at `0.8.0` so downstream services can keep `fast-telemetry`, `fast-telemetry-macros`, and `fast-telemetry-export` on the same release line.
+
+Highlights:
+
 - Removed the hidden `Counter::inc_many(...)` / `Counter::add_many(...)` helpers and the `counter_batch` benchmark entity so production grouping is standardized on `CounterSet` and `CounterSetBuffer`.
 - Added `DynamicCounterSet` / `DynamicCounterSetSeries` for runtime-labeled grouped counters, plus `CounterSet` snapshot/reset helpers for delta collectors.
+- Added `dynamic_counter_multi` and `dynamic_counter_set` harness entities so grouped dynamic counters can be benchmarked against explicit independent `DynamicCounter` updates.
+
+Focused mac harness comparison with verified final counts:
+
+```text
+./crates/fast-telemetry/bench/run-cache-bench.sh \
+  --entity dynamic_counter_multi \
+  --modes fast \
+  --threads 18 \
+  --labels 128 \
+  --profile hotspot \
+  --batch-size 3
+
+./crates/fast-telemetry/bench/run-cache-bench.sh \
+  --entity dynamic_counter_set \
+  --modes fast \
+  --threads 18 \
+  --labels 128 \
+  --profile hotspot \
+  --batch-size 3
+```
+
+CPU time per logical operation:
+
+| Counters | Independent dynamic counters | DynamicCounterSet | Improvement |
+| ---: | ---: | ---: | ---: |
+| 3 | 22.30 CPU ns/op | 2.75 CPU ns/op | 8.1x lower CPU |
+| 6 | 83.06 CPU ns/op | 4.36 CPU ns/op | 19.1x lower CPU |
+
+CPU time per counter write:
+
+| Counters | Independent dynamic counters | DynamicCounterSet |
+| ---: | ---: | ---: |
+| 3 | 7.43 CPU ns/write | 0.92 CPU ns/write |
+| 6 | 13.85 CPU ns/write | 0.73 CPU ns/write |
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.8.0"
+fast-telemetry-export = "0.8.0"
+```
 
 ## 0.7.1 - 2026-06-30
 

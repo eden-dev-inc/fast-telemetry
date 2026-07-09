@@ -26,7 +26,7 @@ Enable the shared runtime when a parent service should own telemetry and pass it
 to child crates:
 
 ```toml
-fast-telemetry = { version = "0.7", features = ["runtime"] }
+fast-telemetry = { version = "0.8", features = ["runtime"] }
 ```
 
 ## Why
