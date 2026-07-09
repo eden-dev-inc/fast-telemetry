@@ -73,11 +73,11 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Defaults: threads=nproc, iters=10000000, shards=threads, runs=3"
       echo "--modes comma-separated modes: fast,otel,atomic,metrics (default: fast,otel)"
-      echo "--entity one of: counter,counter_multi,counter_set,counter_buffered,counter_buffered_indexed,counter_buffered_lookup,distribution,dynamic_counter,dynamic_distribution,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
+      echo "--entity one of: counter,counter_multi,counter_set,counter_buffered,counter_buffered_indexed,counter_buffered_lookup,distribution,dynamic_counter,dynamic_counter_set,dynamic_distribution,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
       echo "  otel mode supports: counter,counter_multi,distribution,dynamic_counter,dynamic_distribution,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
       echo "  metrics mode supports: counter,dynamic_counter,dynamic_gauge,dynamic_gauge_i64,dynamic_histogram,labeled_counter,labeled_gauge,labeled_histogram"
       echo "--labels label cardinality for labeled entities (default: 16)"
-      echo "--batch-size counters per op for counter_multi/counter_set/counter_buffered/counter_buffered_indexed/counter_buffered_lookup (default: 8)"
+      echo "--batch-size counters per op for counter_multi/counter_set/counter_buffered/counter_buffered_indexed/counter_buffered_lookup/dynamic_counter_set (default: 8)"
       echo "--flush-every local operations per atomic flush for counter_buffered variants (default: 64)"
       echo "--labels registered metric names for counter_buffered_lookup (default: 16)"
       echo "--profile access pattern: uniform,hotspot,churn (default: uniform)"
@@ -97,7 +97,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$ENTITY" in
-  counter|counter_multi|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram) ;;
+  counter|counter_multi|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|dynamic_counter_set|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram) ;;
   *)
     echo "ERROR: unsupported --entity '$ENTITY'"
     exit 1
@@ -160,7 +160,7 @@ if [[ "$ENTITY" == "counter_multi" ]]; then
   done
 fi
 
-if [[ "$ENTITY" == "counter_set" || "$ENTITY" == "counter_buffered" || "$ENTITY" == "counter_buffered_indexed" || "$ENTITY" == "counter_buffered_lookup" ]]; then
+if [[ "$ENTITY" == "counter_set" || "$ENTITY" == "counter_buffered" || "$ENTITY" == "counter_buffered_indexed" || "$ENTITY" == "counter_buffered_lookup" || "$ENTITY" == "dynamic_counter_set" ]]; then
   for mode in "${MODES_ARR[@]}"; do
     if [[ "$mode" != "fast" ]]; then
       echo "ERROR: entity=$ENTITY is only valid with --modes fast"

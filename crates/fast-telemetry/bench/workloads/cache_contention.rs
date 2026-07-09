@@ -8,12 +8,13 @@
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity counter_buffered --threads 16 --iters 10000000 --shards 16 --batch-size 8 --flush-every 64
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity labeled_counter --threads 16 --iters 10000000 --labels 64
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity dynamic_counter --threads 16 --iters 10000000 --labels 64 --shards 16
+// - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity dynamic_counter_set --threads 16 --iters 10000000 --labels 64 --shards 16 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity dynamic_counter --threads 16 --iters 10000000 --labels 64
 
 use fast_telemetry::{
     Counter, CounterSet, CounterSetBuffer, Distribution, DynamicCounter, DynamicDistribution,
-    DynamicGauge, DynamicGaugeI64, DynamicHistogram, LabelEnum, LabeledCounter, LabeledGauge,
-    LabeledHistogram,
+    DynamicCounterSet, DynamicGauge, DynamicGaugeI64, DynamicHistogram, LabelEnum,
+    LabeledCounter, LabeledGauge, LabeledHistogram,
 };
 use metrics::atomics::AtomicU64 as MetricsAtomicU64;
 use metrics::{
@@ -60,6 +61,7 @@ enum Entity {
     CounterBufferedLookup,
     Distribution,
     DynamicCounter,
+    DynamicCounterSet,
     DynamicDistribution,
     DynamicGauge,
     DynamicGaugeI64,
@@ -157,6 +159,7 @@ fn parse_args() -> Config {
                     "counter_buffered_lookup" => Entity::CounterBufferedLookup,
                     "distribution" => Entity::Distribution,
                     "dynamic_counter" => Entity::DynamicCounter,
+                    "dynamic_counter_set" => Entity::DynamicCounterSet,
                     "dynamic_distribution" => Entity::DynamicDistribution,
                     "dynamic_gauge" => Entity::DynamicGauge,
                     "dynamic_gauge_i64" => Entity::DynamicGaugeI64,
@@ -165,7 +168,7 @@ fn parse_args() -> Config {
                     "labeled_gauge" => Entity::LabeledGauge,
                     "labeled_histogram" => Entity::LabeledHistogram,
                     value => panic!(
-                        "invalid --entity: {value} (expected counter|counter_multi|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram)"
+                        "invalid --entity: {value} (expected counter|counter_multi|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|dynamic_counter_set|dynamic_distribution|dynamic_gauge|dynamic_gauge_i64|dynamic_histogram|labeled_counter|labeled_gauge|labeled_histogram)"
                     ),
                 };
                 i += 2;
@@ -226,11 +229,11 @@ fn parse_args() -> Config {
             }
             "--help" => {
                 println!(
-                    "Usage: bench_cache_contention --mode <fast|atomic|metrics|otel> --entity <counter|counter_multi|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|labeled_counter|labeled_gauge|labeled_histogram> --threads <n> --iters <n> [--shards <n>] [--labels <n>] [--batch-size <n>] [--flush-every <n>] [--profile <uniform|hotspot|churn>] [--thread-affinity <off|round_robin|rr>] [--export-interval-ms <n>]"
+                    "Usage: bench_cache_contention --mode <fast|atomic|metrics|otel> --entity <counter|counter_multi|counter_set|counter_buffered|counter_buffered_indexed|counter_buffered_lookup|distribution|dynamic_counter|dynamic_counter_set|labeled_counter|labeled_gauge|labeled_histogram> --threads <n> --iters <n> [--shards <n>] [--labels <n>] [--batch-size <n>] [--flush-every <n>] [--profile <uniform|hotspot|churn>] [--thread-affinity <off|round_robin|rr>] [--export-interval-ms <n>]"
                 );
                 println!("  --profile <uniform|hotspot|churn> controls label access pattern");
                 println!(
-                    "  --batch-size <n> controls counters per op for counter_multi, counter_set, counter_buffered, counter_buffered_indexed, and counter_buffered_lookup"
+                    "  --batch-size <n> controls counters per op for counter_multi, counter_set, counter_buffered, counter_buffered_indexed, counter_buffered_lookup, and dynamic_counter_set"
                 );
                 println!("  --flush-every <n> controls local-delta flush cadence for counter_buffered");
                 println!("  --labels <n> controls registered metric names for counter_buffered_lookup");
@@ -740,6 +743,56 @@ fn run_fast(entity: Entity, cfg: &Config) -> RunResult {
                 cpu_usage,
             }
         }
+        Entity::DynamicCounterSet => {
+            let counter_names: Vec<String> =
+                (0..batch_size).map(|idx| format!("metric{idx}")).collect();
+            let metric = Arc::new(DynamicCounterSet::with_shards(
+                shards,
+                counter_names.iter().map(String::as_str),
+            ));
+            let values: Arc<Vec<isize>> = Arc::new(vec![1; batch_size]);
+            let endpoint_values: Arc<Vec<String>> =
+                Arc::new((0..labels).map(|i| format!("ep{i}")).collect());
+            let org_cardinality = usize::max(1, labels / 4);
+            let org_values: Arc<Vec<String>> =
+                Arc::new((0..org_cardinality).map(|i| format!("org{i}")).collect());
+            let worker_metric = Arc::clone(&metric);
+            let worker_values = Arc::clone(&values);
+            let worker_endpoints = Arc::clone(&endpoint_values);
+            let worker_orgs = Arc::clone(&org_values);
+            let exporter_metric = Arc::clone(&metric);
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        let mut series_handles = Vec::with_capacity(worker_endpoints.len());
+                        for (endpoint_idx, endpoint) in worker_endpoints.iter().enumerate() {
+                            let org_idx = endpoint_idx % worker_orgs.len();
+                            series_handles.push(worker_metric.series(&[
+                                ("endpoint_uuid", endpoint.as_str()),
+                                ("org_id", worker_orgs[org_idx].as_str()),
+                            ]));
+                        }
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, series_handles.len());
+                            series_handles[idx].add_all_values(&worker_values);
+                        }
+                    },
+                    move || exporter_metric.sum_all(),
+                );
+
+            RunResult {
+                final_count: metric.sum_all(),
+                record_seconds,
+                total_seconds,
+                export_count,
+                export_seconds,
+                cpu_usage,
+            }
+        }
         Entity::DynamicDistribution => {
             let metric = Arc::new(DynamicDistribution::new(shards));
             let endpoint_values: Arc<Vec<String>> =
@@ -1172,7 +1225,8 @@ fn run_metrics(entity: Entity, cfg: &Config) -> RunResult {
         | Entity::CounterSet
         | Entity::CounterBuffered
         | Entity::CounterBufferedIndexed
-        | Entity::CounterBufferedLookup => {
+        | Entity::CounterBufferedLookup
+        | Entity::DynamicCounterSet => {
             panic!("metrics mode does not support entity={entity:?}; use mode=fast")
         }
         Entity::Distribution | Entity::DynamicDistribution => {
@@ -1641,7 +1695,8 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
         Entity::CounterSet
         | Entity::CounterBuffered
         | Entity::CounterBufferedIndexed
-        | Entity::CounterBufferedLookup => {
+        | Entity::CounterBufferedLookup
+        | Entity::DynamicCounterSet => {
             panic!("otel mode does not support entity={entity:?}; use mode=fast")
         }
         Entity::Distribution => {
@@ -2076,7 +2131,8 @@ fn main() {
         | Entity::CounterSet
         | Entity::CounterBuffered
         | Entity::CounterBufferedIndexed
-        | Entity::CounterBufferedLookup => cfg.batch_size,
+        | Entity::CounterBufferedLookup
+        | Entity::DynamicCounterSet => cfg.batch_size,
         _ => 1,
     };
     let total_counter_writes = total_ops * counter_writes_per_op;
@@ -2121,6 +2177,7 @@ fn main() {
         Entity::CounterBufferedLookup => "counter_buffered_lookup",
         Entity::Distribution => "distribution",
         Entity::DynamicCounter => "dynamic_counter",
+        Entity::DynamicCounterSet => "dynamic_counter_set",
         Entity::DynamicDistribution => "dynamic_distribution",
         Entity::DynamicGauge => "dynamic_gauge",
         Entity::DynamicGaugeI64 => "dynamic_gauge_i64",
@@ -2148,6 +2205,7 @@ fn main() {
             | Entity::CounterBufferedLookup
             | Entity::Distribution
             | Entity::DynamicCounter
+            | Entity::DynamicCounterSet
             | Entity::DynamicDistribution
             | Entity::DynamicHistogram
             | Entity::LabeledCounter
