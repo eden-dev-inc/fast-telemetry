@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Removed the hidden `Counter::inc_many(...)` / `Counter::add_many(...)` helpers and the `counter_batch` benchmark entity so production grouping is standardized on `CounterSet` and `CounterSetBuffer`.
+- Added `DynamicCounterSet` / `DynamicCounterSetSeries` for runtime-labeled grouped counters, plus `CounterSet` snapshot/reset helpers for delta collectors.
 
 ## 0.7.1 - 2026-06-30
 

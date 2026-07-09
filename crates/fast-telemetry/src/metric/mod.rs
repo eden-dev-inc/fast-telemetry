@@ -18,9 +18,10 @@ mod visitor;
 pub use counter::{Counter, CounterSet, CounterSetBuffer};
 pub use distribution::Distribution;
 pub use dynamic::{
-    DynamicCounter, DynamicCounterSeries, DynamicDistribution, DynamicDistributionSeries,
-    DynamicGauge, DynamicGaugeI64, DynamicGaugeI64Series, DynamicGaugeSeries, DynamicHistogram,
-    DynamicHistogramSeries, DynamicHistogramSeriesView, DynamicLabelSet,
+    DynamicCounter, DynamicCounterSeries, DynamicCounterSet, DynamicCounterSetSeries,
+    DynamicDistribution, DynamicDistributionSeries, DynamicGauge, DynamicGaugeI64,
+    DynamicGaugeI64Series, DynamicGaugeSeries, DynamicHistogram, DynamicHistogramSeries,
+    DynamicHistogramSeriesView, DynamicLabelSet,
 };
 #[cfg(feature = "eviction")]
 pub use dynamic::{advance_cycle, current_cycle};

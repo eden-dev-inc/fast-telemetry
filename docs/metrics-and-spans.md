@@ -76,6 +76,66 @@ threshold. `inc_all()`, `add_all(...)`, and `add_values(...)` finish the
 operation automatically. Buffers flush on drop, but explicit `flush()` is useful
 before export or at request/task boundaries when fresh totals matter.
 
+For delta collectors, `CounterSet` can return and reset the current window:
+
+```rust
+let window = counters.snapshot_and_reset();
+let request_delta = counters.sum_and_reset(REQUESTS);
+```
+
+Concurrent writes may move into the next window, matching `Counter::swap()`
+semantics. Counts are not lost.
+
+## Dynamic Grouped Counters
+
+Use dynamic grouped counters when one hot-path operation updates related
+counters for a label set discovered at runtime, such as org/endpoint/outcome
+gateway metrics.
+
+```rust
+use fast_telemetry::DynamicCounterSet;
+
+let counters = DynamicCounterSet::with_shards(
+    4,
+    ["requests", "bytes", "errors"],
+);
+
+let requests = counters.counter_index("requests").unwrap();
+let bytes = counters.counter_index("bytes").unwrap();
+let errors = counters.counter_index("errors").unwrap();
+
+let series = counters.get_or_create(&[
+    ("org", "eden"),
+    ("endpoint", "ingest"),
+    ("outcome", "ok"),
+]);
+
+series.add_index_values(&[(requests, 1), (bytes, 4096)]);
+
+if false {
+    series.add_index(errors, 1);
+}
+```
+
+`DynamicCounterSet` also has name-based helpers such as
+`add_values(labels, &[("requests", 1), ("bytes", bytes)])`, but production hot
+paths should resolve indexes once and use `DynamicCounterSetSeries` handles.
+
+For windowed export, use `snapshot_and_reset()` to collect one row per dynamic
+label set:
+
+```rust
+for (labels, values) in counters.snapshot_and_reset() {
+    let _ = (labels, values);
+}
+```
+
+For cumulative custom export, `visit_series(...)` walks each
+`(counter_name, labels, value)` observation without cloning label sets.
+
+Like other dynamic metrics, `with_max_series(...)` bounds cardinality and routes
+new label sets to `__ft_overflow=true` after the cap is reached.
+
 ## Labeled Metrics
 
 ### Compile-Time Labels (O(1) array lookup)
@@ -124,7 +184,8 @@ Dynamic metrics are useful when the active label set is only known at runtime,
 but they come with a lifecycle worth planning for:
 
 - `with_max_series(...)` bounds cardinality for `DynamicCounter`,
-  `DynamicDistribution`, `DynamicGauge`, and `DynamicGaugeI64`
+  `DynamicCounterSet`, `DynamicDistribution`, `DynamicGauge`, and
+  `DynamicGaugeI64`
 - `DynamicHistogram::with_limits(..., max_series)` provides the same cap for histograms
 - once the cap is hit, new label sets are redirected into a single overflow series
   and `overflow_count()` tells you how often that happened

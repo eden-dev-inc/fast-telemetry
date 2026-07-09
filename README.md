@@ -53,6 +53,10 @@ Grouped buffered counters use the production `CounterSet` and
 group of related counters, and resolve counter indexes once during construction
 so the hot path stays on direct indexed updates.
 
+For runtime labels, `DynamicCounterSet` applies the same grouped-counter pattern
+to dynamic series: resolve the label-keyed series and counter indexes once, then
+record related counters in one grouped call.
+
 ## Quick Start
 
 ```rust

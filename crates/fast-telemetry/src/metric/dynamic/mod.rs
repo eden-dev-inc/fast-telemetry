@@ -12,12 +12,14 @@
 
 mod cache;
 mod counter;
+mod counter_set;
 mod distribution;
 mod gauge;
 mod gauge_i64;
 mod histogram;
 
 pub use counter::{DynamicCounter, DynamicCounterSeries};
+pub use counter_set::{DynamicCounterSet, DynamicCounterSetSeries};
 pub use distribution::{DynamicDistribution, DynamicDistributionSeries};
 pub use gauge::{DynamicGauge, DynamicGaugeSeries};
 pub use gauge_i64::{DynamicGaugeI64, DynamicGaugeI64Series};

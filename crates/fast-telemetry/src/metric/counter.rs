@@ -378,6 +378,53 @@ impl CounterSet {
         }
         total
     }
+
+    /// Returns one value per counter in index order.
+    #[inline]
+    pub fn snapshot(&self) -> Vec<isize> {
+        (0..self.counters).map(|idx| self.sum(idx)).collect()
+    }
+
+    /// Resets one counter to zero and returns its previous sum.
+    ///
+    /// # Eventual Consistency
+    ///
+    /// Writes that occur concurrently with `sum_and_reset()` may be attributed
+    /// to the next window rather than the current one. No counts are lost; they
+    /// simply shift to the next export window.
+    #[inline]
+    pub fn sum_and_reset(&self, counter_idx: usize) -> isize {
+        assert!(counter_idx < self.counters, "counter index out of bounds");
+        let shards = self.cells.len() / self.stride;
+        (0..shards)
+            .map(|shard| {
+                self.cell_at((shard * self.stride) + counter_idx)
+                    .swap(0, Ordering::Relaxed)
+            })
+            .sum()
+    }
+
+    /// Returns one value per counter in index order, then resets all counters.
+    ///
+    /// # Eventual Consistency
+    ///
+    /// Writes that occur concurrently with `snapshot_and_reset()` may be
+    /// attributed to the next window rather than the current one. No counts are
+    /// lost; they simply shift to the next export window.
+    #[inline]
+    pub fn snapshot_and_reset(&self) -> Vec<isize> {
+        let mut values = vec![0; self.counters];
+        let shards = self.cells.len() / self.stride;
+        for shard in 0..shards {
+            let offset = shard * self.stride;
+            for (counter_idx, value) in values.iter_mut().enumerate() {
+                *value += self
+                    .cell_at(offset + counter_idx)
+                    .swap(0, Ordering::Relaxed);
+            }
+        }
+        values
+    }
 }
 
 /// A local write buffer for a [`CounterSet`].
@@ -632,6 +679,29 @@ mod tests {
         assert_eq!(counters.sum(1), 8);
         assert_eq!(counters.sum(2), 9);
         assert_eq!(counters.sum_all(), 22);
+        assert_eq!(counters.snapshot(), vec![5, 8, 9]);
+    }
+
+    #[test]
+    fn counter_set_sum_and_reset_resets_one_counter() {
+        let counters = CounterSet::new(4, 3);
+
+        counters.add_values(&[2, 3, 4]);
+        counters.add_values(&[5, 6, 7]);
+
+        assert_eq!(counters.sum_and_reset(1), 9);
+        assert_eq!(counters.snapshot(), vec![7, 0, 11]);
+    }
+
+    #[test]
+    fn counter_set_snapshot_and_reset_resets_all_counters() {
+        let counters = CounterSet::new(4, 3);
+
+        counters.add_values(&[2, 3, 4]);
+        counters.add_values(&[5, 6, 7]);
+
+        assert_eq!(counters.snapshot_and_reset(), vec![7, 9, 11]);
+        assert_eq!(counters.snapshot(), vec![0, 0, 0]);
     }
 
     #[test]

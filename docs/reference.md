@@ -9,6 +9,7 @@
 | `Counter`            | Totals that only go up                   | ~2ns (thread-local write) |
 | `CounterSet`         | Fixed groups of related counters         | ~0.2-0.4ns per buffered increment in grouped workloads |
 | `CounterSetBuffer`   | Local deltas for `CounterSet`            | Flushes to shared atomics every configured operation count |
+| `DynamicCounterSet`  | Runtime-labeled groups of related counters | One label lookup per cached series, then direct indexed updates |
 | `Histogram`          | Latency distributions with fixed buckets | ~2ns + bucket lookup      |
 | `Distribution`       | Exponential-bucket distributions         | ~2ns + bucket lookup      |
 | `Gauge` / `GaugeF64` | Point-in-time values                     | ~2ns (single atomic)      |
@@ -22,10 +23,11 @@
 | `LabeledCounter<L>`                | Compile-time enum, O(1) array index |
 | `LabeledHistogram<L>`              | Compile-time enum, O(1) array index |
 | `LabeledGauge<L>`                  | Compile-time enum, O(1) array index |
-| `DynamicCounter`                   | Runtime labels, HashMap lookup      |
-| `DynamicHistogram`                 | Runtime labels, HashMap lookup      |
-| `DynamicDistribution`              | Runtime labels, HashMap lookup      |
-| `DynamicGauge` / `DynamicGaugeI64` | Runtime labels, HashMap lookup      |
+| `DynamicCounter`                   | Runtime labels, dynamic index lookup |
+| `DynamicCounterSet`                | Runtime labels plus grouped counter indexes |
+| `DynamicHistogram`                 | Runtime labels, dynamic index lookup |
+| `DynamicDistribution`              | Runtime labels, dynamic index lookup |
+| `DynamicGauge` / `DynamicGaugeI64` | Runtime labels, dynamic index lookup |
 
 ### Derive Macros
 
@@ -55,6 +57,10 @@ Pass the number of shards to `Counter::new(n)` and other constructors:
 For `CounterSet::new(shards, counters)`, `counters` is the fixed number of
 related counter slots in each shard row. Store slot indexes as constants or enum
 discriminants so hot paths do not perform name lookup.
+
+For `DynamicCounterSet::with_shards(shards, names)`, resolve both the dynamic
+series handle and the counter indexes before entering the hot path. Use
+`snapshot_and_reset()` or `sum_and_reset(index)` for windowed delta collectors.
 
 ## Lineage
 
