@@ -15,7 +15,7 @@ Highlights:
 
 - Removed the hidden `Counter::inc_many(...)` / `Counter::add_many(...)` helpers and the `counter_batch` benchmark entity so production grouping is standardized on `CounterSet` and `CounterSetBuffer`.
 - Added `DynamicCounterSet` / `DynamicCounterSetSeries` for runtime-labeled grouped counters, plus `CounterSet` snapshot/reset helpers for delta collectors.
-- Added `dynamic_counter_multi` and `dynamic_counter_set` harness entities so grouped dynamic counters can be benchmarked against explicit independent `DynamicCounter` updates.
+- Added `dynamic_counter_multi` and `dynamic_counter_set` harness entities so grouped dynamic counters can be benchmarked against explicit independent `DynamicCounter` updates and matching OpenTelemetry Rust counter adds.
 
 Focused mac harness comparison with verified final counts:
 

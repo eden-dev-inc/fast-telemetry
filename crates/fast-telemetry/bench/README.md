@@ -87,6 +87,9 @@ The cache harness includes a focused probe for counter batching:
 # Dynamic before/control shape: runtime label set plus N independent dynamic counters.
 ./bench/run-cache-bench.sh --entity dynamic_counter_multi --modes fast --labels 128 --batch-size 8 --threads 16 --runs 5
 
+# OpenTelemetry Rust dynamic shape: same runtime label set plus N OTel counters.
+./bench/run-cache-bench.sh --entity dynamic_counter_multi --modes otel --labels 128 --batch-size 8 --threads 16 --runs 5
+
 # Buffered shape: update local deltas and flush shared atomics every N operations.
 ./bench/run-cache-bench.sh --entity counter_buffered --modes fast --batch-size 8 --flush-every 64 --threads 16 --runs 5
 
@@ -104,10 +107,10 @@ The cache harness includes a focused probe for counter batching:
 ```
 
 Use `cpu_ns_per_counter_write` and `total_counter_writes_per_sec` when comparing
-these runs. `counter_multi` supports both `fast` and `otel` modes, so the
-summary can compare independent fast-telemetry counters against independent
-OpenTelemetry Rust counters for the same number of writes per logical operation.
-`counter_set`, `dynamic_counter_multi`, `dynamic_counter_set`,
+these runs. `counter_multi` and `dynamic_counter_multi` support both `fast` and
+`otel` modes, so the summary can compare independent fast-telemetry counters
+against independent OpenTelemetry Rust counters for the same number of writes
+per logical operation. `counter_set`, `dynamic_counter_set`,
 `counter_buffered`, `counter_buffered_indexed`, and `counter_buffered_lookup`
 are intentionally `fast`-only because they exercise fast-telemetry's grouped
 counter APIs.

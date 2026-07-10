@@ -9,6 +9,7 @@
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity labeled_counter --threads 16 --iters 10000000 --labels 64
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity dynamic_counter --threads 16 --iters 10000000 --labels 64 --shards 16
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity dynamic_counter_multi --threads 16 --iters 10000000 --labels 64 --shards 16 --batch-size 8
+// - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity dynamic_counter_multi --threads 16 --iters 1000000 --labels 64 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode fast --entity dynamic_counter_set --threads 16 --iters 10000000 --labels 64 --shards 16 --batch-size 8
 // - cargo run --release --bin bench_cache_contention --features bench-tools -- --mode otel --entity dynamic_counter --threads 16 --iters 10000000 --labels 64
 
@@ -1660,7 +1661,7 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
     );
     let meter = provider.meter("fast-telemetry.bench_cache_contention");
     let expected_counter_writes_per_op = match entity {
-        Entity::CounterMulti => batch_size,
+        Entity::CounterMulti | Entity::DynamicCounterMulti => batch_size,
         _ => 1,
     };
     let expected_final_count =
@@ -1756,7 +1757,6 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
         | Entity::CounterBuffered
         | Entity::CounterBufferedIndexed
         | Entity::CounterBufferedLookup
-        | Entity::DynamicCounterMulti
         | Entity::DynamicCounterSet => {
             panic!("otel mode does not support entity={entity:?}; use mode=fast")
         }
@@ -1829,6 +1829,66 @@ fn run_otel(entity: Entity, cfg: &Config) -> RunResult {
                         for i in 0..n {
                             let idx = profile_index(profile, t, i, worker_attrs.len());
                             worker_counter.add(1, &worker_attrs[idx]);
+                        }
+                    },
+                    move || {
+                        let _ = exporter_provider.force_flush();
+                        let _ = exporter_exporter.get_finished_metrics();
+                        exporter_exporter.reset();
+                        0usize
+                    },
+                );
+
+            let _ = provider.force_flush();
+            let _ = exporter.get_finished_metrics();
+            RunResult {
+                final_count: expected_final_count,
+                record_seconds,
+                total_seconds,
+                export_count,
+                export_seconds,
+                cpu_usage,
+            }
+        }
+        Entity::DynamicCounterMulti => {
+            let counters: Arc<Vec<OTelCounter<u64>>> = Arc::new(
+                (0..batch_size)
+                    .map(|idx| {
+                        meter
+                            .u64_counter(format!("contention_dynamic_counter_{idx}"))
+                            .build()
+                    })
+                    .collect(),
+            );
+            let org_cardinality = usize::max(1, labels / 4);
+            let attrs: Arc<Vec<Vec<KeyValue>>> = Arc::new(
+                (0..labels)
+                    .map(|i| {
+                        let org_idx = i % org_cardinality;
+                        vec![
+                            KeyValue::new("endpoint_uuid", format!("ep{i}")),
+                            KeyValue::new("org_id", format!("org{org_idx}")),
+                        ]
+                    })
+                    .collect(),
+            );
+            let worker_counters = Arc::clone(&counters);
+            let worker_attrs = Arc::clone(&attrs);
+            let exporter_provider = Arc::clone(&provider);
+            let exporter_exporter = exporter.clone();
+
+            let (record_seconds, total_seconds, export_count, export_seconds, cpu_usage) =
+                run_with_threads(
+                    threads,
+                    iters,
+                    thread_affinity,
+                    export_interval_ms,
+                    move |t, n| {
+                        for i in 0..n {
+                            let idx = profile_index(profile, t, i, worker_attrs.len());
+                            for counter in worker_counters.iter() {
+                                counter.add(1, &worker_attrs[idx]);
+                            }
                         }
                     },
                     move || {
