@@ -10,7 +10,7 @@ registration and a shared span collector so export setup happens once.
 
 ```toml
 [dependencies]
-fast-telemetry = { version = "0.7", features = ["runtime"] }
+fast-telemetry = { version = "0.8", features = ["runtime"] }
 ```
 
 ```rust

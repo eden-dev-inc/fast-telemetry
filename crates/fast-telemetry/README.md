@@ -18,6 +18,10 @@ Use `CounterSet` and `CounterSetBuffer` for production grouped counters when one
 hot-path operation updates a fixed set of related counters. Resolve indexes once
 and record by index on the hot path.
 
+Use `DynamicCounterSet` when that grouped-counter pattern needs runtime labels.
+Resolve the dynamic series and counter indexes once, then record related
+counters by index on the hot path.
+
 See the [workspace README](../../README.md) for full documentation, examples,
 runtime integration rules, and API reference.
 
