@@ -87,7 +87,7 @@ where
 {
     use tokio::time::MissedTickBehavior;
 
-    log::info!(
+    crate::logging::log_info!(
         "Starting stale-series sweeper, interval={}s, eviction_threshold={}",
         config.interval.as_secs(),
         config.eviction_threshold
@@ -101,7 +101,7 @@ where
         tokio::select! {
             _ = interval.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("Stale-series sweeper shutting down");
+                crate::logging::log_info!("Stale-series sweeper shutting down");
                 return;
             }
         }
@@ -109,7 +109,7 @@ where
         let evicted = sweep_fn(config.eviction_threshold);
 
         if evicted > 0 {
-            log::debug!("Evicted {evicted} stale metric series");
+            crate::logging::log_debug!("Evicted {evicted} stale metric series");
         }
     }
 }
@@ -126,7 +126,7 @@ where
 {
     use monoio::time::MissedTickBehavior;
 
-    log::info!(
+    crate::logging::log_info!(
         "Starting monoio stale-series sweeper, interval={}s, eviction_threshold={}",
         config.interval.as_secs(),
         config.eviction_threshold
@@ -140,7 +140,7 @@ where
         monoio::select! {
             _ = interval.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("monoio stale-series sweeper shutting down");
+                crate::logging::log_info!("monoio stale-series sweeper shutting down");
                 return;
             }
         }
@@ -148,7 +148,7 @@ where
         let evicted = sweep_fn(config.eviction_threshold);
 
         if evicted > 0 {
-            log::debug!("Evicted {evicted} stale metric series");
+            crate::logging::log_debug!("Evicted {evicted} stale metric series");
         }
     }
 }
@@ -168,7 +168,7 @@ pub async fn run_compio<F>(
 {
     use futures_util::{FutureExt as _, select};
 
-    log::info!(
+    crate::logging::log_info!(
         "Starting compio stale-series sweeper, interval={}s, eviction_threshold={}",
         config.interval.as_secs(),
         config.eviction_threshold
@@ -186,7 +186,7 @@ pub async fn run_compio<F>(
         select! {
             _ = tick.fuse() => {},
             _ = cancel.as_mut() => {
-                log::info!("compio stale-series sweeper shutting down");
+                crate::logging::log_info!("compio stale-series sweeper shutting down");
                 return;
             }
         }
@@ -194,7 +194,7 @@ pub async fn run_compio<F>(
         let evicted = sweep_fn(config.eviction_threshold);
 
         if evicted > 0 {
-            log::debug!("Evicted {evicted} stale metric series");
+            crate::logging::log_debug!("Evicted {evicted} stale metric series");
         }
     }
 }

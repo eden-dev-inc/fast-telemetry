@@ -101,6 +101,22 @@ fn test_dynamic_counter_delta_export() {
     assert!(output.contains("api.requests:3|c|#endpoint_uuid:ep-1,org_id:org-a\n"));
 }
 
+#[test]
+fn test_dynamic_counter_delta_export_reports_cardinality_overflow() {
+    let metrics = DynamicMetrics {
+        requests: DynamicCounter::with_max_series(1, 1),
+    };
+    let mut state = DynamicMetricsDogStatsDState::new();
+
+    metrics.requests.inc(&[("org_id", "org-a")]);
+    metrics.requests.inc(&[("org_id", "org-b")]);
+    assert_eq!(metrics.requests.overflow_count(), 1);
+
+    let mut output = String::new();
+    metrics.export_dogstatsd_delta(&mut output, &[], &mut state);
+    assert!(output.contains("api.requests:1|c|#__ft_overflow:true\n"));
+}
+
 struct ParsedPrometheus {
     help: BTreeMap<String, String>,
     metric_type: BTreeMap<String, String>,

@@ -188,7 +188,7 @@ where
 {
     let url = format!("{}/v1/metrics", config.endpoint.trim_end_matches('/'));
 
-    log::info!(
+    crate::logging::log_info!(
         "Starting OTLP metrics exporter, endpoint={url}, interval={}s",
         config.interval.as_secs()
     );
@@ -203,7 +203,7 @@ where
     let client = match reqwest::Client::builder().timeout(config.timeout).build() {
         Ok(c) => c,
         Err(e) => {
-            log::error!("Failed to build HTTP client for OTLP exporter: {e}");
+            crate::logging::log_error!("Failed to build HTTP client for OTLP exporter: {e}");
             return;
         }
     };
@@ -227,7 +227,7 @@ where
         tokio::select! {
             _ = interval.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("OTLP metrics exporter shutting down, performing final export");
+                crate::logging::log_info!("OTLP metrics exporter shutting down, performing final export");
                 export_once(&ctx, &mut collect_fn, &mut bufs).await;
                 return;
             }
@@ -235,7 +235,7 @@ where
 
         if consecutive_failures > 0 {
             let backoff = backoff_with_jitter(consecutive_failures);
-            log::debug!(
+            crate::logging::log_debug!(
                 "OTLP export backing off {}ms (failures={consecutive_failures})",
                 backoff.as_millis()
             );
@@ -260,7 +260,7 @@ where
 
         bufs.encode.clear();
         if let Err(e) = request.encode(&mut bufs.encode) {
-            log::warn!("OTLP protobuf encode failed: {e}");
+            crate::logging::log_warn!("OTLP protobuf encode failed: {e}");
             continue;
         }
         let body_len = bufs.encode.len();
@@ -268,17 +268,19 @@ where
         match send_otlp(&client, &url, &bufs.encode, &mut bufs.gzip, &config.headers).await {
             Ok(resp) if resp.status().is_success() => {
                 consecutive_failures = 0;
-                log::debug!("Exported {metric_count} OTLP metrics ({body_len} bytes)");
+                crate::logging::log_debug!(
+                    "Exported {metric_count} OTLP metrics ({body_len} bytes)"
+                );
             }
             Ok(resp) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                log::warn!("OTLP export failed: status={status}, body={body}");
+                crate::logging::log_warn!("OTLP export failed: status={status}, body={body}");
             }
             Err(e) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                log::warn!("OTLP export request failed: {e}");
+                crate::logging::log_warn!("OTLP export request failed: {e}");
             }
         }
     }
@@ -304,12 +306,12 @@ where
     let target = match MonoioHttpTarget::parse(&url) {
         Ok(target) => target,
         Err(e) => {
-            log::error!("Invalid monoio OTLP endpoint {url}: {e}");
+            crate::logging::log_error!("Invalid monoio OTLP endpoint {url}: {e}");
             return;
         }
     };
 
-    log::info!(
+    crate::logging::log_info!(
         "Starting monoio OTLP metrics exporter, endpoint={url}, interval={}s",
         config.interval.as_secs()
     );
@@ -340,7 +342,7 @@ where
         monoio::select! {
             _ = interval.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("monoio OTLP metrics exporter shutting down, performing final export");
+                crate::logging::log_info!("monoio OTLP metrics exporter shutting down, performing final export");
                 export_once_monoio(&ctx, &mut collect_fn, &mut bufs).await;
                 return;
             }
@@ -348,7 +350,7 @@ where
 
         if consecutive_failures > 0 {
             let backoff = backoff_with_jitter(consecutive_failures);
-            log::debug!(
+            crate::logging::log_debug!(
                 "monoio OTLP export backing off {}ms (failures={consecutive_failures})",
                 backoff.as_millis()
             );
@@ -373,7 +375,7 @@ where
 
         bufs.encode.clear();
         if let Err(e) = request.encode(&mut bufs.encode) {
-            log::warn!("monoio OTLP protobuf encode failed: {e}");
+            crate::logging::log_warn!("monoio OTLP protobuf encode failed: {e}");
             continue;
         }
         let body_len = bufs.encode.len();
@@ -389,11 +391,13 @@ where
         {
             Ok(resp) if resp.is_success() => {
                 consecutive_failures = 0;
-                log::debug!("Exported {metric_count} monoio OTLP metrics ({body_len} bytes)");
+                crate::logging::log_debug!(
+                    "Exported {metric_count} monoio OTLP metrics ({body_len} bytes)"
+                );
             }
             Ok(resp) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                log::warn!(
+                crate::logging::log_warn!(
                     "monoio OTLP export failed: status={}, body={}",
                     resp.status,
                     resp.body_text_lossy()
@@ -401,7 +405,7 @@ where
             }
             Err(e) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                log::warn!("monoio OTLP export request failed: {e}");
+                crate::logging::log_warn!("monoio OTLP export request failed: {e}");
             }
         }
     }
@@ -436,7 +440,7 @@ where
 
     bufs.encode.clear();
     if let Err(e) = request.encode(&mut bufs.encode) {
-        log::warn!("Final OTLP protobuf encode failed: {e}");
+        crate::logging::log_warn!("Final OTLP protobuf encode failed: {e}");
         return;
     }
 
@@ -452,9 +456,9 @@ where
         Ok(resp) if !resp.status().is_success() => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            log::warn!("Final OTLP export returned {status}: {body}");
+            crate::logging::log_warn!("Final OTLP export returned {status}: {body}");
         }
-        Err(e) => log::warn!("Final OTLP export failed: {e}"),
+        Err(e) => crate::logging::log_warn!("Final OTLP export failed: {e}"),
         _ => {}
     }
 }
@@ -487,7 +491,7 @@ async fn export_once_monoio<F>(
 
     bufs.encode.clear();
     if let Err(e) = request.encode(&mut bufs.encode) {
-        log::warn!("Final monoio OTLP protobuf encode failed: {e}");
+        crate::logging::log_warn!("Final monoio OTLP protobuf encode failed: {e}");
         return;
     }
 
@@ -501,13 +505,13 @@ async fn export_once_monoio<F>(
     .await
     {
         Ok(resp) if !resp.is_success() => {
-            log::warn!(
+            crate::logging::log_warn!(
                 "Final monoio OTLP export returned {}: {}",
                 resp.status,
                 resp.body_text_lossy()
             );
         }
-        Err(e) => log::warn!("Final monoio OTLP export failed: {e}"),
+        Err(e) => crate::logging::log_warn!("Final monoio OTLP export failed: {e}"),
         _ => {}
     }
 }

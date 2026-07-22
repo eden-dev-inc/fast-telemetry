@@ -673,7 +673,7 @@ pub async fn run<F>(config: OtelStandardConfig, cancel: CancellationToken, mut c
 where
     F: FnMut(&mut Vec<pb::Metric>),
 {
-    log::info!(
+    crate::logging::log_info!(
         "Starting ClickHouse OTel-standard exporter, endpoint={}, database={}, interval={}s",
         config.clickhouse.endpoint,
         config.clickhouse.database,
@@ -689,7 +689,7 @@ where
     let mut client = match connect_and_prepare(&config).await {
         Ok(c) => c,
         Err(e) => {
-            log::error!(
+            crate::logging::log_error!(
                 "Failed to connect to ClickHouse at {} or create ClickHouse metric tables: {e}",
                 config.clickhouse.endpoint
             );
@@ -709,7 +709,7 @@ where
         tokio::select! {
             _ = interval_timer.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("ClickHouse OTel-standard exporter shutting down, performing final export");
+                crate::logging::log_info!("ClickHouse OTel-standard exporter shutting down, performing final export");
                 let _ = export_once(
                     &client,
                     &config,
@@ -724,7 +724,7 @@ where
 
         if consecutive_failures > 0 {
             let backoff = backoff_with_jitter(consecutive_failures);
-            log::debug!(
+            crate::logging::log_debug!(
                 "ClickHouse export backing off {}ms (failures={consecutive_failures})",
                 backoff.as_millis()
             );
@@ -747,12 +747,12 @@ where
         if client.is_closed() {
             match connect(&config.clickhouse).await {
                 Ok(c) => {
-                    log::info!("Reconnected to ClickHouse");
+                    crate::logging::log_info!("Reconnected to ClickHouse");
                     client = c;
                 }
                 Err(e) => {
                     consecutive_failures = consecutive_failures.saturating_add(1);
-                    log::warn!("ClickHouse reconnect failed: {e}");
+                    crate::logging::log_warn!("ClickHouse reconnect failed: {e}");
                     continue;
                 }
             }
@@ -781,11 +781,11 @@ where
         match insert_batches(&client, &config, &mut batches).await {
             Ok(_) => {
                 consecutive_failures = 0;
-                log::debug!("Exported {row_count} rows to ClickHouse");
+                crate::logging::log_debug!("Exported {row_count} rows to ClickHouse");
             }
             Err(e) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                log::warn!("ClickHouse insert failed: {e}");
+                crate::logging::log_warn!("ClickHouse insert failed: {e}");
             }
         }
     }
@@ -807,7 +807,7 @@ pub async fn run_first_party<F>(
 ) where
     F: FnMut(&mut ClickHouseMetricBatch, u64),
 {
-    log::info!(
+    crate::logging::log_info!(
         "Starting first-party ClickHouse OTel-standard exporter, endpoint={}, database={}, interval={}s",
         config.clickhouse.endpoint,
         config.clickhouse.database,
@@ -817,7 +817,7 @@ pub async fn run_first_party<F>(
     let mut client = match connect_and_prepare(&config).await {
         Ok(c) => c,
         Err(e) => {
-            log::error!(
+            crate::logging::log_error!(
                 "Failed to connect to ClickHouse at {} or create ClickHouse metric tables: {e}",
                 config.clickhouse.endpoint
             );
@@ -841,7 +841,7 @@ pub async fn run_first_party<F>(
         tokio::select! {
             _ = interval_timer.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("First-party ClickHouse exporter shutting down, performing final export");
+                crate::logging::log_info!("First-party ClickHouse exporter shutting down, performing final export");
                 let _ = export_first_party_once(
                     &client,
                     &config,
@@ -854,7 +854,7 @@ pub async fn run_first_party<F>(
 
         if consecutive_failures > 0 {
             let backoff = backoff_with_jitter(consecutive_failures);
-            log::debug!(
+            crate::logging::log_debug!(
                 "ClickHouse export backing off {}ms (failures={consecutive_failures})",
                 backoff.as_millis()
             );
@@ -875,12 +875,12 @@ pub async fn run_first_party<F>(
         if client.is_closed() {
             match connect(&config.clickhouse).await {
                 Ok(c) => {
-                    log::info!("Reconnected to ClickHouse");
+                    crate::logging::log_info!("Reconnected to ClickHouse");
                     client = c;
                 }
                 Err(e) => {
                     consecutive_failures = consecutive_failures.saturating_add(1);
-                    log::warn!("ClickHouse reconnect failed: {e}");
+                    crate::logging::log_warn!("ClickHouse reconnect failed: {e}");
                     continue;
                 }
             }
@@ -896,11 +896,11 @@ pub async fn run_first_party<F>(
         match insert_metric_batch(&client, &config, &mut batch).await {
             Ok(_) => {
                 consecutive_failures = 0;
-                log::debug!("Exported {row_count} rows to ClickHouse");
+                crate::logging::log_debug!("Exported {row_count} rows to ClickHouse");
             }
             Err(e) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                log::warn!("ClickHouse insert failed: {e}");
+                crate::logging::log_warn!("ClickHouse insert failed: {e}");
             }
         }
     }
@@ -937,7 +937,7 @@ where
     }
 
     if let Err(e) = insert_batches(client, config, batches).await {
-        log::warn!("Final ClickHouse insert failed: {e}");
+        crate::logging::log_warn!("Final ClickHouse insert failed: {e}");
         return Err(e);
     }
     Ok(())
@@ -959,7 +959,7 @@ where
     }
 
     if let Err(e) = insert_metric_batch(client, config, batch).await {
-        log::warn!("Final ClickHouse insert failed: {e}");
+        crate::logging::log_warn!("Final ClickHouse insert failed: {e}");
         return Err(e);
     }
     Ok(())

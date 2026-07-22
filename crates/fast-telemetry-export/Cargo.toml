@@ -1,6 +1,6 @@
 [package]
 name = "fast-telemetry-export"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2024"
 authors.workspace = true
 homepage.workspace = true
@@ -23,11 +23,13 @@ otlp = ["dep:flate2", "dep:prost", "dep:reqwest", "fast-telemetry/otlp", "tokio-
 clickhouse = ["dep:klickhouse", "dep:indexmap", "fast-telemetry/otlp", "fast-telemetry/clickhouse", "tokio-runtime"]
 monoio = ["dep:monoio", "tokio-runtime"]
 compio = ["dep:compio", "dep:futures-util", "dep:memchr"]
+logging = ["dep:eden_logger", "eden_logger/log-info", "eden_logger/log-warn", "eden_logger/log-error", "eden_logger/log-internal"]
+logging-debug = ["logging", "eden_logger/log-debug"]
 
 [dependencies]
 compio = { workspace = true, features = ["runtime", "io", "net", "time", "io-uring"], optional = true }
 futures-util = { workspace = true, optional = true }
-log = { workspace = true }
+eden_logger = { workspace = true, optional = true }
 memchr = { workspace = true, optional = true }
 monoio = { workspace = true, optional = true }
 fast-telemetry = { workspace = true }

@@ -219,7 +219,7 @@ pub async fn run<R, F, T>(
         qualified_table(&config.database, &table)
     );
 
-    log::info!(
+    crate::logging::log_info!(
         "Starting ClickHouse exporter, endpoint={}, table={}.{}, interval={}s",
         config.endpoint,
         config.database,
@@ -230,7 +230,7 @@ pub async fn run<R, F, T>(
     let mut client = match connect(&config).await {
         Ok(c) => c,
         Err(e) => {
-            log::error!(
+            crate::logging::log_error!(
                 "Failed to connect to ClickHouse at {}: {e}",
                 config.endpoint
             );
@@ -249,7 +249,7 @@ pub async fn run<R, F, T>(
         tokio::select! {
             _ = interval_timer.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("ClickHouse exporter shutting down, performing final export");
+                crate::logging::log_info!("ClickHouse exporter shutting down, performing final export");
                 let _ = export_once(
                     &client,
                     &query,
@@ -263,7 +263,7 @@ pub async fn run<R, F, T>(
 
         if consecutive_failures > 0 {
             let backoff = backoff_with_jitter(consecutive_failures);
-            log::debug!(
+            crate::logging::log_debug!(
                 "ClickHouse export backing off {}ms (failures={consecutive_failures})",
                 backoff.as_millis()
             );
@@ -285,12 +285,12 @@ pub async fn run<R, F, T>(
         if client.is_closed() {
             match connect(&config).await {
                 Ok(c) => {
-                    log::info!("Reconnected to ClickHouse");
+                    crate::logging::log_info!("Reconnected to ClickHouse");
                     client = c;
                 }
                 Err(e) => {
                     consecutive_failures = consecutive_failures.saturating_add(1);
-                    log::warn!("ClickHouse reconnect failed: {e}");
+                    crate::logging::log_warn!("ClickHouse reconnect failed: {e}");
                     continue;
                 }
             }
@@ -308,11 +308,11 @@ pub async fn run<R, F, T>(
             Ok(0) => {}
             Ok(n) => {
                 consecutive_failures = 0;
-                log::debug!("Exported {n} rows to ClickHouse");
+                crate::logging::log_debug!("Exported {n} rows to ClickHouse");
             }
             Err(e) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                log::warn!("ClickHouse insert failed: {e}");
+                crate::logging::log_warn!("ClickHouse insert failed: {e}");
             }
         }
     }

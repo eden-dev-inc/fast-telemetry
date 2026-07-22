@@ -267,7 +267,7 @@ pub async fn run(
 ) {
     let url = format!("{}/v1/traces", config.endpoint.trim_end_matches('/'));
 
-    log::info!(
+    crate::logging::log_info!(
         "Starting OTLP span exporter, endpoint={url}, service={}",
         config.service_name
     );
@@ -282,7 +282,7 @@ pub async fn run(
     let client = match reqwest::Client::builder().timeout(config.timeout).build() {
         Ok(c) => c,
         Err(e) => {
-            log::error!("Failed to build HTTP client for span exporter: {e}");
+            crate::logging::log_error!("Failed to build HTTP client for span exporter: {e}");
             return;
         }
     };
@@ -310,7 +310,7 @@ pub async fn run(
         tokio::select! {
             _ = interval.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("Span exporter shutting down, performing final export");
+                crate::logging::log_info!("Span exporter shutting down, performing final export");
                 export_once(&ctx, &mut bufs).await;
                 return;
             }
@@ -318,7 +318,7 @@ pub async fn run(
 
         if consecutive_failures > 0 {
             let backoff = backoff_with_jitter(consecutive_failures);
-            log::debug!(
+            crate::logging::log_debug!(
                 "Span export backing off {}ms (failures={consecutive_failures})",
                 backoff.as_millis()
             );
@@ -344,7 +344,9 @@ pub async fn run(
         let span_count = bufs.spans.len();
 
         if dropped > 0 {
-            log::debug!("Span export dropped {dropped} excess spans (exported {span_count})");
+            crate::logging::log_debug!(
+                "Span export dropped {dropped} excess spans (exported {span_count})"
+            );
         }
 
         let otlp_spans: Vec<_> = bufs.spans.iter().map(|s| s.to_otlp()).collect();
@@ -352,7 +354,7 @@ pub async fn run(
 
         bufs.encode.clear();
         if let Err(e) = request.encode(&mut bufs.encode) {
-            log::warn!("Span protobuf encode failed: {e}");
+            crate::logging::log_warn!("Span protobuf encode failed: {e}");
             continue;
         }
 
@@ -361,17 +363,17 @@ pub async fn run(
         match send_otlp(&client, &url, &bufs.encode, &mut bufs.gzip, &config.headers).await {
             Ok(resp) if resp.status().is_success() => {
                 consecutive_failures = 0;
-                log::debug!("Exported {span_count} spans ({body_len} bytes)");
+                crate::logging::log_debug!("Exported {span_count} spans ({body_len} bytes)");
             }
             Ok(resp) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                log::warn!("Span export failed: status={status}, body={body}");
+                crate::logging::log_warn!("Span export failed: status={status}, body={body}");
             }
             Err(e) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                log::warn!("Span export request failed: {e}");
+                crate::logging::log_warn!("Span export request failed: {e}");
             }
         }
     }
@@ -404,7 +406,7 @@ async fn export_once(ctx: &SpanExportContext<'_>, bufs: &mut SpanExportBufs) {
 
     bufs.encode.clear();
     if let Err(e) = request.encode(&mut bufs.encode) {
-        log::warn!("Final span protobuf encode failed: {e}");
+        crate::logging::log_warn!("Final span protobuf encode failed: {e}");
         return;
     }
 
@@ -420,9 +422,9 @@ async fn export_once(ctx: &SpanExportContext<'_>, bufs: &mut SpanExportBufs) {
         Ok(resp) if !resp.status().is_success() => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            log::warn!("Final span export returned {status}: {body}");
+            crate::logging::log_warn!("Final span export returned {status}: {body}");
         }
-        Err(e) => log::warn!("Final span export failed: {e}"),
+        Err(e) => crate::logging::log_warn!("Final span export failed: {e}"),
         _ => {}
     }
 }
