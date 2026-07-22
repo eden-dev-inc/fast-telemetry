@@ -18,8 +18,10 @@ Highlights:
   a repeated warning on every delta export; it remains observable through the exported
   `__ft_overflow=true` series, each dynamic metric's `overflow_count()`, and
   `MetricVisitor::dynamic_overflow(...)`.
-- Replaced direct `log` facade calls in `fast-telemetry-export` with `eden_logger` internal-audience
-  logs for DogStatsD, OTLP metrics, span export, ClickHouse export, and stale-series sweeping.
+- Replaced direct `log` facade calls in `fast-telemetry-export` with opt-in `eden_logger`
+  internal-audience diagnostics for DogStatsD, OTLP metrics, span export, ClickHouse export,
+  and stale-series sweeping. Enable the `logging` feature for info/warn/error diagnostics and
+  `logging-debug` for debug output; exporters remain quiet by default.
 
 Install:
 

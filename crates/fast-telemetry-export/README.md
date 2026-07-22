@@ -20,6 +20,14 @@ This crate provides:
 | `clickhouse` |         | Native-TCP ClickHouse exporter — first-party rows, generic primitive, and OTel schema |
 | `monoio`     |         | Monoio-native DogStatsD, OTLP HTTP/protobuf, sweeper, and span-flush helper          |
 | `compio`     |         | Compio-native DogStatsD and sweeper; span-flush helper with `otlp`                   |
+| `logging`    |         | Internal exporter info, warning, and error diagnostics through `eden_logger`         |
+| `logging-debug` |      | Adds debug diagnostics; also enables `logging`                                       |
+
+Exporter logging is opt-in so the crate does not write to stderr or bypass the
+application's logging setup by default. Enable `logging` to emit internal
+diagnostics through `eden_logger`; add `logging-debug` when per-export debug
+messages are useful. Runtime filtering follows `eden_logger`'s
+`EDEN_LOG_LEVEL` configuration.
 
 The ClickHouse exporter ships two layers:
 

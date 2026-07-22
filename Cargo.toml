@@ -32,7 +32,7 @@ quote = "1"
 syn = { version = "2", features = ["extra-traits", "full", "parsing"] }
 
 # --- Export: fast-telemetry-export runtime dependencies ---
-eden_logger = { version = "0.1.1", default-features = false, features = ["log-debug", "log-info", "log-warn", "log-error", "log-internal"] }
+eden_logger = { version = "0.1.1", default-features = false }
 compio = { version = "0.18", default-features = false }
 futures-util = "0.3"
 memchr = "2"                                                              # dogstatsd feature
