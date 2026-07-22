@@ -2,11 +2,32 @@
 
 ## Unreleased
 
+## 0.8.1 - 2026-07-22
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
+
+Why this is a 0.8.1 patch:
+
+- this release fixes a downstream compile-time dependency leak in derive-generated DogStatsD delta export methods.
+- `fast-telemetry-export` now uses `eden_logger` for internal exporter diagnostics instead of the `log` facade.
+
+Highlights:
+
 - Fixed `ExportMetrics` dynamic-metric expansion so downstream crates no longer need a direct
   `log` dependency to compile DogStatsD delta export methods. Cardinality overflow no longer emits
   a repeated warning on every delta export; it remains observable through the exported
   `__ft_overflow=true` series, each dynamic metric's `overflow_count()`, and
   `MetricVisitor::dynamic_overflow(...)`.
+- Replaced direct `log` facade calls in `fast-telemetry-export` with `eden_logger` internal-audience
+  logs for DogStatsD, OTLP metrics, span export, ClickHouse export, and stale-series sweeping.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.8.1"
+fast-telemetry-export = "0.8.1"
+```
 
 ## 0.8.0 - 2026-07-09
 

@@ -181,8 +181,6 @@ fn simulate_spans(collector: Arc<SpanCollector>) {
 
 #[tokio::main]
 async fn main() {
-    env_logger::init();
-
     let metrics = Arc::new(AppMetrics::new());
     let collector = Arc::new(SpanCollector::new(4, 4096));
     let cancel = CancellationToken::new();

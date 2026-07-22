@@ -92,18 +92,18 @@ pub async fn run<F>(
     use tokio::net::UdpSocket;
     use tokio::time::MissedTickBehavior;
 
-    log::info!("Starting DogStatsD exporter, endpoint={}", config.endpoint);
+    crate::logging::log_info!("Starting DogStatsD exporter, endpoint={}", config.endpoint);
 
     let socket = match UdpSocket::bind("0.0.0.0:0").await {
         Ok(s) => s,
         Err(e) => {
-            log::error!("Failed to bind UDP socket for DogStatsD export: {e}");
+            crate::logging::log_error!("Failed to bind UDP socket for DogStatsD export: {e}");
             return;
         }
     };
 
     if let Err(e) = socket.connect(&config.endpoint).await {
-        log::error!("Failed to connect UDP socket to {}: {e}", config.endpoint);
+        crate::logging::log_error!("Failed to connect UDP socket to {}: {e}", config.endpoint);
         return;
     }
 
@@ -119,7 +119,7 @@ pub async fn run<F>(
         tokio::select! {
             _ = interval.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("DogStatsD exporter shutting down");
+                crate::logging::log_info!("DogStatsD exporter shutting down");
                 return;
             }
         }
@@ -146,7 +146,7 @@ pub async fn run<F>(
             metric_count += 1;
 
             if line_len > max_packet_size {
-                log::warn!(
+                crate::logging::log_warn!(
                     "Dropping oversized metric line ({line_len} bytes, max {max_packet_size})"
                 );
                 start = end;
@@ -159,7 +159,7 @@ pub async fn run<F>(
                         total_sent += n;
                         batch_count += 1;
                     }
-                    Err(e) => log::warn!("Failed to send DogStatsD batch: {e}"),
+                    Err(e) => crate::logging::log_warn!("Failed to send DogStatsD batch: {e}"),
                 }
                 batch.clear();
             }
@@ -181,13 +181,13 @@ pub async fn run<F>(
                             total_sent += n;
                             batch_count += 1;
                         }
-                        Err(e) => log::warn!("Failed to send DogStatsD batch: {e}"),
+                        Err(e) => crate::logging::log_warn!("Failed to send DogStatsD batch: {e}"),
                     }
                     batch.clear();
                 }
                 batch.extend_from_slice(line);
             } else {
-                log::warn!("Dropping oversized trailing metric ({line_len} bytes)");
+                crate::logging::log_warn!("Dropping oversized trailing metric ({line_len} bytes)");
             }
         }
 
@@ -197,11 +197,11 @@ pub async fn run<F>(
                     total_sent += n;
                     batch_count += 1;
                 }
-                Err(e) => log::warn!("Failed to send final DogStatsD batch: {e}"),
+                Err(e) => crate::logging::log_warn!("Failed to send final DogStatsD batch: {e}"),
             }
         }
 
-        log::debug!(
+        crate::logging::log_debug!(
             "DogStatsD export: {metric_count} metrics, {batch_count} batches, {total_sent} bytes"
         );
     }
@@ -225,7 +225,7 @@ pub async fn run_monoio<F>(
     use monoio::net::udp::UdpSocket;
     use monoio::time::MissedTickBehavior;
 
-    log::info!(
+    crate::logging::log_info!(
         "Starting monoio DogStatsD exporter, endpoint={}",
         config.endpoint
     );
@@ -234,12 +234,12 @@ pub async fn run_monoio<F>(
         Ok(mut addrs) => match addrs.next() {
             Some(addr) => addr,
             None => {
-                log::error!("DogStatsD endpoint resolved to no addresses");
+                crate::logging::log_error!("DogStatsD endpoint resolved to no addresses");
                 return;
             }
         },
         Err(e) => {
-            log::error!(
+            crate::logging::log_error!(
                 "Failed to resolve DogStatsD endpoint {}: {e}",
                 config.endpoint
             );
@@ -258,13 +258,15 @@ pub async fn run_monoio<F>(
     let socket = match UdpSocket::bind(bind_addr) {
         Ok(s) => s,
         Err(e) => {
-            log::error!("Failed to bind monoio UDP socket for DogStatsD export: {e}");
+            crate::logging::log_error!(
+                "Failed to bind monoio UDP socket for DogStatsD export: {e}"
+            );
             return;
         }
     };
 
     if let Err(e) = socket.connect(endpoint).await {
-        log::error!("Failed to connect monoio UDP socket to {endpoint}: {e}");
+        crate::logging::log_error!("Failed to connect monoio UDP socket to {endpoint}: {e}");
         return;
     }
 
@@ -280,7 +282,7 @@ pub async fn run_monoio<F>(
         monoio::select! {
             _ = interval.tick() => {}
             _ = cancel.cancelled() => {
-                log::info!("monoio DogStatsD exporter shutting down");
+                crate::logging::log_info!("monoio DogStatsD exporter shutting down");
                 return;
             }
         }
@@ -307,7 +309,7 @@ pub async fn run_monoio<F>(
             metric_count += 1;
 
             if line_len > max_packet_size {
-                log::warn!(
+                crate::logging::log_warn!(
                     "Dropping oversized metric line ({line_len} bytes, max {max_packet_size})"
                 );
                 start = end;
@@ -341,7 +343,7 @@ pub async fn run_monoio<F>(
                 }
                 batch.extend_from_slice(line);
             } else {
-                log::warn!("Dropping oversized trailing metric ({line_len} bytes)");
+                crate::logging::log_warn!("Dropping oversized trailing metric ({line_len} bytes)");
             }
         }
 
@@ -352,7 +354,7 @@ pub async fn run_monoio<F>(
             batch_count += 1;
         }
 
-        log::debug!(
+        crate::logging::log_debug!(
             "monoio DogStatsD export: {metric_count} metrics, {batch_count} batches, {total_sent} bytes"
         );
     }
@@ -377,7 +379,7 @@ pub async fn run_compio<F>(
     use compio::net::UdpSocket;
     use futures_util::{FutureExt as _, select};
 
-    log::info!(
+    crate::logging::log_info!(
         "Starting compio DogStatsD exporter, endpoint={}",
         config.endpoint
     );
@@ -386,12 +388,12 @@ pub async fn run_compio<F>(
         Ok(mut addrs) => match addrs.next() {
             Some(addr) => addr,
             None => {
-                log::error!("DogStatsD endpoint resolved to no addresses");
+                crate::logging::log_error!("DogStatsD endpoint resolved to no addresses");
                 return;
             }
         },
         Err(e) => {
-            log::error!(
+            crate::logging::log_error!(
                 "Failed to resolve DogStatsD endpoint {}: {e}",
                 config.endpoint
             );
@@ -410,13 +412,15 @@ pub async fn run_compio<F>(
     let socket = match UdpSocket::bind(bind_addr).await {
         Ok(s) => s,
         Err(e) => {
-            log::error!("Failed to bind compio UDP socket for DogStatsD export: {e}");
+            crate::logging::log_error!(
+                "Failed to bind compio UDP socket for DogStatsD export: {e}"
+            );
             return;
         }
     };
 
     if let Err(e) = socket.connect(endpoint).await {
-        log::error!("Failed to connect compio UDP socket to {endpoint}: {e}");
+        crate::logging::log_error!("Failed to connect compio UDP socket to {endpoint}: {e}");
         return;
     }
 
@@ -435,7 +439,7 @@ pub async fn run_compio<F>(
         select! {
             _ = tick.fuse() => {},
             _ = cancel.as_mut() => {
-                log::info!("compio DogStatsD exporter shutting down");
+                crate::logging::log_info!("compio DogStatsD exporter shutting down");
                 return;
             }
         }
@@ -462,7 +466,7 @@ pub async fn run_compio<F>(
             metric_count += 1;
 
             if line_len > max_packet_size {
-                log::warn!(
+                crate::logging::log_warn!(
                     "Dropping oversized metric line ({line_len} bytes, max {max_packet_size})"
                 );
                 start = end;
@@ -496,7 +500,7 @@ pub async fn run_compio<F>(
                 }
                 batch.extend_from_slice(line);
             } else {
-                log::warn!("Dropping oversized trailing metric ({line_len} bytes)");
+                crate::logging::log_warn!("Dropping oversized trailing metric ({line_len} bytes)");
             }
         }
 
@@ -507,7 +511,7 @@ pub async fn run_compio<F>(
             batch_count += 1;
         }
 
-        log::debug!(
+        crate::logging::log_debug!(
             "compio DogStatsD export: {metric_count} metrics, {batch_count} batches, {total_sent} bytes"
         );
     }
@@ -527,7 +531,7 @@ async fn send_monoio_batch(
     match result {
         Ok(n) => Some(n),
         Err(e) => {
-            log::warn!("Failed to send monoio {context}: {e}");
+            crate::logging::log_warn!("Failed to send monoio {context}: {e}");
             None
         }
     }
@@ -547,7 +551,7 @@ async fn send_compio_batch(
     match result {
         Ok(n) => Some(n),
         Err(e) => {
-            log::warn!("Failed to send compio {context}: {e}");
+            crate::logging::log_warn!("Failed to send compio {context}: {e}");
             None
         }
     }

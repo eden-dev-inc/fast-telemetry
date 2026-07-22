@@ -1,6 +1,6 @@
 [package]
 name = "fast-telemetry-export"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2024"
 authors.workspace = true
 homepage.workspace = true
@@ -27,7 +27,7 @@ compio = ["dep:compio", "dep:futures-util", "dep:memchr"]
 [dependencies]
 compio = { workspace = true, features = ["runtime", "io", "net", "time", "io-uring"], optional = true }
 futures-util = { workspace = true, optional = true }
-log = { workspace = true }
+eden_logger = { workspace = true }
 memchr = { workspace = true, optional = true }
 monoio = { workspace = true, optional = true }
 fast-telemetry = { workspace = true }

@@ -15,9 +15,9 @@ rust-version = "1.90.0"
 
 [workspace.dependencies]
 # Local crates
-fast-telemetry = { path = "crates/fast-telemetry", version = "0.8.0" }
-fast-telemetry-macros = { path = "crates/fast-telemetry-macros", version = "0.8.0" }
-fast-telemetry-export = { path = "crates/fast-telemetry-export", version = "0.8.0" }
+fast-telemetry = { path = "crates/fast-telemetry", version = "0.8.1" }
+fast-telemetry-macros = { path = "crates/fast-telemetry-macros", version = "0.8.1" }
+fast-telemetry-export = { path = "crates/fast-telemetry-export", version = "0.8.1" }
 
 # --- Core: fast-telemetry runtime dependencies ---
 crossbeam-utils = "0.8"
@@ -32,7 +32,7 @@ quote = "1"
 syn = { version = "2", features = ["extra-traits", "full", "parsing"] }
 
 # --- Export: fast-telemetry-export runtime dependencies ---
-log = "0.4"
+eden_logger = { version = "0.1.1", default-features = false, features = ["log-debug", "log-info", "log-warn", "log-error", "log-internal"] }
 compio = { version = "0.18", default-features = false }
 futures-util = "0.3"
 memchr = "2"                                                              # dogstatsd feature

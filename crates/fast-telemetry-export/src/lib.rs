@@ -32,6 +32,8 @@
 //! - `monoio` — monoio-native exporter loops for monoio applications
 //! - `compio` — compio-native exporter loops for compio applications
 
+mod logging;
+
 #[cfg(feature = "clickhouse")]
 pub mod clickhouse;
 
