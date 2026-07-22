@@ -497,14 +497,6 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 state_fields.push(quote! { #field_name: std::collections::HashMap<fast_telemetry::DynamicLabelSet, isize>, });
                 state_inits.push(quote! { #field_name: std::collections::HashMap::new(), });
                 delta_exports.push(quote! {
-                    let overflow = self.#field_name.overflow_count();
-                    if overflow > 0 {
-                        log::warn!(
-                            "fast-telemetry: {} hit cardinality cap, {} records routed to overflow",
-                            #statsd_metric_name,
-                            overflow
-                        );
-                    }
                     let mut current_keys = std::collections::HashSet::new();
                     self.#field_name.visit_series(|labels, current| {
                         let key = fast_telemetry::DynamicLabelSet::from_canonical_pairs(labels);
@@ -577,14 +569,6 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 state_inits
                     .push(quote! { #buckets_state_field: std::collections::HashMap::new(), });
                 delta_exports.push(quote! {
-                    let overflow = self.#field_name.overflow_count();
-                    if overflow > 0 {
-                        log::warn!(
-                            "fast-telemetry: {} hit cardinality cap, {} records routed to overflow",
-                            #statsd_metric_name,
-                            overflow
-                        );
-                    }
                     let mut current_keys = std::collections::HashSet::new();
                     self.#field_name.visit_series(|labels, _count, _sum, snap| {
                         let key = fast_telemetry::DynamicLabelSet::from_canonical_pairs(labels);
@@ -645,14 +629,6 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 state_label_count_exprs.push(quote! { 0usize });
                 // Gauges are point-in-time, no delta tracking needed (always export current value)
                 delta_exports.push(quote! {
-                    let overflow = self.#field_name.overflow_count();
-                    if overflow > 0 {
-                        log::warn!(
-                            "fast-telemetry: {} hit cardinality cap, {} records routed to overflow",
-                            #statsd_metric_name,
-                            overflow
-                        );
-                    }
                     fast_telemetry::DogStatsDExport::export_dogstatsd(&self.#field_name, output, #statsd_metric_name, tags);
                 });
             }
@@ -703,14 +679,6 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 state_label_count_exprs.push(quote! { 0usize });
                 // i64 Gauges are point-in-time, no delta tracking needed (always export current value)
                 delta_exports.push(quote! {
-                    let overflow = self.#field_name.overflow_count();
-                    if overflow > 0 {
-                        log::warn!(
-                            "fast-telemetry: {} hit cardinality cap, {} records routed to overflow",
-                            #statsd_metric_name,
-                            overflow
-                        );
-                    }
                     fast_telemetry::DogStatsDExport::export_dogstatsd(&self.#field_name, output, #statsd_metric_name, tags);
                 });
             }
@@ -770,14 +738,6 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 state_inits.push(quote! { #count_state_field: std::collections::HashMap::new(), });
                 state_inits.push(quote! { #sum_state_field: std::collections::HashMap::new(), });
                 delta_exports.push(quote! {
-                    let overflow = self.#field_name.overflow_count();
-                    if overflow > 0 {
-                        log::warn!(
-                            "fast-telemetry: {} hit cardinality cap, {} records routed to overflow",
-                            #statsd_metric_name,
-                            overflow
-                        );
-                    }
                     let mut current_keys = std::collections::HashSet::new();
                     self.#field_name.visit_series(|labels, series| {
                         let key = fast_telemetry::DynamicLabelSet::from_canonical_pairs(labels);

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed `ExportMetrics` dynamic-metric expansion so downstream crates no longer need a direct
+  `log` dependency to compile DogStatsD delta export methods. Cardinality overflow no longer emits
+  a repeated warning on every delta export; it remains observable through the exported
+  `__ft_overflow=true` series, each dynamic metric's `overflow_count()`, and
+  `MetricVisitor::dynamic_overflow(...)`.
+
 ## 0.8.0 - 2026-07-09
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
