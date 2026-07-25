@@ -43,6 +43,7 @@
 | Prometheus text | `export_prometheus()`                                                                                           | Serve at `/metrics`                             |
 | DogStatsD       | `export_dogstatsd()`, `export_dogstatsd_delta()`, or `export_dogstatsd_with_temporality(..., Temporality, ...)` | UDP via `fast-telemetry-export`                 |
 | OTLP protobuf   | `export_otlp()` (requires `#[otlp]` on struct)                                                                  | HTTP via `fast-telemetry-export`                |
+| OTLP logs       | `build_log_export_request()` (requires `otlp-logs`)                                                            | Acknowledged HTTP via `OtlpHttpClient`           |
 | ClickHouse rows | `export_clickhouse()` (requires `#[clickhouse]` on struct) or `ClickHouseExport`; `export_otlp()` fallback also supported | Native TCP via `fast-telemetry-export[clickhouse]` |
 
 ## Shard Count
@@ -70,9 +71,11 @@ This project has since evolved substantially.
 
 ## Scope
 
-fast-telemetry is **metrics and lightweight spans**. It does not cover:
+fast-telemetry provides **metrics, lightweight spans, and reusable OTLP
+transport**. Its log support accepts caller-built OTLP records; it does not
+provide a structured logging API. It does not cover:
 
-- Structured logging
+- Log macros, contextual record construction, or log filtering
 - Distributed trace backends (ingestion, storage, query)
 - Automatic cross-service context propagation
 - Alerting or dashboarding

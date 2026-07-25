@@ -1,7 +1,7 @@
 //! Thread-sharded atomic counter.
 //!
-//! Forked from https://crates.io/crates/fast-counter (MIT/Apache licensed)
-//! Originally authored by https://crates.io/users/JackThomson2
+//! Forked from <https://crates.io/crates/fast-counter> (MIT/Apache licensed)
+//! Originally authored by <https://crates.io/users/JackThomson2>
 //! Modified to use crossbeam's CachePadded for more correct cache line sizing,
 //! and to support swap operations and export operations.
 

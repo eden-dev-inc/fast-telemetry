@@ -37,6 +37,36 @@ Tokio metric and span loops. With `otlp-logs`, callers can submit an
 rejection, retry classification, and `Retry-After` value. The client validates
 headers and TLS/mTLS material at construction and never retries on its own.
 
+```rust,no_run
+use fast_telemetry::otlp::{build_log_export_request, build_resource, pb};
+use fast_telemetry_export::otlp::{OtlpHttpClient, OtlpHttpConfig};
+
+# async fn export() -> Result<(), Box<dyn std::error::Error>> {
+let client = OtlpHttpClient::new(
+    OtlpHttpConfig::new("https://otel-collector:4318")
+        .with_header("Authorization", "Bearer <token>"),
+)?;
+let resource = build_resource("checkout", &[("service.instance.id", "checkout-1")]);
+let request = build_log_export_request(
+    &resource,
+    "checkout",
+    vec![pb::LogRecord {
+        body: Some(pb::AnyValue {
+            value: Some(pb::any_value::Value::StringValue("ready".to_string())),
+        }),
+        ..Default::default()
+    }],
+);
+let outcome = client.export_logs(&request).await?;
+assert_eq!(outcome.accepted + outcome.rejected, 1);
+# Ok(())
+# }
+```
+
+`is_retryable`, `is_invalid_payload`, and `is_terminal` form a complete,
+non-overlapping policy for transport failures. A caller that retries after a
+lost response must tolerate duplicate delivery.
+
 The ClickHouse exporter ships two layers:
 
 - `clickhouse::run<R, F, T>` — generic over a caller-supplied `klickhouse::Row`

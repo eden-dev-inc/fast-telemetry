@@ -11,7 +11,7 @@ authors = [
 homepage = "https://github.com/eden-dev-inc/fast-telemetry"
 license = "Apache-2.0"
 repository = "https://github.com/eden-dev-inc/fast-telemetry"
-rust-version = "1.90.0"
+rust-version = "1.93.0"
 
 [workspace.dependencies]
 # Local crates

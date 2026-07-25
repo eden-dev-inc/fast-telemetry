@@ -289,7 +289,8 @@ impl SpanCollector {
     /// Call this before [`drain_into`](Self::drain_into) when running on the
     /// same thread that submitted spans (e.g., in tests or single-threaded
     /// exporters).  In production, thread-local buffers are flushed
-    /// automatically when they reach [`FLUSH_THRESHOLD`] or on thread exit.
+    /// automatically when they reach the internal flush threshold or on thread
+    /// exit.
     pub fn flush_local(&self) {
         LOCAL.with(|cell| {
             // SAFETY: see LOCAL definition.

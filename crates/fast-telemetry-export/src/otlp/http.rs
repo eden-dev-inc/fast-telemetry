@@ -92,21 +92,32 @@ impl OtlpHttpConfig {
 /// Classification used by retrying exporters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OtlpHttpErrorKind {
+    /// The endpoint, header, timeout, or TLS configuration is invalid.
     Configuration,
+    /// The protobuf request or gzip body could not be encoded.
     Encode,
+    /// The request could not be sent or its response body could not be read.
     Transport,
+    /// The collector returned a status that callers may safely retry.
     RetryableStatus,
+    /// The collector rejected the request payload as invalid or too large.
     InvalidPayload,
+    /// The collector returned a permanent HTTP status.
     TerminalStatus,
+    /// A successful response contained invalid protobuf.
     Decode,
 }
 
 /// A structured OTLP request failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OtlpHttpError {
+    /// Stable error classification for retry and health decisions.
     pub kind: OtlpHttpErrorKind,
+    /// Human-readable diagnostic that is safe to surface outside logging.
     pub message: String,
+    /// HTTP status when the collector returned a non-success response.
     pub status: Option<u16>,
+    /// Collector-provided retry delay, when present and valid.
     pub retry_after: Option<Duration>,
 }
 
@@ -135,6 +146,7 @@ impl OtlpHttpError {
         matches!(
             self.kind,
             OtlpHttpErrorKind::Configuration
+                | OtlpHttpErrorKind::Encode
                 | OtlpHttpErrorKind::TerminalStatus
                 | OtlpHttpErrorKind::Decode
         )
@@ -156,8 +168,11 @@ impl std::error::Error for OtlpHttpError {}
 /// Acknowledged result from an OTLP request.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OtlpExportOutcome {
+    /// Signal items accepted by the collector.
     pub accepted: u64,
+    /// Signal items rejected by the collector.
     pub rejected: u64,
+    /// Optional collector warning or partial-rejection diagnostic.
     pub message: Option<String>,
 }
 
@@ -258,18 +273,9 @@ impl OtlpHttpClient {
             self.send_protobuf("/v1/logs", request).await?;
         let (rejected, message) = response
             .partial_success
-            .map(|partial| {
-                (
-                    partial.rejected_log_records.max(0) as u64,
-                    non_empty(partial.error_message),
-                )
-            })
+            .map(|partial| (partial.rejected_log_records, partial.error_message))
             .unwrap_or_default();
-        Ok(OtlpExportOutcome {
-            accepted: sent.saturating_sub(rejected),
-            rejected,
-            message,
-        })
+        Ok(export_outcome(sent, rejected, message))
     }
 
     pub async fn export_metrics(
@@ -280,24 +286,16 @@ impl OtlpHttpClient {
             .resource_metrics
             .iter()
             .flat_map(|resource| &resource.scope_metrics)
-            .map(|scope| scope.metrics.len() as u64)
+            .flat_map(|scope| &scope.metrics)
+            .map(metric_data_point_count)
             .sum();
         let response: pb::ExportMetricsServiceResponse =
             self.send_protobuf("/v1/metrics", request).await?;
         let (rejected, message) = response
             .partial_success
-            .map(|partial| {
-                (
-                    partial.rejected_data_points.max(0) as u64,
-                    non_empty(partial.error_message),
-                )
-            })
+            .map(|partial| (partial.rejected_data_points, partial.error_message))
             .unwrap_or_default();
-        Ok(OtlpExportOutcome {
-            accepted: sent.saturating_sub(rejected),
-            rejected,
-            message,
-        })
+        Ok(export_outcome(sent, rejected, message))
     }
 
     pub async fn export_traces(
@@ -314,18 +312,9 @@ impl OtlpHttpClient {
             self.send_protobuf("/v1/traces", request).await?;
         let (rejected, message) = response
             .partial_success
-            .map(|partial| {
-                (
-                    partial.rejected_spans.max(0) as u64,
-                    non_empty(partial.error_message),
-                )
-            })
+            .map(|partial| (partial.rejected_spans, partial.error_message))
             .unwrap_or_default();
-        Ok(OtlpExportOutcome {
-            accepted: sent.saturating_sub(rejected),
-            rejected,
-            message,
-        })
+        Ok(export_outcome(sent, rejected, message))
     }
 
     async fn send_protobuf<M, R>(&self, path: &str, message: &M) -> Result<R, OtlpHttpError>
@@ -380,6 +369,27 @@ impl OtlpHttpClient {
                 format!("failed to decode OTLP response: {error}"),
             )
         })
+    }
+}
+
+fn metric_data_point_count(metric: &pb::Metric) -> u64 {
+    let count = match metric.data.as_ref() {
+        Some(pb::metric::Data::Gauge(data)) => data.data_points.len(),
+        Some(pb::metric::Data::Sum(data)) => data.data_points.len(),
+        Some(pb::metric::Data::Histogram(data)) => data.data_points.len(),
+        Some(pb::metric::Data::ExponentialHistogram(data)) => data.data_points.len(),
+        Some(pb::metric::Data::Summary(data)) => data.data_points.len(),
+        None => 0,
+    };
+    count.try_into().unwrap_or(u64::MAX)
+}
+
+fn export_outcome(sent: u64, reported_rejected: i64, message: String) -> OtlpExportOutcome {
+    let rejected = u64::try_from(reported_rejected).unwrap_or(0).min(sent);
+    OtlpExportOutcome {
+        accepted: sent - rejected,
+        rejected,
+        message: non_empty(message),
     }
 }
 
@@ -561,5 +571,86 @@ mod tests {
                     .saturating_add('…'.len_utf8())
         );
         assert_eq!(text.ends_with('…'), body.len() > MAX_ERROR_BODY_BYTES);
+    }
+
+    #[hegel::test(test_cases = 300)]
+    fn generated_outcomes_conserve_the_sent_signal_count(tc: TestCase) {
+        let sent = tc.draw(gs::integers::<u32>()) as u64;
+        let reported_rejected = tc.draw(gs::integers::<i32>()) as i64;
+        let include_message = tc.draw(gs::booleans());
+        let message = if include_message {
+            "collector warning".to_string()
+        } else {
+            String::new()
+        };
+        let outcome = export_outcome(sent, reported_rejected, message);
+
+        assert_eq!(outcome.accepted.saturating_add(outcome.rejected), sent);
+        assert!(outcome.rejected <= sent);
+        assert_eq!(outcome.message.is_some(), include_message);
+    }
+
+    #[test]
+    fn counts_metric_data_points_instead_of_metric_messages() {
+        let metrics = [
+            pb::Metric {
+                data: Some(pb::metric::Data::Gauge(pb::OtlpGauge {
+                    data_points: vec![pb::NumberDataPoint::default(); 2],
+                })),
+                ..Default::default()
+            },
+            pb::Metric {
+                data: Some(pb::metric::Data::Sum(pb::Sum {
+                    data_points: vec![pb::NumberDataPoint::default(); 3],
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            pb::Metric {
+                data: Some(pb::metric::Data::Histogram(pb::OtlpHistogram {
+                    data_points: vec![pb::HistogramDataPoint::default(); 4],
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            pb::Metric {
+                data: Some(pb::metric::Data::ExponentialHistogram(
+                    pb::OtlpExpHistogram {
+                        data_points: vec![pb::ExponentialHistogramDataPoint::default(); 5],
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            },
+            pb::Metric {
+                data: Some(pb::metric::Data::Summary(pb::Summary {
+                    data_points: vec![pb::SummaryDataPoint::default(); 6],
+                })),
+                ..Default::default()
+            },
+        ];
+
+        assert_eq!(metrics.iter().map(metric_data_point_count).sum::<u64>(), 20);
+    }
+
+    #[test]
+    fn every_error_kind_has_one_exporter_action() {
+        for kind in [
+            OtlpHttpErrorKind::Configuration,
+            OtlpHttpErrorKind::Encode,
+            OtlpHttpErrorKind::Transport,
+            OtlpHttpErrorKind::RetryableStatus,
+            OtlpHttpErrorKind::InvalidPayload,
+            OtlpHttpErrorKind::TerminalStatus,
+            OtlpHttpErrorKind::Decode,
+        ] {
+            let error = OtlpHttpError::new(kind, "classification");
+            let actions = [
+                error.is_retryable(),
+                error.is_invalid_payload(),
+                error.is_terminal(),
+            ];
+            assert_eq!(actions.into_iter().filter(|selected| *selected).count(), 1);
+        }
     }
 }

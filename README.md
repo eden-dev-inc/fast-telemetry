@@ -4,7 +4,8 @@ High-performance, cache-friendly telemetry for Rust.
 
 `fast-telemetry` provides thread-sharded counters, gauges, histograms,
 distributions, lightweight spans, derive macros, and production export adapters
-for Prometheus, DogStatsD, OTLP, ClickHouse, and custom in-process visitors.
+for Prometheus, DogStatsD, acknowledged OTLP metrics/logs/traces, ClickHouse,
+and custom in-process visitors.
 
 ## Crates
 
@@ -12,21 +13,21 @@ for Prometheus, DogStatsD, OTLP, ClickHouse, and custom in-process visitors.
 | --- | --- |
 | [`fast-telemetry`](crates/fast-telemetry) | Sharded metrics, spans, and format serialization |
 | [`fast-telemetry-macros`](crates/fast-telemetry-macros) | `ExportMetrics` and `LabelEnum` derive macros |
-| [`fast-telemetry-export`](crates/fast-telemetry-export) | DogStatsD, OTLP, ClickHouse, span export, and stale-series sweeping |
+| [`fast-telemetry-export`](crates/fast-telemetry-export) | DogStatsD, acknowledged OTLP/HTTP, ClickHouse, span export, and stale-series sweeping |
 
 ## Install
 
 ```toml
 [dependencies]
-fast-telemetry = "0.7"
-fast-telemetry-export = "0.7"
+fast-telemetry = "0.9"
+fast-telemetry-export = "0.9"
 ```
 
 Enable the shared runtime when a parent service should own telemetry and pass it
 to child crates:
 
 ```toml
-fast-telemetry = { version = "0.8", features = ["runtime"] }
+fast-telemetry = { version = "0.9", features = ["runtime"] }
 ```
 
 ## Why

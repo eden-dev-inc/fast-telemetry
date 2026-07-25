@@ -34,8 +34,8 @@ pub mod pb {
     pub use opentelemetry_proto::tonic::metrics::v1::{
         self, AggregationTemporality, ExponentialHistogram as OtlpExpHistogram,
         ExponentialHistogramDataPoint, Gauge as OtlpGauge, Histogram as OtlpHistogram,
-        HistogramDataPoint, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum,
-        exponential_histogram_data_point, metric, number_data_point,
+        HistogramDataPoint, Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum, Summary,
+        SummaryDataPoint, exponential_histogram_data_point, metric, number_data_point,
     };
     pub use opentelemetry_proto::tonic::resource::v1::Resource;
     pub use opentelemetry_proto::tonic::trace::v1::{
