@@ -11,12 +11,20 @@
 //! The actual metric collection is provided by the caller via a closure,
 //! making this exporter work with any metrics struct.
 
+pub mod http;
+
 use std::time::Duration;
 
-use fast_telemetry::otlp::{build_export_request, build_resource, pb};
+use fast_telemetry::otlp::{build_export_request, build_resource};
 use prost::Message;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
+
+pub use fast_telemetry::otlp::pb;
+pub use http::{
+    OtlpExportOutcome, OtlpHttpClient, OtlpHttpConfig, OtlpHttpError, OtlpHttpErrorKind,
+    OtlpTlsConfig,
+};
 
 /// Configuration for the OTLP HTTP metrics exporter.
 #[derive(Clone)]
@@ -103,12 +111,14 @@ const BASE_BACKOFF: Duration = Duration::from_secs(5);
 
 /// Minimum payload size (bytes) before gzip compression is applied.
 /// Below this threshold, compression overhead exceeds savings.
+#[cfg(feature = "monoio")]
 const GZIP_THRESHOLD: usize = 1024;
 
 /// Gzip-compress `data` into `out` using fast compression (level 1).
 ///
 /// Returns `true` if compression was applied, `false` if the payload was below
 /// the threshold (in which case `out` is untouched).
+#[cfg(feature = "monoio")]
 fn gzip_compress(data: &[u8], out: &mut Vec<u8>) -> bool {
     if data.len() < GZIP_THRESHOLD {
         return false;
@@ -122,32 +132,6 @@ fn gzip_compress(data: &[u8], out: &mut Vec<u8>) -> bool {
     let _ = encoder.write_all(data);
     let _ = encoder.finish();
     true
-}
-
-/// Send a protobuf-encoded body, applying gzip when beneficial.
-async fn send_otlp(
-    client: &reqwest::Client,
-    url: &str,
-    body: &[u8],
-    gzip_buf: &mut Vec<u8>,
-    extra_headers: &[(String, String)],
-) -> Result<reqwest::Response, reqwest::Error> {
-    let mut req = client
-        .post(url)
-        .header("Content-Type", "application/x-protobuf");
-
-    for (name, value) in extra_headers {
-        req = req.header(name, value);
-    }
-
-    if gzip_compress(body, gzip_buf) {
-        req.header("Content-Encoding", "gzip")
-            .body(gzip_buf.clone())
-            .send()
-            .await
-    } else {
-        req.body(body.to_vec()).send().await
-    }
 }
 
 /// Run the OTLP metrics export loop.
@@ -200,7 +184,11 @@ where
         .collect();
     let resource = build_resource(&config.service_name, &attr_refs);
 
-    let client = match reqwest::Client::builder().timeout(config.timeout).build() {
+    let mut http_config = OtlpHttpConfig::new(&config.endpoint).with_timeout(config.timeout);
+    for (name, value) in &config.headers {
+        http_config = http_config.with_header(name, value);
+    }
+    let client = match OtlpHttpClient::new(http_config) {
         Ok(c) => c,
         Err(e) => {
             crate::logging::log_error!("Failed to build HTTP client for OTLP exporter: {e}");
@@ -213,14 +201,10 @@ where
     interval.tick().await;
 
     let mut consecutive_failures: u32 = 0;
-    let mut bufs = ExportBufs::default();
-
     let ctx = ExportContext {
         client: &client,
-        url: &url,
         resource: &resource,
         scope_name: &config.scope_name,
-        extra_headers: &config.headers,
     };
 
     loop {
@@ -228,7 +212,7 @@ where
             _ = interval.tick() => {}
             _ = cancel.cancelled() => {
                 crate::logging::log_info!("OTLP metrics exporter shutting down, performing final export");
-                export_once(&ctx, &mut collect_fn, &mut bufs).await;
+                export_once(&ctx, &mut collect_fn).await;
                 return;
             }
         }
@@ -242,7 +226,7 @@ where
             tokio::select! {
                 _ = tokio::time::sleep(backoff) => {}
                 _ = cancel.cancelled() => {
-                    export_once(&ctx, &mut collect_fn, &mut bufs).await;
+                    export_once(&ctx, &mut collect_fn).await;
                     return;
                 }
             }
@@ -258,25 +242,25 @@ where
         let metric_count = metric_messages.len();
         let request = build_export_request(&resource, &config.scope_name, metric_messages);
 
-        bufs.encode.clear();
-        if let Err(e) = request.encode(&mut bufs.encode) {
-            crate::logging::log_warn!("OTLP protobuf encode failed: {e}");
-            continue;
-        }
-        let body_len = bufs.encode.len();
+        let body_len = request.encoded_len();
 
-        match send_otlp(&client, &url, &bufs.encode, &mut bufs.gzip, &config.headers).await {
-            Ok(resp) if resp.status().is_success() => {
+        match client.export_metrics(&request).await {
+            Ok(outcome) if outcome.rejected == 0 => {
                 consecutive_failures = 0;
                 crate::logging::log_debug!(
                     "Exported {metric_count} OTLP metrics ({body_len} bytes)"
                 );
             }
-            Ok(resp) => {
+            Ok(outcome) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                crate::logging::log_warn!("OTLP export failed: status={status}, body={body}");
+                crate::logging::log_warn!(
+                    "OTLP export partially rejected {} data points: {}",
+                    outcome.rejected,
+                    outcome
+                        .message
+                        .as_deref()
+                        .unwrap_or("collector did not provide a reason")
+                );
             }
             Err(e) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
@@ -412,20 +396,19 @@ where
 }
 
 struct ExportContext<'a> {
-    client: &'a reqwest::Client,
-    url: &'a str,
+    client: &'a OtlpHttpClient,
     resource: &'a pb::Resource,
     scope_name: &'a str,
-    extra_headers: &'a [(String, String)],
 }
 
 #[derive(Default)]
+#[cfg(feature = "monoio")]
 struct ExportBufs {
     encode: Vec<u8>,
     gzip: Vec<u8>,
 }
 
-async fn export_once<F>(ctx: &ExportContext<'_>, collect_fn: &mut F, bufs: &mut ExportBufs)
+async fn export_once<F>(ctx: &ExportContext<'_>, collect_fn: &mut F)
 where
     F: FnMut(&mut Vec<pb::Metric>),
 {
@@ -438,25 +421,16 @@ where
 
     let request = build_export_request(ctx.resource, ctx.scope_name, metric_messages);
 
-    bufs.encode.clear();
-    if let Err(e) = request.encode(&mut bufs.encode) {
-        crate::logging::log_warn!("Final OTLP protobuf encode failed: {e}");
-        return;
-    }
-
-    match send_otlp(
-        ctx.client,
-        ctx.url,
-        &bufs.encode,
-        &mut bufs.gzip,
-        ctx.extra_headers,
-    )
-    .await
-    {
-        Ok(resp) if !resp.status().is_success() => {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            crate::logging::log_warn!("Final OTLP export returned {status}: {body}");
+    match ctx.client.export_metrics(&request).await {
+        Ok(outcome) if outcome.rejected > 0 => {
+            crate::logging::log_warn!(
+                "Final OTLP export partially rejected {} data points: {}",
+                outcome.rejected,
+                outcome
+                    .message
+                    .as_deref()
+                    .unwrap_or("collector did not provide a reason")
+            );
         }
         Err(e) => crate::logging::log_warn!("Final OTLP export failed: {e}"),
         _ => {}

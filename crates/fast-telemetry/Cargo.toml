@@ -1,6 +1,6 @@
 [package]
 name = "fast-telemetry"
-version = "0.8.1"
+version = "0.9.0"
 edition = "2024"
 authors.workspace = true
 homepage.workspace = true
@@ -19,7 +19,8 @@ all-features = true
 default = ["macros"]
 macros = ["dep:fast-telemetry-macros"]
 runtime = []
-otlp = ["dep:opentelemetry-proto", "dep:prost"]
+otlp = ["dep:opentelemetry-proto", "dep:prost", "opentelemetry-proto/gen-tonic", "opentelemetry-proto/gen-tonic-messages", "opentelemetry-proto/metrics", "opentelemetry-proto/trace"]
+otlp-logs = ["otlp", "opentelemetry-proto/logs"]
 clickhouse = ["dep:indexmap", "dep:klickhouse"]
 shuttle-tests = ["dep:shuttle"]
 bench-tools = ["dep:libc", "dep:metrics", "dep:metrics-util", "dep:opentelemetry", "dep:opentelemetry_sdk"]
@@ -35,7 +36,7 @@ libc = { version = "0.2", optional = true }
 metrics = { workspace = true, optional = true }
 metrics-util = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
-opentelemetry-proto = { version = "0.30", default-features = false, features = ["gen-tonic", "gen-tonic-messages", "metrics", "trace"], optional = true }
+opentelemetry-proto = { version = "0.30", default-features = false, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true, features = ["testing"] }
 parking_lot = { workspace = true }
 prost = { version = "0.13", optional = true }

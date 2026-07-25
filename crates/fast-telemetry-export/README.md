@@ -8,6 +8,7 @@ This crate provides:
 - DogStatsD export over UDP
 - OTLP metrics export over HTTP/protobuf
 - OTLP span export over HTTP/protobuf
+- acknowledged OTLP log requests through a reusable HTTP client
 - ClickHouse metrics export over the native TCP protocol (via [`klickhouse`])
 - stale-series sweeping for dynamic metrics
 
@@ -17,6 +18,7 @@ This crate provides:
 | ------------ | ------- | ------------------------------------------------------------------------------------ |
 | `dogstatsd`  | ✓       | DogStatsD UDP exporter                                                               |
 | `otlp`       | ✓       | OTLP HTTP/protobuf metrics + span exporters                                          |
+| `otlp-logs`  |         | OTLP Logs protobuf types and acknowledged `OtlpHttpClient::export_logs`              |
 | `clickhouse` |         | Native-TCP ClickHouse exporter — first-party rows, generic primitive, and OTel schema |
 | `monoio`     |         | Monoio-native DogStatsD, OTLP HTTP/protobuf, sweeper, and span-flush helper          |
 | `compio`     |         | Compio-native DogStatsD and sweeper; span-flush helper with `otlp`                   |
@@ -28,6 +30,47 @@ application's logging setup by default. Enable `logging` to emit internal
 diagnostics through `eden_logger`; add `logging-debug` when per-export debug
 messages are useful. Runtime filtering follows `eden_logger`'s
 `EDEN_LOG_LEVEL` configuration.
+
+The `otlp::OtlpHttpClient` is the shared, non-logging transport used by the
+Tokio metric and span loops. With `otlp-logs`, callers can submit an
+`ExportLogsServiceRequest` and receive a structured acknowledgement, partial
+rejection, retry classification, and `Retry-After` value. The client validates
+headers and TLS/mTLS material at construction, emits an OTLP exporter
+`User-Agent`, bounds response bodies to 64 KiB by default, and never retries on
+its own. `with_max_response_bytes` can lower or raise that response limit.
+
+```rust,no_run
+use fast_telemetry::otlp::{build_log_export_request, build_resource, pb};
+use fast_telemetry_export::otlp::{OtlpHttpClient, OtlpHttpConfig};
+
+# async fn export() -> Result<(), Box<dyn std::error::Error>> {
+let client = OtlpHttpClient::new(
+    OtlpHttpConfig::new("https://otel-collector:4318")
+        .with_header("Authorization", "Bearer <token>"),
+)?;
+let resource = build_resource("checkout", &[("service.instance.id", "checkout-1")]);
+let request = build_log_export_request(
+    &resource,
+    "checkout",
+    vec![pb::LogRecord {
+        body: Some(pb::AnyValue {
+            value: Some(pb::any_value::Value::StringValue("ready".to_string())),
+        }),
+        ..Default::default()
+    }],
+);
+let outcome = client.export_logs(&request).await?;
+assert_eq!(outcome.accepted + outcome.rejected, 1);
+# Ok(())
+# }
+```
+
+`is_retryable`, `is_invalid_payload`, and `is_terminal` form a complete,
+non-overlapping policy. Following OTLP/HTTP, only transport failures and status
+429, 502, 503, or 504 are retryable; 400/413 identify invalid payloads and all
+other HTTP failures are terminal. Partial-success responses are successful
+acknowledgements and must not be retried. A caller that retries after a lost
+response must tolerate duplicate delivery.
 
 The ClickHouse exporter ships two layers:
 
@@ -54,7 +97,7 @@ columns with defaults. Summary metrics are ignored.
 Enable the `monoio` feature to run exporter loops on a monoio runtime:
 
 ```toml
-fast-telemetry-export = { version = "0.8", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+fast-telemetry-export = { version = "0.9", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
 ```
 
 The monoio entry points mirror the Tokio ones:
@@ -77,7 +120,7 @@ Enable the `compio` feature to run the DogStatsD UDP exporter and sweeper on a
 compio runtime without pulling in Tokio:
 
 ```toml
-fast-telemetry-export = { version = "0.8", default-features = false, features = ["compio"] }
+fast-telemetry-export = { version = "0.9", default-features = false, features = ["compio"] }
 ```
 
 The compio entry points are:

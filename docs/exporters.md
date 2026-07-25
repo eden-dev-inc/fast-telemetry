@@ -7,7 +7,7 @@ batching, compression, backoff, and graceful shutdown.
 
 ```toml
 [dependencies]
-fast-telemetry-export = "0.7"
+fast-telemetry-export = "0.9"
 ```
 
 ### DogStatsD
@@ -76,6 +76,63 @@ let config = SpanExportConfig::new("http://otel-collector:4318")
 
 spawn(collector, config, cancel);
 ```
+
+### Acknowledged OTLP HTTP and Logs
+
+Enable `otlp-logs` when a caller needs to submit OTLP log records directly or
+share one transport policy across logs, metrics, and traces:
+
+```toml
+[dependencies]
+fast-telemetry = { version = "0.9", features = ["otlp-logs"] }
+fast-telemetry-export = { version = "0.9", default-features = false, features = ["otlp-logs"] }
+```
+
+```rust,no_run
+use fast_telemetry::otlp::{build_log_export_request, build_resource, pb};
+use fast_telemetry_export::otlp::{OtlpHttpClient, OtlpHttpConfig};
+
+# async fn export() -> Result<(), Box<dyn std::error::Error>> {
+let client = OtlpHttpClient::new(
+    OtlpHttpConfig::new("https://otel-collector:4318")
+        .with_header("Authorization", "Bearer <token>")
+        .with_gzip_threshold(1024),
+)?;
+let resource = build_resource("checkout", &[("service.instance.id", "checkout-1")]);
+let request = build_log_export_request(
+    &resource,
+    "checkout",
+    vec![pb::LogRecord {
+        body: Some(pb::AnyValue {
+            value: Some(pb::any_value::Value::StringValue("ready".to_string())),
+        }),
+        ..Default::default()
+    }],
+);
+let outcome = client.export_logs(&request).await?;
+assert_eq!(outcome.accepted + outcome.rejected, 1);
+# Ok(())
+# }
+```
+
+The same client exposes `export_metrics` and `export_traces`. It validates its
+endpoint, headers, and TLS/mTLS material at construction, then performs exactly
+one request per call. It never retries or logs internally.
+
+Use the returned classification to drive the caller's policy:
+
+| Result | Caller action |
+| --- | --- |
+| `Ok` with `rejected == 0` | Advance the caller's checkpoint or mark the batch delivered |
+| `Ok` with `rejected > 0` | Inspect `message`; isolate invalid records when ordering must continue |
+| `error.is_retryable()` | Retry transport errors, 408, 425, 429, and 5xx; honor `retry_after` |
+| `error.is_invalid_payload()` | Split or reject HTTP 400/413 payloads |
+| `error.is_terminal()` | Stop and surface configuration, encoding, authentication, other permanent HTTP, or decode failures |
+
+Additional CA bundles and mTLS identities are configured with
+`with_ca_certificate_pem` and `with_client_identity_pem`. The client uses
+at-least-once request semantics: a lost response can cause a caller to resend a
+batch, so stable event identity remains the caller's responsibility.
 
 ### ClickHouse (native TCP)
 

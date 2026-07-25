@@ -101,49 +101,6 @@ const MAX_BACKOFF: Duration = Duration::from_secs(300);
 /// Base backoff delay after the first failure.
 const BASE_BACKOFF: Duration = Duration::from_secs(5);
 
-/// Minimum payload size (bytes) before gzip compression is applied.
-const GZIP_THRESHOLD: usize = 1024;
-
-fn gzip_compress(data: &[u8], out: &mut Vec<u8>) -> bool {
-    if data.len() < GZIP_THRESHOLD {
-        return false;
-    }
-    use flate2::Compression;
-    use flate2::write::GzEncoder;
-    use std::io::Write;
-
-    out.clear();
-    let mut encoder = GzEncoder::new(out, Compression::fast());
-    let _ = encoder.write_all(data);
-    let _ = encoder.finish();
-    true
-}
-
-async fn send_otlp(
-    client: &reqwest::Client,
-    url: &str,
-    body: &[u8],
-    gzip_buf: &mut Vec<u8>,
-    extra_headers: &[(String, String)],
-) -> Result<reqwest::Response, reqwest::Error> {
-    let mut req = client
-        .post(url)
-        .header("Content-Type", "application/x-protobuf");
-
-    for (name, value) in extra_headers {
-        req = req.header(name, value);
-    }
-
-    if gzip_compress(body, gzip_buf) {
-        req.header("Content-Encoding", "gzip")
-            .body(gzip_buf.clone())
-            .send()
-            .await
-    } else {
-        req.body(body.to_vec()).send().await
-    }
-}
-
 /// Spawn the span exporter on a dedicated thread with its own single-threaded
 /// tokio runtime, matching the original design that avoids contending with the
 /// application's async runtime.
@@ -279,7 +236,12 @@ pub async fn run(
         .collect();
     let resource = build_resource(&config.service_name, &attr_refs);
 
-    let client = match reqwest::Client::builder().timeout(config.timeout).build() {
+    let mut http_config =
+        crate::otlp::OtlpHttpConfig::new(&config.endpoint).with_timeout(config.timeout);
+    for (name, value) in &config.headers {
+        http_config = http_config.with_header(name, value);
+    }
+    let client = match crate::otlp::OtlpHttpClient::new(http_config) {
         Ok(c) => c,
         Err(e) => {
             crate::logging::log_error!("Failed to build HTTP client for span exporter: {e}");
@@ -294,13 +256,10 @@ pub async fn run(
     let mut consecutive_failures: u32 = 0;
     let mut bufs = SpanExportBufs {
         spans: Vec::with_capacity(config.max_batch_size),
-        encode: Vec::new(),
-        gzip: Vec::new(),
     };
 
     let ctx = SpanExportContext {
         client: &client,
-        url: &url,
         collector: &collector,
         resource: &resource,
         config: &config,
@@ -352,24 +311,23 @@ pub async fn run(
         let otlp_spans: Vec<_> = bufs.spans.iter().map(|s| s.to_otlp()).collect();
         let request = build_trace_export_request(&resource, &config.scope_name, otlp_spans);
 
-        bufs.encode.clear();
-        if let Err(e) = request.encode(&mut bufs.encode) {
-            crate::logging::log_warn!("Span protobuf encode failed: {e}");
-            continue;
-        }
+        let body_len = request.encoded_len();
 
-        let body_len = bufs.encode.len();
-
-        match send_otlp(&client, &url, &bufs.encode, &mut bufs.gzip, &config.headers).await {
-            Ok(resp) if resp.status().is_success() => {
+        match client.export_traces(&request).await {
+            Ok(outcome) if outcome.rejected == 0 => {
                 consecutive_failures = 0;
                 crate::logging::log_debug!("Exported {span_count} spans ({body_len} bytes)");
             }
-            Ok(resp) => {
+            Ok(outcome) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                crate::logging::log_warn!("Span export failed: status={status}, body={body}");
+                crate::logging::log_warn!(
+                    "Span export partially rejected {} spans: {}",
+                    outcome.rejected,
+                    outcome
+                        .message
+                        .as_deref()
+                        .unwrap_or("collector did not provide a reason")
+                );
             }
             Err(e) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
@@ -380,8 +338,7 @@ pub async fn run(
 }
 
 struct SpanExportContext<'a> {
-    client: &'a reqwest::Client,
-    url: &'a str,
+    client: &'a crate::otlp::OtlpHttpClient,
     collector: &'a SpanCollector,
     resource: &'a pb::Resource,
     config: &'a SpanExportConfig,
@@ -389,8 +346,6 @@ struct SpanExportContext<'a> {
 
 struct SpanExportBufs {
     spans: Vec<fast_telemetry::span::CompletedSpan>,
-    encode: Vec<u8>,
-    gzip: Vec<u8>,
 }
 
 async fn export_once(ctx: &SpanExportContext<'_>, bufs: &mut SpanExportBufs) {
@@ -404,25 +359,16 @@ async fn export_once(ctx: &SpanExportContext<'_>, bufs: &mut SpanExportBufs) {
     let otlp_spans: Vec<_> = bufs.spans.iter().map(|s| s.to_otlp()).collect();
     let request = build_trace_export_request(ctx.resource, &ctx.config.scope_name, otlp_spans);
 
-    bufs.encode.clear();
-    if let Err(e) = request.encode(&mut bufs.encode) {
-        crate::logging::log_warn!("Final span protobuf encode failed: {e}");
-        return;
-    }
-
-    match send_otlp(
-        ctx.client,
-        ctx.url,
-        &bufs.encode,
-        &mut bufs.gzip,
-        &ctx.config.headers,
-    )
-    .await
-    {
-        Ok(resp) if !resp.status().is_success() => {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            crate::logging::log_warn!("Final span export returned {status}: {body}");
+    match ctx.client.export_traces(&request).await {
+        Ok(outcome) if outcome.rejected > 0 => {
+            crate::logging::log_warn!(
+                "Final span export partially rejected {} spans: {}",
+                outcome.rejected,
+                outcome
+                    .message
+                    .as_deref()
+                    .unwrap_or("collector did not provide a reason")
+            );
         }
         Err(e) => crate::logging::log_warn!("Final span export failed: {e}"),
         _ => {}

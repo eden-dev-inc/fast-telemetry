@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+Planned release: `0.9.0`.
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`,
+`fast-telemetry-export`.
+
+Why this is a 0.9.0 minor release:
+
+- it adds a public OTLP Logs model and acknowledged OTLP/HTTP transport API.
+- it moves Tokio metrics and span export onto the same reusable, non-logging
+  HTTP client.
+- it raises the workspace MSRV to Rust 1.93, which is required by the current
+  `compio-buf` dependency used by the optional Compio exporter.
+
+Highlights:
+
+- Added the `otlp-logs` feature and
+  `fast_telemetry::otlp::build_log_export_request`.
+- Added `OtlpHttpConfig`, `OtlpTlsConfig`, and `OtlpHttpClient` with custom
+  headers, request timeouts, gzip, additional CA bundles, mTLS client
+  identities, `Retry-After` parsing, a standard exporter `User-Agent`, bounded
+  response bodies, and OTLP-compliant status classification.
+- Added acknowledged `export_logs`, `export_metrics`, and `export_traces`
+  operations. The one-shot client returns diagnostics as values and performs
+  no logging or retries, so callers can safely compose their own queueing,
+  retry, ordering, and health policies.
+- Preserved the existing metrics and span exporter APIs while moving their
+  Tokio HTTP transport onto the shared client.
+- Corrected metric acknowledgement accounting to count OTLP data points and
+  clamp invalid collector rejection counts so accepted and rejected totals
+  always conserve the number sent.
+- Restricted automatic retry classification to transport failures and OTLP's
+  429/502/503/504 statuses; partial-success responses remain acknowledged and
+  are never candidates for replay.
+- Added deterministic unit coverage, a loopback Collector test for all three
+  OTLP signals, and pinned Hegel properties for status policy, gzip,
+  `Retry-After`, bounded diagnostics, and acknowledgement conservation.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = { version = "0.9", features = ["otlp-logs"] }
+fast-telemetry-export = { version = "0.9", default-features = false, features = ["otlp-logs"] }
+```
+
 ## 0.8.1 - 2026-07-22
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`, `fast-telemetry-export`.
