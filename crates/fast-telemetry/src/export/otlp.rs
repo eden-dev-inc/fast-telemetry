@@ -16,10 +16,20 @@ use crate::{
 
 /// Re-export proto types so downstream crates (and the derive macro) can reference them.
 pub mod pb {
+    #[cfg(feature = "otlp-logs")]
+    pub use opentelemetry_proto::tonic::collector::logs::v1::{
+        ExportLogsPartialSuccess, ExportLogsServiceRequest, ExportLogsServiceResponse,
+    };
     pub use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+    pub use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
     pub use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
+    pub use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
     pub use opentelemetry_proto::tonic::common::v1::{
         AnyValue, InstrumentationScope, KeyValue, any_value,
+    };
+    #[cfg(feature = "otlp-logs")]
+    pub use opentelemetry_proto::tonic::logs::v1::{
+        LogRecord, ResourceLogs, ScopeLogs, SeverityNumber,
     };
     pub use opentelemetry_proto::tonic::metrics::v1::{
         self, AggregationTemporality, ExponentialHistogram as OtlpExpHistogram,
@@ -158,6 +168,29 @@ pub fn build_export_request(
                     ..Default::default()
                 }),
                 metrics,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    }
+}
+
+/// Wrap OTLP log records into an `ExportLogsServiceRequest`.
+#[cfg(feature = "otlp-logs")]
+pub fn build_log_export_request(
+    resource: &pb::Resource,
+    scope_name: &str,
+    logs: Vec<pb::LogRecord>,
+) -> pb::ExportLogsServiceRequest {
+    pb::ExportLogsServiceRequest {
+        resource_logs: vec![pb::ResourceLogs {
+            resource: Some(resource.clone()),
+            scope_logs: vec![pb::ScopeLogs {
+                scope: Some(pb::InstrumentationScope {
+                    name: scope_name.to_string(),
+                    ..Default::default()
+                }),
+                log_records: logs,
                 ..Default::default()
             }],
             ..Default::default()
@@ -1090,6 +1123,42 @@ mod tests {
         let scope = sm.scope.as_ref().expect("missing scope");
         assert_eq!(scope.name, "fast-telemetry");
         assert_eq!(sm.metrics.len(), 1);
+    }
+
+    #[cfg(feature = "otlp-logs")]
+    #[test]
+    fn test_build_log_export_request() {
+        let resource = build_resource("test-service", &[("version", "1.0")]);
+        let record = pb::LogRecord {
+            body: Some(pb::AnyValue {
+                value: Some(pb::any_value::Value::StringValue("hello".to_string())),
+            }),
+            ..Default::default()
+        };
+
+        let request = build_log_export_request(&resource, "fast-telemetry", vec![record]);
+
+        assert_eq!(request.resource_logs.len(), 1);
+        let resource_logs = &request.resource_logs[0];
+        assert_eq!(
+            resource_logs
+                .resource
+                .as_ref()
+                .expect("resource")
+                .attributes
+                .len(),
+            2
+        );
+        assert_eq!(resource_logs.scope_logs.len(), 1);
+        assert_eq!(resource_logs.scope_logs[0].log_records.len(), 1);
+        assert_eq!(
+            resource_logs.scope_logs[0]
+                .scope
+                .as_ref()
+                .expect("scope")
+                .name,
+            "fast-telemetry"
+        );
     }
 
     #[test]

@@ -15,9 +15,9 @@ rust-version = "1.90.0"
 
 [workspace.dependencies]
 # Local crates
-fast-telemetry = { path = "crates/fast-telemetry", version = "0.8.1" }
-fast-telemetry-macros = { path = "crates/fast-telemetry-macros", version = "0.8.1" }
-fast-telemetry-export = { path = "crates/fast-telemetry-export", version = "0.8.1" }
+fast-telemetry = { path = "crates/fast-telemetry", version = "0.9.0" }
+fast-telemetry-macros = { path = "crates/fast-telemetry-macros", version = "0.9.0" }
+fast-telemetry-export = { path = "crates/fast-telemetry-export", version = "0.9.0" }
 
 # --- Core: fast-telemetry runtime dependencies ---
 crossbeam-utils = "0.8"
@@ -42,6 +42,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 
 # --- OTLP: fast-telemetry + fast-telemetry-export otlp feature ---
 flate2 = "1"
+httpdate = "1"
 prost = "0.13"                                                            # pinned by opentelemetry-proto 0.30
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 
@@ -51,6 +52,7 @@ klickhouse = { version = "0.14", default-features = false, features = ["derive",
 
 # --- Dev/test/bench only ---
 criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
+hegeltest = "=0.28.2"
 metrics = "0.24.3"
 metrics-util = { version = "0.20.1", features = ["registry", "storage"] }
 opentelemetry = "0.31"
