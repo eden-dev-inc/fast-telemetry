@@ -7,7 +7,7 @@ use std::time::Duration;
 use fast_telemetry::otlp::{
     build_export_request, build_log_export_request, build_resource, build_trace_export_request, pb,
 };
-use fast_telemetry_export::otlp::{OtlpHttpClient, OtlpHttpConfig};
+use fast_telemetry_export::otlp::{OtlpHttpClient, OtlpHttpConfig, OtlpHttpErrorKind};
 use flate2::read::GzDecoder;
 use prost::Message;
 
@@ -38,6 +38,33 @@ fn collector(
                 )
                 .expect("write response");
         }
+    });
+    (format!("http://{address}"), captured_rx, task)
+}
+
+fn collector_response(
+    status: &str,
+    body: Vec<u8>,
+) -> (
+    String,
+    mpsc::Receiver<CapturedRequest>,
+    thread::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind collector");
+    let address = listener.local_addr().expect("collector address");
+    let (captured_tx, captured_rx) = mpsc::channel();
+    let status = status.to_string();
+    let task = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        captured_tx
+            .send(read_request(&mut stream))
+            .expect("capture request");
+        let head = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/x-protobuf\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = stream.write_all(head.as_bytes());
+        let _ = stream.write_all(&body);
     });
     (format!("http://{address}"), captured_rx, task)
 }
@@ -149,6 +176,7 @@ async fn exports_logs_metrics_and_traces_through_the_shared_client() {
         let head = request.head.to_ascii_lowercase();
         assert!(head.contains("x-tenant: tenant-a"));
         assert!(head.contains("content-encoding: gzip"));
+        assert!(head.contains("user-agent: otel-otlp-exporter-rust/fast-telemetry-export-"));
     }
     assert!(log_request.head.starts_with("POST /v1/logs "));
     assert!(metric_request.head.starts_with("POST /v1/metrics "));
@@ -160,5 +188,40 @@ async fn exports_logs_metrics_and_traces_through_the_shared_client() {
     pb::ExportTraceServiceRequest::decode(decoded_body(&trace_request).as_slice())
         .expect("decode traces");
 
+    server.join().expect("collector thread");
+}
+
+#[tokio::test]
+async fn bounds_success_and_error_response_bodies() {
+    let resource = build_resource("checkout", &[]);
+    let logs = build_log_export_request(&resource, "integration", vec![pb::LogRecord::default()]);
+
+    let (endpoint, captured, server) = collector_response("200 OK", vec![b'x'; 4 * 1024]);
+    let client = OtlpHttpClient::new(OtlpHttpConfig::new(endpoint).with_max_response_bytes(128))
+        .expect("HTTP client");
+    let error = client
+        .export_logs(&logs)
+        .await
+        .expect_err("oversized success response");
+    assert_eq!(error.kind, OtlpHttpErrorKind::Decode);
+    captured
+        .recv_timeout(Duration::from_secs(1))
+        .expect("captured success request");
+    server.join().expect("collector thread");
+
+    let (endpoint, captured, server) =
+        collector_response("503 Service Unavailable", vec![b'y'; 4 * 1024]);
+    let client = OtlpHttpClient::new(OtlpHttpConfig::new(endpoint).with_max_response_bytes(128))
+        .expect("HTTP client");
+    let error = client
+        .export_logs(&logs)
+        .await
+        .expect_err("bounded retryable response");
+    assert_eq!(error.kind, OtlpHttpErrorKind::RetryableStatus);
+    assert!(error.message.len() <= 128 + '…'.len_utf8());
+    assert!(error.message.ends_with('…'));
+    captured
+        .recv_timeout(Duration::from_secs(1))
+        .expect("captured error request");
     server.join().expect("collector thread");
 }

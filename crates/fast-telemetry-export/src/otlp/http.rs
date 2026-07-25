@@ -17,7 +17,12 @@ use reqwest::header::{
 use super::pb;
 
 const DEFAULT_GZIP_THRESHOLD: usize = 1024;
+const DEFAULT_MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_ERROR_BODY_BYTES: usize = 8 * 1024;
+const USER_AGENT: &str = concat!(
+    "OTel-OTLP-Exporter-Rust/fast-telemetry-export-",
+    env!("CARGO_PKG_VERSION")
+);
 
 /// TLS material for an OTLP HTTP client.
 #[derive(Clone, Default)]
@@ -39,6 +44,8 @@ pub struct OtlpHttpConfig {
     pub headers: Vec<(String, String)>,
     /// Minimum uncompressed protobuf size before gzip is used.
     pub gzip_threshold: usize,
+    /// Maximum response body retained in memory.
+    pub max_response_bytes: usize,
     /// Optional additional trust roots and mTLS identity.
     pub tls: OtlpTlsConfig,
 }
@@ -50,6 +57,7 @@ impl Default for OtlpHttpConfig {
             timeout: Duration::from_secs(10),
             headers: Vec::new(),
             gzip_threshold: DEFAULT_GZIP_THRESHOLD,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
             tls: OtlpTlsConfig::default(),
         }
     }
@@ -75,6 +83,11 @@ impl OtlpHttpConfig {
 
     pub fn with_gzip_threshold(mut self, threshold: usize) -> Self {
         self.gzip_threshold = threshold;
+        self
+    }
+
+    pub fn with_max_response_bytes(mut self, maximum: usize) -> Self {
+        self.max_response_bytes = maximum;
         self
     }
 
@@ -183,10 +196,23 @@ pub struct OtlpHttpClient {
     endpoint: String,
     headers: HeaderMap,
     gzip_threshold: usize,
+    max_response_bytes: usize,
 }
 
 impl OtlpHttpClient {
     pub fn new(config: OtlpHttpConfig) -> Result<Self, OtlpHttpError> {
+        if config.timeout.is_zero() {
+            return Err(OtlpHttpError::new(
+                OtlpHttpErrorKind::Configuration,
+                "OTLP request timeout must be greater than zero",
+            ));
+        }
+        if config.max_response_bytes == 0 {
+            return Err(OtlpHttpError::new(
+                OtlpHttpErrorKind::Configuration,
+                "OTLP maximum response bytes must be greater than zero",
+            ));
+        }
         let parsed =
             reqwest::Url::parse(config.endpoint.trim_end_matches('/')).map_err(|error| {
                 OtlpHttpError::new(
@@ -224,7 +250,9 @@ impl OtlpHttpClient {
             headers.append(name, value);
         }
 
-        let mut builder = reqwest::Client::builder().timeout(config.timeout);
+        let mut builder = reqwest::Client::builder()
+            .timeout(config.timeout)
+            .user_agent(USER_AGENT);
         for bundle in config.tls.ca_certificates_pem {
             let certificates = reqwest::Certificate::from_pem_bundle(&bundle).map_err(|error| {
                 OtlpHttpError::new(
@@ -255,6 +283,7 @@ impl OtlpHttpClient {
             endpoint: parsed.as_str().trim_end_matches('/').to_string(),
             headers,
             gzip_threshold: config.gzip_threshold,
+            max_response_bytes: config.max_response_bytes,
         })
     }
 
@@ -340,7 +369,7 @@ impl OtlpHttpClient {
             request = request.header(CONTENT_ENCODING, "gzip");
         }
 
-        let response = request.body(body).send().await.map_err(|error| {
+        let mut response = request.body(body).send().await.map_err(|error| {
             OtlpHttpError::new(
                 OtlpHttpErrorKind::Transport,
                 format!("OTLP request failed: {error}"),
@@ -348,16 +377,15 @@ impl OtlpHttpClient {
         })?;
         let status = response.status();
         let retry_after = parse_retry_after(response.headers().get(RETRY_AFTER));
-        let response_body = response.bytes().await.map_err(|error| {
-            OtlpHttpError::new(
-                OtlpHttpErrorKind::Transport,
-                format!("failed to read OTLP response: {error}"),
-            )
-        })?;
+        let (response_body, response_truncated) =
+            read_bounded_body(&mut response, self.max_response_bytes, status.is_success()).await?;
 
         if !status.is_success() {
             let kind = classify_status(status.as_u16());
-            let mut error = OtlpHttpError::new(kind, body_text(&response_body));
+            let mut error = OtlpHttpError::new(
+                kind,
+                body_text_with_truncation(&response_body, response_truncated),
+            );
             error.status = Some(status.as_u16());
             error.retry_after = retry_after;
             return Err(error);
@@ -370,6 +398,53 @@ impl OtlpHttpClient {
             )
         })
     }
+}
+
+async fn read_bounded_body(
+    response: &mut reqwest::Response,
+    maximum: usize,
+    success: bool,
+) -> Result<(Vec<u8>, bool), OtlpHttpError> {
+    if success
+        && response
+            .content_length()
+            .is_some_and(|length| length > maximum as u64)
+    {
+        return Err(OtlpHttpError::new(
+            OtlpHttpErrorKind::Decode,
+            format!("OTLP response exceeded the configured {maximum}-byte limit"),
+        ));
+    }
+
+    let capacity = response
+        .content_length()
+        .and_then(|length| usize::try_from(length).ok())
+        .unwrap_or_default()
+        .min(maximum);
+    let mut body = Vec::with_capacity(capacity);
+    let mut truncated = false;
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        OtlpHttpError::new(
+            OtlpHttpErrorKind::Transport,
+            format!("failed to read OTLP response: {error}"),
+        )
+    })? {
+        let remaining = maximum.saturating_sub(body.len());
+        if chunk.len() > remaining {
+            body.extend_from_slice(&chunk[..remaining]);
+            truncated = true;
+            break;
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    if success && truncated {
+        return Err(OtlpHttpError::new(
+            OtlpHttpErrorKind::Decode,
+            format!("OTLP response exceeded the configured {maximum}-byte limit"),
+        ));
+    }
+    Ok((body, truncated))
 }
 
 fn metric_data_point_count(metric: &pb::Metric) -> u64 {
@@ -420,7 +495,7 @@ fn gzip(body: &[u8], threshold: usize) -> Result<(Vec<u8>, bool), OtlpHttpError>
 fn classify_status(status: u16) -> OtlpHttpErrorKind {
     match status {
         400 | 413 => OtlpHttpErrorKind::InvalidPayload,
-        408 | 425 | 429 | 500..=599 => OtlpHttpErrorKind::RetryableStatus,
+        429 | 502..=504 => OtlpHttpErrorKind::RetryableStatus,
         _ => OtlpHttpErrorKind::TerminalStatus,
     }
 }
@@ -434,12 +509,17 @@ fn parse_retry_after(value: Option<&HeaderValue>) -> Option<Duration> {
     deadline.duration_since(SystemTime::now()).ok()
 }
 
+#[cfg(test)]
 fn body_text(body: &[u8]) -> String {
+    body_text_with_truncation(body, false)
+}
+
+fn body_text_with_truncation(body: &[u8], response_truncated: bool) -> String {
     let truncated = &body[..body.len().min(MAX_ERROR_BODY_BYTES)];
     let mut text = String::from_utf8_lossy(truncated).into_owned();
     if text.is_empty() {
         text = "collector rejected OTLP request".to_string();
-    } else if truncated.len() != body.len() {
+    } else if response_truncated || truncated.len() != body.len() {
         text.push('…');
     }
     text
@@ -457,6 +537,18 @@ mod tests {
     #[test]
     fn validates_endpoint_and_headers() {
         assert!(OtlpHttpClient::new(OtlpHttpConfig::new("not a url")).is_err());
+        assert!(
+            OtlpHttpClient::new(
+                OtlpHttpConfig::new("http://localhost:4318").with_timeout(Duration::ZERO)
+            )
+            .is_err()
+        );
+        assert!(
+            OtlpHttpClient::new(
+                OtlpHttpConfig::new("http://localhost:4318").with_max_response_bytes(0)
+            )
+            .is_err()
+        );
         assert!(
             OtlpHttpClient::new(
                 OtlpHttpConfig::new("http://localhost:4318").with_header("bad\nname", "value")
@@ -490,7 +582,13 @@ mod tests {
         assert_eq!(classify_status(400), OtlpHttpErrorKind::InvalidPayload);
         assert_eq!(classify_status(413), OtlpHttpErrorKind::InvalidPayload);
         assert_eq!(classify_status(429), OtlpHttpErrorKind::RetryableStatus);
+        assert_eq!(classify_status(502), OtlpHttpErrorKind::RetryableStatus);
         assert_eq!(classify_status(503), OtlpHttpErrorKind::RetryableStatus);
+        assert_eq!(classify_status(504), OtlpHttpErrorKind::RetryableStatus);
+        assert_eq!(classify_status(408), OtlpHttpErrorKind::TerminalStatus);
+        assert_eq!(classify_status(425), OtlpHttpErrorKind::TerminalStatus);
+        assert_eq!(classify_status(500), OtlpHttpErrorKind::TerminalStatus);
+        assert_eq!(classify_status(505), OtlpHttpErrorKind::TerminalStatus);
         assert_eq!(classify_status(401), OtlpHttpErrorKind::TerminalStatus);
     }
 
@@ -508,7 +606,7 @@ mod tests {
         let status = tc.draw(gs::integers::<u16>());
         let expected = match status {
             400 | 413 => OtlpHttpErrorKind::InvalidPayload,
-            408 | 425 | 429 | 500..=599 => OtlpHttpErrorKind::RetryableStatus,
+            429 | 502..=504 => OtlpHttpErrorKind::RetryableStatus,
             _ => OtlpHttpErrorKind::TerminalStatus,
         };
         let kind = classify_status(status);

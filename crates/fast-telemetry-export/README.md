@@ -35,7 +35,9 @@ The `otlp::OtlpHttpClient` is the shared, non-logging transport used by the
 Tokio metric and span loops. With `otlp-logs`, callers can submit an
 `ExportLogsServiceRequest` and receive a structured acknowledgement, partial
 rejection, retry classification, and `Retry-After` value. The client validates
-headers and TLS/mTLS material at construction and never retries on its own.
+headers and TLS/mTLS material at construction, emits an OTLP exporter
+`User-Agent`, bounds response bodies to 64 KiB by default, and never retries on
+its own. `with_max_response_bytes` can lower or raise that response limit.
 
 ```rust,no_run
 use fast_telemetry::otlp::{build_log_export_request, build_resource, pb};
@@ -64,8 +66,11 @@ assert_eq!(outcome.accepted + outcome.rejected, 1);
 ```
 
 `is_retryable`, `is_invalid_payload`, and `is_terminal` form a complete,
-non-overlapping policy for transport failures. A caller that retries after a
-lost response must tolerate duplicate delivery.
+non-overlapping policy. Following OTLP/HTTP, only transport failures and status
+429, 502, 503, or 504 are retryable; 400/413 identify invalid payloads and all
+other HTTP failures are terminal. Partial-success responses are successful
+acknowledgements and must not be retried. A caller that retries after a lost
+response must tolerate duplicate delivery.
 
 The ClickHouse exporter ships two layers:
 

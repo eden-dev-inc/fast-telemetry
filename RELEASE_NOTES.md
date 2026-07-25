@@ -21,7 +21,8 @@ Highlights:
   `fast_telemetry::otlp::build_log_export_request`.
 - Added `OtlpHttpConfig`, `OtlpTlsConfig`, and `OtlpHttpClient` with custom
   headers, request timeouts, gzip, additional CA bundles, mTLS client
-  identities, `Retry-After` parsing, and structured status classification.
+  identities, `Retry-After` parsing, a standard exporter `User-Agent`, bounded
+  response bodies, and OTLP-compliant status classification.
 - Added acknowledged `export_logs`, `export_metrics`, and `export_traces`
   operations. The one-shot client returns diagnostics as values and performs
   no logging or retries, so callers can safely compose their own queueing,
@@ -31,6 +32,9 @@ Highlights:
 - Corrected metric acknowledgement accounting to count OTLP data points and
   clamp invalid collector rejection counts so accepted and rejected totals
   always conserve the number sent.
+- Restricted automatic retry classification to transport failures and OTLP's
+  429/502/503/504 statuses; partial-success responses remain acknowledged and
+  are never candidates for replay.
 - Added deterministic unit coverage, a loopback Collector test for all three
   OTLP signals, and pinned Hegel properties for status policy, gzip,
   `Retry-After`, bounded diagnostics, and acknowledgement conservation.
