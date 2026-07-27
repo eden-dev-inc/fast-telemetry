@@ -31,6 +31,13 @@ diagnostics through `eden_logger`; add `logging-debug` when per-export debug
 messages are useful. Runtime filtering follows `eden_logger`'s
 `EDEN_LOG_LEVEL` configuration.
 
+Tokio applications should run exporters on their parent-owned executor.
+Metric exporters already expose async `run(...)` functions; the span exporter
+provides `spans::spawn_on(&tokio::runtime::Handle, ...)` and returns a task that
+can be awaited during shutdown. `spans::spawn_standalone(...)` remains
+available when a dedicated telemetry thread and private Tokio runtime are an
+explicit isolation choice.
+
 The `otlp::OtlpHttpClient` is the shared, non-logging transport used by the
 Tokio metric and span loops. With `otlp-logs`, callers can submit an
 `ExportLogsServiceRequest` and receive a structured acknowledgement, partial

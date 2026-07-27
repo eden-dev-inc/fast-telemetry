@@ -250,7 +250,8 @@ async fn main() {
     // ));
 
     // OTLP span exporter
-    // fast_telemetry_export::spans::spawn(
+    // let span_exporter = fast_telemetry_export::spans::spawn_on(
+    //     &tokio::runtime::Handle::current(),
     //     collector.clone(),
     //     fast_telemetry_export::spans::SpanExportConfig::new("http://localhost:4318")
     //         .with_service_name("fast-telemetry-demo"),
@@ -269,6 +270,7 @@ async fn main() {
     // In a real app, you'd wait for shutdown signal:
     // tokio::signal::ctrl_c().await.ok();
     // cancel.cancel();
+    // span_exporter.await.ok();
 
     let _ = (cancel, Duration::from_secs(0)); // suppress unused warnings
 }

@@ -10,7 +10,7 @@ registration and a shared span collector so export setup happens once.
 
 ```toml
 [dependencies]
-fast-telemetry = { version = "0.8", features = ["runtime"] }
+fast-telemetry = { version = "0.9", features = ["runtime"] }
 ```
 
 ```rust
@@ -48,13 +48,18 @@ pub type TelemetryRuntime = fast_telemetry::Runtime;
 let runtime: Arc<TelemetryRuntime> = Runtime::new(RuntimeConfig::default());
 
 let span_cancel = CancellationToken::new();
-let _span_exporter = spans::spawn(
+let span_exporter = spans::spawn_on(
+    &tokio::runtime::Handle::current(),
     Arc::clone(runtime.span_collector()),
     SpanExportConfig::new("http://otel-collector:4318").with_service_name("myapp"),
     span_cancel.clone(),
 );
 
-let cache = shardmap::ShardMap::with_parent_telemetry(Some(Arc::clone(&runtime)));
+let cache = shardmap::ShardMap::with_parent_telemetry(Arc::clone(&runtime));
+
+// During graceful shutdown:
+span_cancel.cancel();
+span_exporter.await?;
 ```
 
 Metric export and span export use different surfaces from the same runtime:
@@ -103,11 +108,14 @@ pub struct CacheTelemetry {
 }
 
 impl CacheTelemetry {
-    pub fn with_parent_telemetry(runtime: Option<Arc<TelemetryRuntime>>) -> Self {
-        let runtime = runtime.unwrap_or_else(|| Runtime::new(RuntimeConfig::default()));
+    pub fn with_parent_telemetry(runtime: Arc<TelemetryRuntime>) -> Self {
         let metrics =
             runtime.register_metrics(MetricScope::new("shardmap.cache"), CacheMetrics::new());
         Self { runtime, metrics }
+    }
+
+    pub fn standalone() -> Self {
+        Self::with_parent_telemetry(Runtime::new(RuntimeConfig::default()))
     }
 
     pub fn record_lookup(&self) {
@@ -131,10 +139,15 @@ impl CacheTelemetry {
 #### Performance Rules
 
 - Create one `Runtime` per service and share it across crate boundaries.
+- Make parent-owned runtime injection the primary child-crate constructor.
+- Name fallback constructors `standalone` so they cannot silently split a
+  service's telemetry registry.
 - Register metric groups once during construction, not during operations.
 - Keep hot paths on `RegisteredMetrics<M>` or direct metric handles.
 - Clone `runtime.span_collector()` once when wiring span exporters.
 - Start spans through the shared runtime or its shared `SpanCollector`.
 - Do not create a new `Runtime` or `SpanCollector` per child crate when a parent
   runtime is available.
+- Run Tokio exporters on the parent executor with `spawn_on`, unless a
+  dedicated telemetry thread is an explicit isolation choice.
 - Do not look up metric groups in the registry per operation.

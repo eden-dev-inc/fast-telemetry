@@ -101,10 +101,28 @@ const MAX_BACKOFF: Duration = Duration::from_secs(300);
 /// Base backoff delay after the first failure.
 const BASE_BACKOFF: Duration = Duration::from_secs(5);
 
+/// Spawn the span exporter on a parent-owned Tokio runtime.
+///
+/// This is the preferred hosted-service entry point. The parent retains
+/// control of executor sizing and shutdown, while the returned task can be
+/// awaited after cancelling `cancel` to guarantee the final drain attempt has
+/// completed.
+pub fn spawn_on(
+    handle: &tokio::runtime::Handle,
+    collector: Arc<SpanCollector>,
+    config: SpanExportConfig,
+    cancel: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    handle.spawn(run(collector, config, cancel))
+}
+
 /// Spawn the span exporter on a dedicated thread with its own single-threaded
-/// tokio runtime, matching the original design that avoids contending with the
-/// application's async runtime.
-pub fn spawn(
+/// Tokio runtime.
+///
+/// Prefer [`spawn_on`] when fast-telemetry is embedded in an application that
+/// already owns a Tokio runtime. This standalone path is useful when telemetry
+/// isolation is intentional or no parent executor exists.
+pub fn spawn_standalone(
     collector: Arc<SpanCollector>,
     config: SpanExportConfig,
     cancel: CancellationToken,
@@ -121,6 +139,18 @@ pub fn spawn(
         .ok()
 }
 
+/// Backwards-compatible alias for [`spawn_standalone`].
+///
+/// New hosted applications should use [`spawn_on`] so runtime ownership stays
+/// with the parent application.
+pub fn spawn(
+    collector: Arc<SpanCollector>,
+    config: SpanExportConfig,
+    cancel: CancellationToken,
+) -> Option<std::thread::JoinHandle<()>> {
+    spawn_standalone(collector, config, cancel)
+}
+
 /// Periodically flush this monoio worker's thread-local span buffer.
 ///
 /// [`SpanCollector::drain_into`] can only drain spans that have already moved
@@ -129,8 +159,9 @@ pub fn spawn(
 /// flush threshold for a long time, so run one of these tasks on each monoio
 /// worker that records spans.
 ///
-/// The actual OTLP span exporter can remain [`spawn`], which runs on its own
-/// private Tokio runtime and drains the shared outboxes.
+/// The actual OTLP span exporter can run on a parent Tokio executor with
+/// [`spawn_on`] or remain isolated with [`spawn_standalone`]; either path
+/// drains the shared outboxes.
 #[cfg(feature = "monoio")]
 pub async fn run_local_flusher_monoio(
     collector: Arc<SpanCollector>,
@@ -159,9 +190,9 @@ pub async fn run_local_flusher_monoio(
 /// Periodically flush this compio worker's thread-local span buffer.
 ///
 /// This is the compio-native counterpart to `run_local_flusher_monoio`. Run
-/// one task on each compio worker that records spans; the OTLP span exporter can
-/// remain [`spawn`]. `cancel` may be any future that completes when the flusher
-/// should shut down.
+/// one task on each compio worker that records spans; the OTLP span exporter
+/// can use [`spawn_on`] or [`spawn_standalone`]. `cancel` may be any future
+/// that completes when the flusher should shut down.
 #[cfg(feature = "compio")]
 pub async fn run_local_flusher_compio(
     collector: Arc<SpanCollector>,
@@ -203,9 +234,10 @@ pub async fn run_local_flusher_compio(
 /// use std::time::Duration;
 ///
 /// use fast_telemetry::SpanCollector;
-/// use fast_telemetry_export::spans::{SpanExportConfig, spawn};
+/// use fast_telemetry_export::spans::{SpanExportConfig, spawn_on};
 /// use tokio_util::sync::CancellationToken;
 ///
+/// # async fn example() {
 /// let collector = Arc::new(SpanCollector::new(4, 4096));
 /// let cancel = CancellationToken::new();
 /// let config = SpanExportConfig::new("http://otel-collector:4318")
@@ -215,7 +247,15 @@ pub async fn run_local_flusher_compio(
 ///     .with_timeout(Duration::from_secs(5))
 ///     .with_max_batch_size(1024);
 ///
-/// spawn(collector, config, cancel);
+/// let exporter = spawn_on(
+///     &tokio::runtime::Handle::current(),
+///     collector,
+///     config,
+///     cancel.clone(),
+/// );
+/// cancel.cancel();
+/// exporter.await.expect("span exporter task");
+/// # }
 /// ```
 pub async fn run(
     collector: Arc<SpanCollector>,
@@ -391,4 +431,33 @@ fn backoff_with_jitter(consecutive_failures: u32) -> Duration {
     let final_ms = backoff_ms.saturating_add(jitter);
 
     Duration::from_millis(final_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn span_exporter_can_run_on_parent_tokio_runtime() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("parent Tokio runtime");
+        let collector = Arc::new(SpanCollector::new(1, 16));
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let task = spawn_on(
+            runtime.handle(),
+            collector,
+            SpanExportConfig::new("http://127.0.0.1:4318"),
+            cancel,
+        );
+        runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(1), task)
+                .await
+                .expect("span exporter should stop promptly after cancellation")
+                .expect("span exporter task should exit cleanly");
+        });
+    }
 }

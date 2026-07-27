@@ -15,6 +15,9 @@
 //! - OTLP exporters gzip-compress larger protobuf payloads automatically and
 //!   use exponential backoff after transport failures.
 //! - The span exporter also exposes `max_batch_size` to bound work per cycle.
+//! - Tokio applications can run span export on a parent-owned executor with
+//!   `spans::spawn_on`, or explicitly choose a private executor thread with
+//!   `spans::spawn_standalone`.
 //! - The stale-series sweeper expects the caller to invoke
 //!   `fast_telemetry::advance_cycle()` once per sweep and then call each dynamic
 //!   metric's `evict_stale(...)` method.

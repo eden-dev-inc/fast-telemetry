@@ -29,6 +29,10 @@ Highlights:
   retry, ordering, and health policies.
 - Preserved the existing metrics and span exporter APIs while moving their
   Tokio HTTP transport onto the shared client.
+- Added `spans::spawn_on` so hosted applications can run span export on a
+  parent-owned Tokio executor and await graceful shutdown. The explicit
+  `spans::spawn_standalone` path preserves dedicated-thread isolation, and
+  `spans::spawn` remains a backwards-compatible alias.
 - Corrected metric acknowledgement accounting to count OTLP data points and
   clamp invalid collector rejection counts so accepted and rejected totals
   always conserve the number sent.

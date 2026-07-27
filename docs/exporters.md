@@ -63,7 +63,7 @@ applies exponential backoff on transport failures.
 
 ```rust
 use std::time::Duration;
-use fast_telemetry_export::spans::{SpanExportConfig, spawn};
+use fast_telemetry_export::spans::{SpanExportConfig, spawn_on};
 use tokio_util::sync::CancellationToken;
 
 let cancel = CancellationToken::new();
@@ -74,8 +74,20 @@ let config = SpanExportConfig::new("http://otel-collector:4318")
     .with_timeout(Duration::from_secs(5))
     .with_max_batch_size(1024);
 
-spawn(collector, config, cancel);
+let exporter = spawn_on(
+    &tokio::runtime::Handle::current(),
+    collector,
+    config,
+    cancel.clone(),
+);
+
+// During graceful shutdown:
+cancel.cancel();
+exporter.await?;
 ```
+
+Applications without a parent Tokio executor, or those intentionally isolating
+telemetry I/O, can use `spans::spawn_standalone(...)` instead.
 
 ### Acknowledged OTLP HTTP and Logs
 
