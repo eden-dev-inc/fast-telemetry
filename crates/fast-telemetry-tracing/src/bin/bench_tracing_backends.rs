@@ -201,6 +201,7 @@ struct NativeMetadata {
     root: &'static Metadata<'static>,
     children: [Option<&'static Metadata<'static>>; 3],
     event: Option<&'static Metadata<'static>>,
+    event_attribute_count: usize,
 }
 
 struct CaptureMetadata(Arc<Mutex<WorkloadMetadata>>);
@@ -243,6 +244,11 @@ impl WorkloadMetadata {
             root: self.spans["root"],
             children: names.map(|name| self.spans.get(name).copied()),
             event: self.event,
+            event_attribute_count: self.event.map_or(0, |event| {
+                2 + usize::from(event.module_path().is_some())
+                    + usize::from(event.file().is_some())
+                    + usize::from(event.line().is_some())
+            }),
         }
     }
 }
@@ -305,10 +311,11 @@ fn instrument_native(
                 native_metadata(&mut child, metadata.children[0].expect("child callsite"));
             }
             child.enter();
-            let mut attributes = vec![
-                SpanAttribute::new("ok", true),
-                SpanAttribute::new("message", "checkpoint"),
-            ];
+            let mut attributes = Vec::with_capacity(
+                2 + metadata.map_or(0, |metadata| metadata.event_attribute_count),
+            );
+            attributes.push(SpanAttribute::new("ok", true));
+            attributes.push(SpanAttribute::new("message", "checkpoint"));
             let name = if let Some(metadata) = metadata {
                 let event = metadata.event.expect("attributes callsite has an event");
                 visit_metadata(event, |attribute| attributes.push(attribute));

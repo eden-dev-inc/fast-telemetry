@@ -158,7 +158,7 @@ keeps workers alive through the last batch's drain and payload destruction.
 | `drain_wall_ns`, `drain_cpu_ns` | Moving retained structures out of queues, including OTel force_flush |
 | `verify_wall_ns`, `verify_cpu_ns` | Semantic checks and creation/destruction of verifier temporary structures; excludes destruction of actual retained payloads |
 | `destroy_wall_ns`, `destroy_cpu_ns` | Dropping actual drained payloads after borrowed verification returns |
-| `total_wall_ns` | Measured phase through final worker join, including all phases/counter checks/coordination; excludes metadata/backend setup, initial worker setup, and warmup |
+| `total_wall_ns` | Measured phase through final worker join, including all phases/counter checks/coordination; excludes metadata/backend setup and warmup; with positive warmup, initial worker setup is also excluded |
 | `record_cpu_ns_per_iteration`, `record_cpu_ns_per_span` | Record CPU divided by workload iterations or actual retained spans |
 | `pipeline_cpu_ns_per_iteration`, `pipeline_cpu_ns_per_span` | Record plus drain CPU; verification and payload destruction excluded, preserving the earlier pipeline definition |
 | `pipeline_with_destroy_cpu_ns_per_iteration`, `pipeline_with_destroy_cpu_ns_per_span` | Record plus drain plus actual payload destruction CPU; the fuller retained-payload lifecycle diagnostic |
@@ -179,6 +179,8 @@ may create multiple spans. Barrier overhead matters for small batches. Compare
 the same batch, workload and thread count and preserve the configuration.
 Derived wall rates must name their interval: record, record+drain,
 record+drain+destroy, or total (which includes verification).
+With `WARMUP=0`, the first timed barrier may include workers' initial arrival, so
+record and total intervals can include that startup delay.
 
 SDK conversion/export occurs during OTel span closure; FT `CompletedSpan`
 construction/publication occurs during closure; native public APIs construct and
