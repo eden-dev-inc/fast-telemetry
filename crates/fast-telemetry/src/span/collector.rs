@@ -11,17 +11,23 @@
 //!
 //! Each outbox is capped at [`OUTBOX_CAPACITY`] spans to bound memory.
 //! When the outbox is full, flushes are silently dropped.
+//!
+//! External adapters can use an owning [`SpanSink`] instead. It publishes
+//! immediately through fixed producer shards with one shared capacity limit,
+//! bypassing native thread-local buffering and adaptive sampling.
 
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crossbeam_utils::CachePadded;
 use parking_lot::Mutex;
 
 use super::context::SpanContext;
 use super::types::{CollectorRef, CompletedSpan, Span, SpanKind};
 use crate::metric::Counter;
+use crate::thread_id::thread_id;
 
 /// Number of spans buffered thread-locally before flushing to the shared outbox.
 /// Higher values amortize the mutex cost but increase latency to export.
@@ -32,6 +38,12 @@ const FLUSH_THRESHOLD: usize = 64;
 /// `OUTBOX_CAPACITY × num_threads × sizeof(CompletedSpan)`.
 const OUTBOX_CAPACITY: usize = 4096;
 
+/// Fixed adapter shards bound registry size independently of producer lifetimes.
+const SINK_SHARDS: usize = 32;
+
+/// Reuse small bursts per producer without preallocating storage on idle shards.
+const SINK_RETAINED_BATCH: usize = FLUSH_THRESHOLD * 4;
+
 /// A shared outbox that a single thread flushes into and the exporter drains.
 struct Outbox {
     spans: Mutex<Vec<CompletedSpan>>,
@@ -41,6 +53,47 @@ impl Outbox {
     fn new() -> Self {
         Self {
             spans: Mutex::new(Vec::with_capacity(FLUSH_THRESHOLD * 2)),
+        }
+    }
+}
+
+/// Native outboxes keep their original buffering and allocation policy.
+enum RegisteredOutbox {
+    Native(Arc<Outbox>),
+    Sink(Arc<SinkOutbox>),
+}
+
+/// Capacity is shared by every shard of one sink, never divided into quotas.
+struct SinkBudget {
+    capacity: usize,
+    queued: AtomicUsize,
+}
+
+struct SinkQueue {
+    spans: Vec<CompletedSpan>,
+    accepted: u64,
+    rejected: u64,
+}
+
+struct SinkOutbox {
+    queue: CachePadded<Mutex<SinkQueue>>,
+    // The budget owns neither the sink nor the collector, avoiding an Arc cycle.
+    budget: Arc<SinkBudget>,
+    retained_capacity: usize,
+}
+
+impl SinkOutbox {
+    fn drain_into(&self, buf: &mut Vec<CompletedSpan>) {
+        let mut queue = self.queue.lock();
+        let drained = queue.spans.len();
+        if drained != 0 {
+            buf.append(&mut queue.spans);
+            // Keep the shard locked until capacity is returned: another publish
+            // on this shard cannot observe its emptied queue with a stale budget.
+            self.budget.queued.fetch_sub(drained, Ordering::Relaxed);
+            // Reuse ordinary batches without retaining each shard's high-water
+            // allocation indefinitely. Native outboxes retain their own policy.
+            queue.spans.shrink_to(self.retained_capacity);
         }
     }
 }
@@ -150,7 +203,10 @@ impl ThreadLocalState {
     fn register(&mut self, collector: &SpanCollector, key: usize) -> &mut ThreadBuffer {
         // Register a new outbox with the collector.
         let outbox = Arc::new(Outbox::new());
-        collector.outboxes.lock().push(Arc::clone(&outbox));
+        collector
+            .outboxes
+            .lock()
+            .push(RegisteredOutbox::Native(Arc::clone(&outbox)));
         self.entries.push((key, ThreadBuffer::new(outbox)));
         &mut self.entries.last_mut().expect("just pushed").1
     }
@@ -187,10 +243,10 @@ thread_local! {
 ///
 /// Created explicitly and held as `Arc<SpanCollector>`.
 pub struct SpanCollector {
-    /// Registered per-thread outboxes.  Lock is taken only when:
-    /// (a) a new thread first submits a span (registration), or
-    /// (b) the exporter drains spans.
-    outboxes: Mutex<Vec<Arc<Outbox>>>,
+    /// Native per-thread outboxes and fixed adapter shards. The registry lock
+    /// is taken for registration, drains, and queue-length queries, never for
+    /// individual adapter publications.
+    outboxes: Mutex<Vec<RegisteredOutbox>>,
     /// Spans that were recorded (passed sampling).
     spans_recorded: Counter,
     /// Spans that were dropped by adaptive sampling.
@@ -201,8 +257,9 @@ pub struct SpanCollector {
 ///
 /// Unlike native spans, this sink never uses thread-local buffering or adaptive
 /// sampling. Every accepted span is immediately visible to `drain_into`, even
-/// while the submitting worker stays alive and idle. Clones share one queue and
-/// its counters. The collector is kept alive until the last sink is dropped.
+/// while the submitting worker stays alive and idle. Clones share one capacity
+/// limit across fixed producer shards and their counters. The collector is kept
+/// alive until the last sink is dropped.
 #[derive(Clone)]
 pub struct SpanSink {
     inner: Arc<SpanSinkInner>,
@@ -210,10 +267,8 @@ pub struct SpanSink {
 
 struct SpanSinkInner {
     _collector: Arc<SpanCollector>,
-    outbox: Arc<Outbox>,
-    capacity: usize,
-    accepted: AtomicU64,
-    rejected: AtomicU64,
+    outboxes: Box<[Arc<SinkOutbox>]>,
+    budget: Arc<SinkBudget>,
 }
 
 impl SpanSink {
@@ -222,29 +277,47 @@ impl SpanSink {
     /// Returns ownership of the span on capacity exhaustion. Rejection is also
     /// counted by `rejected_count`; the caller decides whether to retry or drop.
     pub fn publish(&self, span: CompletedSpan) -> Result<(), Box<CompletedSpan>> {
-        let mut queue = self.inner.outbox.spans.lock();
-        if queue.len() >= self.inner.capacity {
-            self.inner.rejected.fetch_add(1, Ordering::Relaxed);
+        let shard = thread_id() & (self.inner.outboxes.len() - 1);
+        let mut queue = self.inner.outboxes[shard].queue.lock();
+        // Reserve exactly one global slot while holding the destination lock.
+        // Other shards can fill all remaining slots; no shard-local quota can
+        // reject a publication while capacity is available elsewhere.
+        if self
+            .inner
+            .budget
+            .queued
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |queued| {
+                (queued < self.inner.budget.capacity).then(|| queued + 1)
+            })
+            .is_err()
+        {
+            queue.rejected = queue.rejected.wrapping_add(1);
             return Err(Box::new(span));
         }
-        queue.push(span);
-        self.inner.accepted.fetch_add(1, Ordering::Relaxed);
+        queue.spans.push(span);
+        queue.accepted = queue.accepted.wrapping_add(1);
         Ok(())
     }
 
     /// Total successful publications (including spans already drained).
+    /// Exact after publishers quiesce; concurrent reads aggregate shards in turn.
     pub fn accepted_count(&self) -> u64 {
-        self.inner.accepted.load(Ordering::Relaxed)
+        self.inner.outboxes.iter().fold(0u64, |total, outbox| {
+            total.wrapping_add(outbox.queue.lock().accepted)
+        })
     }
 
     /// Total publication attempts rejected because the queue was full.
+    /// Exact after publishers quiesce; concurrent reads aggregate shards in turn.
     pub fn rejected_count(&self) -> u64 {
-        self.inner.rejected.load(Ordering::Relaxed)
+        self.inner.outboxes.iter().fold(0u64, |total, outbox| {
+            total.wrapping_add(outbox.queue.lock().rejected)
+        })
     }
 
     /// Maximum number of queued completed spans.
     pub fn capacity(&self) -> usize {
-        self.inner.capacity
+        self.inner.budget.capacity
     }
 }
 
@@ -265,22 +338,49 @@ impl SpanCollector {
     /// Register a bounded, owning sink for externally completed spans.
     ///
     /// Capacity bounds queued spans, not the size of individual spans. A sink's
-    /// outbox remains registered until the collector is dropped, so reuse sinks
-    /// rather than creating one per request. Native submission is unchanged.
+    /// fixed producer shards remain registered until the collector is dropped,
+    /// so reuse sinks rather than creating one per request. Producer thread exit
+    /// creates no additional outboxes. Native submission is unchanged.
+    /// Queue storage is allocated lazily. After draining, each of at most 32
+    /// shards keeps up to the larger of 256 slots or its equal capacity share
+    /// for reuse (never more than `capacity` slots per shard).
     ///
     /// # Panics
     /// Panics if `capacity` is zero.
     pub fn span_sink(self: &Arc<Self>, capacity: usize) -> SpanSink {
         assert!(capacity > 0, "span sink capacity must be nonzero");
-        let outbox = Arc::new(Outbox::new());
-        self.outboxes.lock().push(Arc::clone(&outbox));
+        let shard_count = capacity.min(SINK_SHARDS).next_power_of_two();
+        let budget = Arc::new(SinkBudget {
+            capacity,
+            queued: AtomicUsize::new(0),
+        });
+        let retained_capacity = capacity
+            .div_ceil(shard_count)
+            .max(SINK_RETAINED_BATCH)
+            .min(capacity);
+        let outboxes: Box<[_]> = (0..shard_count)
+            .map(|_| {
+                Arc::new(SinkOutbox {
+                    queue: CachePadded::new(Mutex::new(SinkQueue {
+                        spans: Vec::new(),
+                        accepted: 0,
+                        rejected: 0,
+                    })),
+                    budget: Arc::clone(&budget),
+                    retained_capacity,
+                })
+            })
+            .collect();
+        self.outboxes.lock().extend(
+            outboxes
+                .iter()
+                .map(|outbox| RegisteredOutbox::Sink(Arc::clone(outbox))),
+        );
         SpanSink {
             inner: Arc::new(SpanSinkInner {
                 _collector: Arc::clone(self),
-                outbox,
-                capacity,
-                accepted: AtomicU64::new(0),
-                rejected: AtomicU64::new(0),
+                outboxes,
+                budget,
             }),
         }
     }
@@ -389,11 +489,15 @@ impl SpanCollector {
     pub fn drain_into(&self, buf: &mut Vec<CompletedSpan>) {
         let outboxes = self.outboxes.lock();
         for outbox in outboxes.iter() {
-            let mut spans = outbox.spans.lock();
-            buf.append(&mut spans);
-            // Release excess capacity so drained outboxes don't hold onto
-            // large allocations between export cycles.
-            spans.shrink_to(FLUSH_THRESHOLD * 2);
+            match outbox {
+                RegisteredOutbox::Native(outbox) => {
+                    let mut spans = outbox.spans.lock();
+                    buf.append(&mut spans);
+                    // Preserve native outboxes' allocation policy.
+                    spans.shrink_to(FLUSH_THRESHOLD * 2);
+                }
+                RegisteredOutbox::Sink(outbox) => outbox.drain_into(buf),
+            }
         }
     }
 
@@ -421,7 +525,13 @@ impl SpanCollector {
     /// been flushed yet.
     pub fn len(&self) -> usize {
         let outboxes = self.outboxes.lock();
-        outboxes.iter().map(|o| o.spans.lock().len()).sum()
+        outboxes
+            .iter()
+            .map(|outbox| match outbox {
+                RegisteredOutbox::Native(outbox) => outbox.spans.lock().len(),
+                RegisteredOutbox::Sink(outbox) => outbox.queue.lock().spans.len(),
+            })
+            .sum()
     }
 
     /// Returns `true` if all outboxes are empty.
@@ -430,13 +540,17 @@ impl SpanCollector {
     /// threshold.
     pub fn is_empty(&self) -> bool {
         let outboxes = self.outboxes.lock();
-        outboxes.iter().all(|o| o.spans.lock().is_empty())
+        outboxes.iter().all(|outbox| match outbox {
+            RegisteredOutbox::Native(outbox) => outbox.spans.lock().is_empty(),
+            RegisteredOutbox::Sink(outbox) => outbox.queue.lock().spans.is_empty(),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{SpanId, SpanStatus, TraceId};
 
     /// Helper: flush + drain for same-thread tests.
     fn flush_and_drain(collector: &SpanCollector, buf: &mut Vec<CompletedSpan>) {
@@ -586,5 +700,63 @@ mod tests {
         let mut buf = Vec::new();
         collector.drain_into(&mut buf);
         assert_eq!(buf.len(), 10);
+    }
+
+    #[test]
+    fn sink_storage_is_lazy_and_bounded_across_short_lived_producers() {
+        let tiny_collector = Arc::new(SpanCollector::new(1, 1));
+        let tiny = tiny_collector.span_sink(1);
+        assert_eq!(tiny.inner.outboxes.len(), 1);
+        assert_eq!(tiny.inner.outboxes[0].queue.lock().spans.capacity(), 0);
+
+        let collector = Arc::new(SpanCollector::new(1, 1));
+        let sink = collector.span_sink(4096);
+        let registered = collector.outboxes.lock().len();
+        assert!(registered <= SINK_SHARDS);
+        assert!(
+            sink.inner
+                .outboxes
+                .iter()
+                .all(|outbox| outbox.queue.lock().spans.capacity() == 0)
+        );
+        fn completed() -> CompletedSpan {
+            CompletedSpan {
+                trace_id: TraceId::INVALID,
+                span_id: SpanId::INVALID,
+                parent_span_id: SpanId::INVALID,
+                name: Cow::Borrowed("short lived"),
+                kind: SpanKind::Internal,
+                start_time_ns: 1,
+                end_time_ns: 2,
+                status: SpanStatus::Unset,
+                attributes: Vec::new(),
+                events: Vec::new(),
+            }
+        }
+        let mut spans = Vec::new();
+        for _ in 0..SINK_SHARDS * 2 {
+            let sink = sink.clone();
+            std::thread::spawn(move || {
+                // Grow past the reusable allocation target on each producer.
+                for _ in 0..512 {
+                    assert!(sink.publish(completed()).is_ok());
+                }
+            })
+            .join()
+            .expect("producer thread");
+            collector.drain_into(&mut spans);
+            assert_eq!(spans.len(), 512);
+            spans.clear();
+        }
+        assert_eq!(collector.outboxes.lock().len(), registered);
+        assert_eq!(sink.accepted_count(), (SINK_SHARDS * 2 * 512) as u64);
+        assert_eq!(sink.rejected_count(), 0);
+        let retained: usize = sink
+            .inner
+            .outboxes
+            .iter()
+            .map(|outbox| outbox.queue.lock().spans.capacity())
+            .sum();
+        assert!(retained <= SINK_SHARDS * SINK_RETAINED_BATCH);
     }
 }

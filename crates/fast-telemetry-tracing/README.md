@@ -127,8 +127,10 @@ here; it is not a universal drop-in replacement for the OpenTelemetry ecosystem.
 item limits; `new` uses 4096 for each. Spans use an owning `SpanSink`, which keeps
 the collector alive and bypasses native adaptive sampling and worker-local
 buffers. A completed low-volume span is immediately visible to the exporter,
-including while its worker stays alive and idle. Newest completed spans or
-standalone events are dropped at capacity. Inspect
+including while its worker stays alive and idle. Span publication uses fixed
+producer shards with one shared span-capacity limit; idle shards do not reserve
+capacity, and producer thread exit does not grow the collector's registry.
+Newest completed spans or standalone events are dropped at capacity. Inspect
 `accepted_span_count`, `dropped_span_count`, `accepted_event_count`, and
 `dropped_event_count` on the handle. Counts of attached span events are available
 in the completed spans; the standalone counters cover only their own queue.
@@ -136,10 +138,12 @@ Native collector sampling/recording counters do not include adapter spans.
 
 These are item-count limits, not byte limits: attributes, event payloads, and
 live spans may grow until the application closes them. No field/event limit is
-silently applied. Drain promptly and choose queue sizes for your traffic and
-export interval. Reuse layers/sinks; their registered outboxes remain until the
-collector is dropped. Drains are destructive; competing consumers divide data.
-Accepted counts mean queued, not acknowledged by a remote collector.
+silently applied. Queue storage is allocated lazily, and drains retain bounded
+small-batch allocations for reuse. Drain promptly and choose queue sizes for your
+traffic and export interval. Reuse layers/sinks; their fixed registered shards
+remain until the collector is dropped. Drains are destructive; competing
+consumers divide data. Accepted counts mean queued, not acknowledged by a remote
+collector.
 
 For the existing hosted trace exporter, enable these dependencies:
 
