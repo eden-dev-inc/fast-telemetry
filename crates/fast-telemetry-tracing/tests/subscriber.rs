@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Barrier, Mutex};
 
 use fast_telemetry::{CompletedSpan, SpanCollector};
-use fast_telemetry_tracing::{FastTelemetrySubscriber, MetadataPolicy};
+use fast_telemetry_tracing::{FastTelemetryLayer, FastTelemetrySubscriber, MetadataPolicy};
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Callsite as _, Dispatch, Subscriber, info, info_span};
 use tracing_subscriber::layer::SubscriberExt;
@@ -31,44 +31,55 @@ fn event_metadata() -> &'static tracing::Metadata<'static> {
 
 #[test]
 fn entered_duplicates_and_out_of_order_exits_match_registry() {
-    let collector = Arc::new(SpanCollector::new(1, 1));
-    let subscriber = FastTelemetrySubscriber::new(collector.clone());
-    tracing::subscriber::with_default(subscriber, || {
-        let a = info_span!(parent: None, "a");
-        let b = info_span!(parent: None, "b");
-        let first_a = a.enter();
-        let entered_b = b.enter();
-        let second_a = a.enter();
-        assert_eq!(tracing::Span::current().id(), b.id());
-        drop(first_a);
-        assert_eq!(tracing::Span::current().id(), b.id());
-        drop(info_span!("on b"));
-        drop(entered_b);
-        // Registry marks re-entries as duplicates of the original entry. An
-        // out-of-order exit of that original does not promote the duplicate.
-        assert!(tracing::Span::current().is_disabled());
-        drop(info_span!("outside"));
-        drop(second_a);
-        assert!(tracing::Span::current().is_disabled());
-    });
-    let spans = drain(&collector);
-    let b = spans.iter().find(|s| s.name == "b").unwrap();
-    assert_eq!(
-        spans
-            .iter()
-            .find(|s| s.name == "on b")
-            .unwrap()
-            .parent_span_id,
-        b.span_id
-    );
-    assert!(
-        spans
-            .iter()
-            .find(|s| s.name == "outside")
-            .unwrap()
-            .parent_span_id
-            .is_invalid()
-    );
+    for direct in [false, true] {
+        let collector = Arc::new(SpanCollector::new(1, 1));
+        let dispatch = if direct {
+            Dispatch::new(FastTelemetrySubscriber::new(collector.clone()))
+        } else {
+            Dispatch::new(
+                tracing_subscriber::registry().with(FastTelemetryLayer::new(collector.clone())),
+            )
+        };
+        tracing::dispatcher::with_default(&dispatch, || {
+            let a = info_span!(parent: None, "a");
+            let b = info_span!(parent: None, "b");
+            let first_a = a.enter();
+            let entered_b = b.enter();
+            let second_a = a.enter();
+            assert_eq!(tracing::Span::current().id(), b.id());
+            drop(first_a);
+            assert_eq!(tracing::Span::current().id(), b.id());
+            drop(info_span!("on b"));
+            drop(entered_b);
+            // Exits carry only the span ID, so dropping first_a removed the
+            // latest matching entry (the duplicate), leaving the original a.
+            assert_eq!(tracing::Span::current().id(), a.id());
+            drop(info_span!("on a"));
+            drop(second_a);
+            assert!(tracing::Span::current().is_disabled());
+            drop(info_span!("outside"));
+        });
+        let spans = drain(&collector);
+        for (child, parent) in [("on b", "b"), ("on a", "a")] {
+            let parent = spans.iter().find(|s| s.name == parent).unwrap();
+            assert_eq!(
+                spans
+                    .iter()
+                    .find(|s| s.name == child)
+                    .unwrap()
+                    .parent_span_id,
+                parent.span_id
+            );
+        }
+        assert!(
+            spans
+                .iter()
+                .find(|s| s.name == "outside")
+                .unwrap()
+                .parent_span_id
+                .is_invalid()
+        );
+    }
 }
 
 #[test]
