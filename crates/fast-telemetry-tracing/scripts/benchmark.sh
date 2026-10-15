@@ -15,6 +15,8 @@ runs="${RUNS:-5}"
 batch="${BATCH:-64}"
 capacity="${CAPACITY:-4096}"
 warmup="${WARMUP:-100}"
+read -r -a modes <<< "${MODES:-native native-matched fast otel disabled registry}"
+(( ${#modes[@]} > 0 )) || { echo 'MODES must not be empty' >&2; exit 1; }
 [[ "$runs" =~ ^[1-9][0-9]*$ ]] || { echo 'RUNS must be positive' >&2; exit 1; }
 {
   date -u
@@ -24,7 +26,7 @@ warmup="${WARMUP:-100}"
   cargo -V
   git rev-parse HEAD
   git status --porcelain
-  printf 'ITERS=%s THREADS=%s RUNS=%s BATCH=%s CAPACITY=%s WARMUP=%s\n' "$iterations" "$threads" "$runs" "$batch" "$capacity" "$warmup"
+  printf 'ITERS=%s THREADS=%s RUNS=%s BATCH=%s CAPACITY=%s WARMUP=%s MODES=%s\n' "$iterations" "$threads" "$runs" "$batch" "$capacity" "$warmup" "${modes[*]}"
   printf 'RUSTFLAGS=%s CARGO_PROFILE_RELEASE_LTO=%s\n' "${RUSTFLAGS:-}" "${CARGO_PROFILE_RELEASE_LTO:-}"
 } > "$output/provenance.txt"
 cargo build --release -p fast-telemetry-tracing --features bench-tools --bin bench_tracing_backends > "$output/build.log" 2>&1
@@ -33,12 +35,11 @@ cp Cargo.lock "$output/Cargo.lock"
 binary="${CARGO_TARGET_DIR:-target}/release/bench_tracing_backends"
 sha256sum "$binary" "$output/Cargo.lock" >> "$output/provenance.txt"
 for ((run=1; run<=runs; run++)); do
-  # Alternate order between repetitions to reduce a fixed backend-order bias.
-  modes='fast otel disabled'
-  (( run % 2 == 0 )) && modes='otel fast disabled'
+  # Rotate all modes between repetitions to reduce fixed backend-order bias.
   for workload in root attributes children; do
     for thread_count in $threads; do
-      for mode in $modes; do
+      for ((offset=0; offset<${#modes[@]}; offset++)); do
+        mode="${modes[(run - 1 + offset) % ${#modes[@]}]}"
         name="run-${run}-${workload}-${thread_count}-${mode}"
         args=(--mode "$mode" --workload "$workload" --threads "$thread_count" --iters "$iterations" --warmup "$warmup" --batch "$batch" --capacity "$capacity")
         printf '%q ' "$binary" "${args[@]}" > "$output/$name.command"
@@ -65,7 +66,8 @@ with (root / 'all-runs.csv').open('w') as stream:
     writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
     writer.writeheader()
     writer.writerows(rows)
-metrics = ['record_cpu_ns_per_iteration', 'record_cpu_ns_per_span', 'pipeline_cpu_ns_per_iteration', 'pipeline_cpu_ns_per_span', 'record_wall_ns', 'drain_wall_ns', 'verify_wall_ns']
+metrics = ['record_cpu_ns_per_iteration', 'record_cpu_ns_per_span', 'pipeline_cpu_ns_per_iteration', 'pipeline_cpu_ns_per_span', 'pipeline_with_destroy_cpu_ns_per_iteration', 'pipeline_with_destroy_cpu_ns_per_span', 'record_wall_ns', 'drain_wall_ns', 'verify_wall_ns', 'destroy_wall_ns', 'destroy_cpu_ns', 'total_wall_ns']
+medians = {}
 with (root / 'medians.csv').open('w') as stream:
     writer = csv.writer(stream)
     writer.writerow(['mode', 'workload', 'threads', 'runs'] + metrics)
@@ -74,5 +76,19 @@ with (root / 'medians.csv').open('w') as stream:
         members = [r for r in rows if (r['mode'], r['workload'], r['threads']) == group]
         values = ['NA' if members[0][m] == 'NA' else statistics.median(float(r[m]) for r in members) for m in metrics]
         writer.writerow(list(group) + [len(members)] + values)
+        medians[group] = dict(zip(metrics, values))
+# Explicit CPU cost ratios use only full-retention modes. Bare native and
+# equal-payload native are separate comparisons; controls have no span ratio.
+with (root / 'comparisons.csv').open('w') as stream:
+    writer = csv.writer(stream)
+    ratio_metrics = ['record_cpu_ns_per_span', 'pipeline_cpu_ns_per_span', 'pipeline_with_destroy_cpu_ns_per_span']
+    writer.writerow(['workload', 'threads', 'numerator', 'denominator'] + ['fast_over_baseline_' + m for m in ratio_metrics])
+    for mode, workload, threads in sorted(medians):
+        if mode != 'fast':
+            continue
+        for baseline in ['native', 'native-matched', 'otel']:
+            key = (baseline, workload, threads)
+            if key in medians:
+                writer.writerow([workload, threads, 'fast', baseline] + [medians[(mode, workload, threads)][m] / medians[key][m] for m in ratio_metrics])
 PY
 printf 'Retained results and provenance in %s\n' "$output"

@@ -201,10 +201,11 @@ Run a final event drain after application tasks stop and spans close. Applicatio
 requiring durable delivery must retain failed batches themselves. No standalone
 event is automatically converted into a fake span or silently exported as logs.
 
-## Matched tracing benchmark
+## Native and tracing benchmark
 
 The [benchmark guide](../../docs/tracing-benchmark.md) describes the retained-count
-contract, timings, repeated-run script, and limitations. There is no speed claim
-for this adapter before fresh measurements. Existing native-span versus SDK
-benchmarks measure different frontends and retention policies; their ratios do
-not establish tracing-layer performance.
+contract, timings, repeated-run script, and limitations. It includes ordinary
+native and payload-matched native baselines, tracing FT/OTel backends, and two
+no-retention controls. There is no speed or native-parity claim for this adapter
+before fresh measurements. Historical native-span versus SDK ratios do not
+establish tracing-layer performance.

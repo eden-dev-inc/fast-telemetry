@@ -1,56 +1,110 @@
-# Comparing the tracing backends
+# Comparing native spans and tracing backends
 
-`fast-telemetry-tracing` provides `bench_tracing_backends`, a matched **in-memory
-retention** benchmark against `tracing-opentelemetry` 0.32 with OpenTelemetry SDK
-0.31. Both modes execute the exact same compiled `tracing` callsites through a
-registry, using scoped subscriber defaults explicitly installed on every worker.
-A disabled-subscriber control executes those callsites with recording disabled.
-Every script sample starts a fresh process; no process changes global subscribers
-or switches measured backends mid-run.
+`fast-telemetry-tracing` provides `bench_tracing_backends`, an **in-memory
+retention** benchmark with two native fast-telemetry baselines, two tracing
+backends, and two controls. The primary product target is ordinary native span
+performance. The payload-matched native baseline separately diagnoses the cost of
+retaining the adapter's extra metadata. Neither baseline is a substitute for the
+other, and no native parity or adapter speedup is asserted before measurements.
 
-No adapter speedup is asserted here. Historical native fast-telemetry versus SDK
-span ratios did not measure this layer and did not establish equal retention.
+| Mode | Frontend and retained output |
+| --- | --- |
+| `native` | Public `SpanCollector::start_span`, `Span::child`, `enter`, setters, `add_event`, and drop; user payload only |
+| `native-matched` | Same public native API, adding the exact fast-telemetry adapter metadata and event name |
+| `fast` | Shared tracing callsites through Registry and `FastTelemetryLayer` |
+| `otel` | Same tracing callsites through Registry and tracing-opentelemetry 0.32 / OpenTelemetry SDK 0.31 |
+| `disabled` | Same tracing callsites with `NoSubscriber`; no retention |
+| `registry` | Same tracing callsites through Registry alone; lifecycle/enter/exit without retained payloads |
+
+All tracing modes use scoped subscriber defaults explicitly installed on every
+worker. Every script sample starts a fresh process; no process changes global
+subscribers or switches measured backends mid-run. Native recording does not run
+through tracing or `SpanSink`. Historical native-versus-SDK results did not
+measure this adapter or establish equal retention; retain their original scope.
 
 ## Retention and workload contract
 
-Both backends retain all completed spans into one bounded immediate in-memory
-sink of the same configured capacity. Fast-telemetry uses `SpanSink` without
-adaptive sampling. OpenTelemetry uses explicit `Sampler::AlwaysOn` and a
-`SimpleSpanProcessor` with a custom bounded in-memory `SpanExporter`. There is no
-background drain race or unbounded in-memory history. On each synchronized batch,
-workers finish and stay alive while the coordinator drains the sinks. Next-batch
-recording starts only after the drain and verification. OpenTelemetry
-`force_flush` runs at the drain boundary. Neither backend sends HTTP traffic.
-This measures this immediate retention policy, not the default asynchronous
-OpenTelemetry batch processor or a production network exporter.
+Every recording mode must retain every completed span and event. Fast uses a
+bounded immediate `SpanSink` without adaptive sampling. OpenTelemetry uses
+`Sampler::AlwaysOn` and a `SimpleSpanProcessor` with a bounded in-memory exporter.
+Their configured `--capacity` is one shared item limit. Native uses its actual
+thread-local collector, whose constructor capacity arguments are ignored and
+whose shared outboxes have a fixed **4096 spans per worker** limit. These are
+different queue policies, even when identical work is retained.
 
-| Workload | Spans per iteration | Events per iteration | User payload |
+Each synchronized batch finishes while workers remain alive. Every native
+worker calls `flush_local` **inside the timed recording interval**, including
+partial batches below the automatic flush threshold. The coordinator then drains
+all outboxes; OpenTelemetry `force_flush` runs in its drain interval. Workers
+cannot start the next batch until drain, verification, and payload destruction
+finish. No backend sends network traffic or serializes protobufs. This measures
+immediate batch retention rather than a production asynchronous exporter.
+
+Native preflight rejects a configuration whose maximum measured **or warmup**
+batch exceeds 1024 completed spans per worker. Draining each batch below this
+pressure boundary keeps the ordinary native adaptive sampler at full retention;
+no native API or sampling policy is changed. Both phases independently require
+`sampled_out_count` delta zero and `recorded_count` delta equal to verified roots.
+Native's recorded counter counts `start_span` roots, not `Span::child` children,
+and its legacy dropped counter always returns zero. Exact inspection of **all
+actual drained completed spans** is required in addition to those counters.
+`--capacity` still appears in native rows to identify the shared experiment
+configuration, but does not configure native queues.
+
+| Workload | Spans / iteration | Events / iteration | User payload |
 | --- | ---: | ---: | --- |
 | `root` | 1 | 0 | Root lifecycle/enter/exit |
 | `attributes` | 2 | 1 | Root worker/iteration, child method/code, event ok/message |
 | `children` | 4 | 0 | Root and three distinct child names |
 
-Both layers record level, target, and source metadata. OpenTelemetry thread,
-activity-time, and context-activation extras are disabled because this adapter
-does not provide those facilities. Attribute names and event-message
-representation differ between backends; verification checks equivalent user
-payloads and relationships, not byte-identical metadata. This benchmark does not
-exercise the adapter's decimal-string policy for large integers, async polling,
-remote propagation, filtering, standalone logs, or durability; focused tests
-cover those semantics separately.
+Native and tracing explicitly enter every span. The ordinary native mode omits
+automatic tracing metadata and names its event `checkpoint`; this is the standard
+native API target, with a deliberately smaller output than the adapter. The
+`native-matched` and `fast` modes retain the same logical span/event/attribute
+payloads, including level, target, module, file, line, typed user values, and the
+tracing event name. Native static strings are naturally borrowed; the benchmark
+does not add string copies to imitate adapter ownership costs.
 
-Every batch inspects the **actual drained completed spans**, checking exact
-span/event/root/child/user-field counts, root names, child names, unique span
-identities, and parent/trace relationships. OpenTelemetry dropped-attribute/event
-counts and both sink rejection counters must be zero. The final accepted counter
-delta must equal the actual drained count. A mismatch exits nonzero. Focused
-regressions run both real sinks with deliberately insufficient capacity and
-require failure. The disabled control must drain zero spans/events.
+Before backend construction and timing, a metadata-only Layer executes the
+selected workload's exact shared tracing callsites once in **every mode**. It
+captures static metadata separately for that workload, including the correct
+root callsite and event. Native matched recording uses resolved static references
+and appends metadata through public native setters during timing. Metadata lookup
+and semantic verification are outside recording; payload construction,
+publication, and native flushes are inside. This setup introduces the same
+callsite registration before warmup in all modes.
+
+| Mode | Total attributes / iteration: root | attributes | children |
+| --- | ---: | ---: | ---: |
+| `native` | 0 | 6 | 0 |
+| `native-matched`, `fast` | 5 | 21 | 20 |
+| `disabled`, `registry` | 0 | 0 | 0 |
+
+The totals include event attributes and the event's `message` field.
+OpenTelemetry uses different metadata keys and represents the message as its
+event name; its actual attribute total is reported, without claiming identical
+metadata. Its thread, activity-time, and context-activation extras are disabled
+because this adapter does not provide them.
+
+Every batch verifies actual span/event/root/child/user-field counts, names,
+unique IDs, and parent/trace relationships. Fast and both native modes also check
+exact attribute keys, typed values, metadata values, event placement/name and
+lifecycle timestamps. Worker/iteration payloads must be unique and within the
+current batch. OpenTelemetry payload-limit loss and both bounded sink rejection
+counters must be zero; accepted counter deltas must equal actual drained spans.
+Controls must drain zero spans/events. A mismatch exits nonzero. Regressions cover
+all modes/workloads, partial native batches with live workers, the native pressure
+boundary, warmup pressure rejection, and insufficient bounded sink capacity.
+
+This benchmark does not exercise large integer conversion, async polling, remote
+propagation, filtering, standalone logs, or durability. Focused tests cover those
+semantics separately. Different frontend semantics and queue policies remain
+material limitations even when payloads match.
 
 ## Run on Adam
 
-Run through the engineering coordinator after static review and Adam's disk gate.
-No benchmark is added to CI. Rust 1.93 or newer is required.
+Run through the engineering coordinator after exact-head static review and Adam's
+disk/resource gate. No benchmark is added to CI. Rust 1.93 or newer is required.
 
 ```sh
 cargo test -p fast-telemetry-tracing --all-features
@@ -60,55 +114,78 @@ RUNS=5 THREADS='1 2 4 8' ITERS=10000 WARMUP=100 BATCH=64 CAPACITY=4096 \
 ```
 
 The script requires a clean committed worktree, builds once in release mode,
-then runs fresh samples with alternating fast/OTel order across repetitions. It
-retains each command, timestamp, CSV row, and stderr along with revision, host,
-kernel, Rust/Cargo versions, build log, binary checksum, dependency tree, and a
-copy/checksum of the resolved ignored Cargo.lock. `all-runs.csv` preserves every
-sample; `medians.csv` summarizes without discarding provenance or outliers.
-`ITERS` and `WARMUP` are **per thread**. Keep capacity at least
-`threads × min(batch, iterations) × spans_per_iteration` to retain each batch;
-undersizing is permitted and must fail the count contract.
+then runs fresh samples with rotated mode order across repetitions. `MODES` can
+select a subset; the default includes all six modes. It retains commands,
+timestamps, CSV rows, stderr, revision, host, kernel, Rust/Cargo versions, build
+log, binary checksum, dependency tree, and a copy/checksum of the resolved ignored
+Cargo.lock. `all-runs.csv` preserves every sample; `medians.csv` summarizes them.
+`comparisons.csv` reports fast/native, fast/native-matched, and fast/OTel CPU cost
+ratios separately. A ratio above one means fast costs more CPU per retained span.
+Controls are excluded from these ratios.
+
+`ITERS` and `WARMUP` are **per thread**. For fast/OTel, keep capacity at least
+`threads × min(batch, max(iterations, warmup)) × spans_per_iteration` to retain
+both phases; undersizing must fail. Native separately requires
+`min(batch, max(iterations, warmup)) × spans_per_iteration <= 1024` per worker.
+The default batch 64 creates at most 256 spans per native worker; eight workers
+create at most 2048 spans per shared sink batch.
 
 For an individual sample:
 
 ```sh
 cargo run --release -p fast-telemetry-tracing --features bench-tools \
   --bin bench_tracing_backends -- \
-  --mode fast --workload attributes --threads 4 --iters 10000 \
+  --mode native --workload attributes --threads 4 --iters 10000 \
   --warmup 100 --batch 64 --capacity 4096
 ```
 
-Use `--mode otel` or `--mode disabled` for the comparison. Fresh processes and
-multiple runs are needed for conclusions; a single debug build or successful
-submission count is not benchmark evidence. Preserve the lockfile from the run
-when reproducing dependency versions.
+Repeat with `native-matched`, `fast`, `otel`, `disabled`, and `registry`. Fresh
+processes and repeated samples are needed for conclusions; one debug run or a
+submission counter is not performance evidence. Preserve the run's lockfile when
+reproducing dependency versions.
 
 ## Read the timings
 
-Warmup follows the same drain/verification policy, is fully drained, and is
-excluded from reported times and accepted-count deltas. The measured run has a
-fresh counter baseline. All workers install their dispatch before their loop.
+The **same resident workers** execute warmup and measurement, preserving warmed
+TLS and queue storage without registering extra native warmup outboxes. Warmup
+uses the same retention/verification/destruction policy, is fully drained, and
+is excluded from reported intervals and measured counter deltas. A final barrier
+keeps workers alive through the last batch's drain and payload destruction.
 
-| Output | Interval |
+| Output | Interval or denominator |
 | --- | --- |
-| `record_wall_ns`, `record_cpu_ns` | Same synchronized recording intervals, including barrier coordination |
-| `drain_wall_ns`, `drain_cpu_ns` | Same intervals for draining; includes OTel force_flush, excludes semantic verification and destruction |
-| `verify_wall_ns`, `verify_cpu_ns` | Semantic checks and destruction of drained payloads |
-| `total_wall_ns` | Measured run including worker setup/join, all phases, and coordination; excludes warmup/backend setup |
-| `record_cpu_ns_per_iteration` | Recording CPU divided by workload iterations across all threads |
-| `record_cpu_ns_per_span` | Recording CPU divided by actual retained spans; `NA` for disabled |
-| `pipeline_cpu_ns_per_iteration`, `pipeline_cpu_ns_per_span` | Recording plus drain CPU, with the same denominators; verification excluded |
+| `record_wall_ns`, `record_cpu_ns` | Synchronized recording intervals, including barrier coordination and required native worker flushes |
+| `drain_wall_ns`, `drain_cpu_ns` | Moving retained structures out of queues, including OTel force_flush |
+| `verify_wall_ns`, `verify_cpu_ns` | Semantic checks and creation/destruction of verifier temporary structures; excludes destruction of actual retained payloads |
+| `destroy_wall_ns`, `destroy_cpu_ns` | Dropping actual drained payloads after borrowed verification returns |
+| `total_wall_ns` | Measured phase through final worker join, including all phases/counter checks/coordination; excludes metadata/backend setup, initial worker setup, and warmup |
+| `record_cpu_ns_per_iteration`, `record_cpu_ns_per_span` | Record CPU divided by workload iterations or actual retained spans |
+| `pipeline_cpu_ns_per_iteration`, `pipeline_cpu_ns_per_span` | Record plus drain CPU; verification and payload destruction excluded, preserving the earlier pipeline definition |
+| `pipeline_with_destroy_cpu_ns_per_iteration`, `pipeline_with_destroy_cpu_ns_per_span` | Record plus drain plus actual payload destruction CPU; the fuller retained-payload lifecycle diagnostic |
+| `attempted_spans` | Work iterations × spans per iteration in every mode, including no-retention controls |
+| `payload_attributes` | Actual total span and event attributes, including metadata and message fields |
+| `sampled_out`, `recorded_roots` | Native measured sampler/root counter deltas; integer zero for non-native modes, whose root counter is inapplicable |
+
+Per-retained-span metrics are `NA` for both controls. Compare controls by CPU per
+iteration or derive CPU per attempted span explicitly; no-retention ratios do not
+establish full-retention parity. Report fast/native **and** fast/native-matched
+side by side, emphasizing record+flush+drain and record+flush+drain+destruction.
+Ordinary native remains the product performance target. The latter matched
+comparison diagnoses metadata cost, not parity with the smaller native output.
 
 CPU is process CPU time from `CLOCK_PROCESS_CPUTIME_ID`, summed over all process
-threads; wall time uses `Instant`. CPU time is not elapsed latency, and a workload
-iteration is not a span when it creates children. Barrier overhead matters for
-small batches, especially the disabled control. Compare the same batch sizes,
-thread counts, and workload. Larger batches change queue contention, allocation,
-and coordination amortization; report the configuration with results.
+threads; wall time uses `Instant`. CPU is not elapsed latency, and an iteration
+may create multiple spans. Barrier overhead matters for small batches. Compare
+the same batch, workload and thread count and preserve the configuration.
+Derived wall rates must name their interval: record, record+drain,
+record+drain+destroy, or total (which includes verification).
 
-SDK conversion and simple-exporter invocation occur during OTel span closure;
-FT publication creates `CompletedSpan` during closure. Draining measures moving
-those retained structures, not protobuf encoding or transport. Adding the drain
-columns to recording does not produce an OTLP network cost. No cycles, full
-OpenTelemetry API parity, universal performance ratio, or durable-delivery claim
-can be inferred from these results.
+SDK conversion/export occurs during OTel span closure; FT `CompletedSpan`
+construction/publication occurs during closure; native public APIs construct and
+buffer the same completed structures on their actual native path. Production
+payload work is never deferred to verification. Backend/queue shutdown and network
+export are outside these lifecycle metrics. The split destruction interval and
+resident warmup differ from the older benchmark revision; historical verify and
+total columns must retain their original interpretation. No cycles, universal
+speed ratio, full OpenTelemetry API parity, or durable-delivery claim follows
+from these results.
