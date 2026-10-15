@@ -1,0 +1,36 @@
+[package]
+name = "fast-telemetry-tracing"
+version = "0.9.0"
+edition = "2024"
+authors.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Optional tracing layer and direct subscriber for fast-telemetry span collection"
+readme = "README.md"
+
+[features]
+default = []
+otlp = ["fast-telemetry/otlp-logs"]
+bench-tools = ["otlp", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry", "dep:libc"]
+
+[dependencies]
+fast-telemetry = { workspace = true }
+parking_lot.workspace = true
+thread_local = "1.1"
+tracing = "0.1.44"
+tracing-core = "0.1.36"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"] }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true, features = ["testing"] }
+tracing-opentelemetry = { version = "0.32.0", default-features = false, optional = true }
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
+tokio = { workspace = true, features = ["sync"] }
+
+[[bin]]
+name = "bench_tracing_backends"
+required-features = ["bench-tools"]

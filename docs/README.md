@@ -6,6 +6,8 @@ Long-form documentation for the `fast-telemetry` workspace.
 - [Getting started](getting-started.md)
 - [Runtime guide](runtime.md)
 - [Metrics and spans](metrics-and-spans.md)
+- [Tracing compatibility layer](../crates/fast-telemetry-tracing/README.md)
+- [Matched tracing backend benchmark](tracing-benchmark.md)
 - [Export adapters](exporters.md)
 - [API reference](reference.md)
 - [Benchmark harness](../crates/fast-telemetry/bench/README.md)

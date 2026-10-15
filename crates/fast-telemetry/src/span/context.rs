@@ -1,6 +1,6 @@
 //! Span context for W3C trace propagation and thread-local current span.
 //!
-//! `SpanContext` is an internal type used at two boundaries:
+//! `SpanContext` is a propagation value used at two boundaries:
 //! 1. **Cross-service propagation** — parsing/encoding W3C `traceparent` headers
 //! 2. **Logging integration** — thread-local "current span" surfaced via
 //!    [`current_trace_id()`] and [`current_span_id()`]
@@ -14,7 +14,7 @@ use super::ids::{SpanId, TraceId};
 
 /// Lightweight span context for W3C propagation and logging integration.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SpanContext {
+pub struct SpanContext {
     pub trace_id: TraceId,
     pub span_id: SpanId,
     pub trace_flags: u8,
@@ -34,8 +34,8 @@ impl SpanContext {
     pub fn from_traceparent(header: &str) -> Option<Self> {
         let bytes = header.as_bytes();
 
-        // Minimum length: 2 + 1 + 32 + 1 + 16 + 1 + 2 = 55
-        if bytes.len() < 55 {
+        // Version 00 has exactly 2 + 1 + 32 + 1 + 16 + 1 + 2 = 55 ASCII bytes.
+        if bytes.len() != 55 || !header.is_ascii() {
             return None;
         }
 
@@ -211,6 +211,16 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn version_zero_rejects_suffixes_and_non_ascii_without_panicking() {
+        let valid = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        assert!(SpanContext::from_traceparent(&format!("{valid}-extra")).is_none());
+        let mut unicode = valid.to_owned();
+        unicode.replace_range(34..36, "é");
+        assert_eq!(unicode.len(), 55);
+        assert!(SpanContext::from_traceparent(&unicode).is_none());
     }
 
     #[test]

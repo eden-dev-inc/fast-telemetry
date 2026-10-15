@@ -8,8 +8,10 @@ use fast_telemetry::otlp::{
     build_export_request, build_log_export_request, build_resource, build_trace_export_request, pb,
 };
 use fast_telemetry_export::otlp::{OtlpHttpClient, OtlpHttpConfig, OtlpHttpErrorKind};
+use fast_telemetry_export::spans::{SpanExportConfig, run as run_span_exporter};
 use flate2::read::GzDecoder;
 use prost::Message;
+use tokio_util::sync::CancellationToken;
 
 struct CapturedRequest {
     head: String,
@@ -188,6 +190,76 @@ async fn exports_logs_metrics_and_traces_through_the_shared_client() {
     pb::ExportTraceServiceRequest::decode(decoded_body(&trace_request).as_slice())
         .expect("decode traces");
 
+    server.join().expect("collector thread");
+}
+
+#[tokio::test]
+async fn span_exporter_drains_sharded_sink_and_reopens_its_capacity() {
+    use std::borrow::Cow;
+    use std::sync::Arc;
+
+    use fast_telemetry::{CompletedSpan, SpanCollector, SpanId, SpanKind, SpanStatus, TraceId};
+
+    let (endpoint, captured, server) = collector(2);
+    let span_collector = Arc::new(SpanCollector::new(1, 1));
+    let sink = span_collector.span_sink(8);
+    for _ in 0..2 {
+        thread::scope(|scope| {
+            for _ in 0..4 {
+                let sink = sink.clone();
+                scope.spawn(move || {
+                    for _ in 0..2 {
+                        assert!(
+                            sink.publish(CompletedSpan {
+                                trace_id: TraceId::random(),
+                                span_id: SpanId::random(),
+                                parent_span_id: SpanId::INVALID,
+                                name: Cow::Borrowed("adapter span"),
+                                kind: SpanKind::Internal,
+                                start_time_ns: 1,
+                                end_time_ns: 2,
+                                status: SpanStatus::Unset,
+                                attributes: Vec::new(),
+                                events: Vec::new(),
+                            })
+                            .is_ok()
+                        );
+                    }
+                });
+            }
+        });
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            run_span_exporter(
+                Arc::clone(&span_collector),
+                SpanExportConfig::new(&endpoint)
+                    .with_interval(Duration::from_secs(60))
+                    .with_max_batch_size(8),
+                cancel,
+            ),
+        )
+        .await
+        .expect("final span export");
+        assert!(span_collector.is_empty());
+        let request = captured
+            .recv_timeout(Duration::from_secs(1))
+            .expect("trace request");
+        assert!(request.head.starts_with("POST /v1/traces "));
+        let traces = pb::ExportTraceServiceRequest::decode(decoded_body(&request).as_slice())
+            .expect("decode traces");
+        let spans: Vec<_> = traces
+            .resource_spans
+            .iter()
+            .flat_map(|resource| &resource.scope_spans)
+            .flat_map(|scope| &scope.spans)
+            .collect();
+        assert_eq!(spans.len(), 8);
+        assert!(spans.iter().all(|span| span.name == "adapter span"));
+    }
+    assert_eq!(sink.accepted_count(), 16);
+    assert_eq!(sink.rejected_count(), 0);
     server.join().expect("collector thread");
 }
 
