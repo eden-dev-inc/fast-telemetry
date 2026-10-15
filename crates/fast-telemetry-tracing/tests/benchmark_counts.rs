@@ -15,17 +15,22 @@ fn row(csv: &str) -> std::collections::HashMap<&str, &str> {
 
 #[test]
 fn benchmark_checks_actual_completed_sinks_for_every_mode_and_workload() {
-    for mode in [
-        "native",
-        "native-matched",
-        "fast",
-        "otel",
-        "disabled",
-        "registry",
-    ] {
+    for (dispatch, mode) in ["scoped", "global"].into_iter().flat_map(|dispatch| {
+        [
+            "native",
+            "native-matched",
+            "fast",
+            "otel",
+            "disabled",
+            "registry",
+        ]
+        .map(|mode| (dispatch, mode))
+    }) {
         for workload in ["root", "attributes", "children"] {
             let output = Command::new(env!("CARGO_BIN_EXE_bench_tracing_backends"))
                 .args([
+                    "--dispatch",
+                    dispatch,
                     "--mode",
                     mode,
                     "--workload",
@@ -50,6 +55,7 @@ fn benchmark_checks_actual_completed_sinks_for_every_mode_and_workload() {
             );
             let csv = String::from_utf8(output.stdout).unwrap();
             let columns = row(&csv);
+            assert_eq!(columns["dispatch"], dispatch);
             let spans: u64 = columns["completed_spans"].parse().unwrap();
             let events: u64 = columns["events"].parse().unwrap();
             let retains = !["disabled", "registry"].contains(&mode);

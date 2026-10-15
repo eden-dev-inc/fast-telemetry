@@ -44,6 +44,21 @@ enum Workload {
     Children,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum DispatchMode {
+    Scoped,
+    Global,
+}
+
+impl DispatchMode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Scoped => "scoped",
+            Self::Global => "global",
+        }
+    }
+}
+
 impl Workload {
     fn spans(self) -> u64 {
         if self == Self::Root {
@@ -62,6 +77,7 @@ impl Workload {
 struct Options {
     mode: Mode,
     mode_name: String,
+    dispatch: DispatchMode,
     workload: Workload,
     workload_name: String,
     threads: usize,
@@ -76,6 +92,7 @@ impl Options {
         let mut options = Self {
             mode: Mode::Fast,
             mode_name: "fast".into(),
+            dispatch: DispatchMode::Scoped,
             workload: Workload::Root,
             workload_name: "root".into(),
             threads: 1,
@@ -110,6 +127,13 @@ impl Options {
                         _ => return Err("workload must be root, attributes, or children".into()),
                     };
                     options.workload_name = value;
+                }
+                "--dispatch" => {
+                    options.dispatch = match value.as_str() {
+                        "scoped" => DispatchMode::Scoped,
+                        "global" => DispatchMode::Global,
+                        _ => return Err("dispatch must be scoped or global".into()),
+                    };
                 }
                 "--threads" => options.threads = number(&value)?,
                 "--iters" => options.iterations = number(&value)?,
@@ -153,8 +177,8 @@ fn number(value: &str) -> Result<usize, String> {
         .ok_or_else(|| format!("expected positive integer: {value}"))
 }
 
-// These are the exact same callsites for every tracing mode. Worker defaults
-// are installed explicitly; nothing sets or changes the global subscriber.
+// These are the exact same callsites for every tracing mode and dispatch mode.
+// Scoped worker defaults or one process-global default are installed explicitly.
 #[inline(never)]
 fn instrument(workload: Workload, worker: usize, iteration: usize) {
     match workload {
@@ -894,14 +918,20 @@ fn measure(
                         || collector.flush_local(),
                     );
                 } else {
-                    tracing::dispatcher::with_default(&dispatch, || {
+                    let record = || {
                         worker_batches(
                             options,
                             barrier,
                             |iteration| instrument(options.workload, worker, iteration),
                             || {},
                         )
-                    });
+                    };
+                    match options.dispatch {
+                        DispatchMode::Scoped => {
+                            tracing::dispatcher::with_default(&dispatch, record)
+                        }
+                        DispatchMode::Global => record(),
+                    }
                 }
             });
         }
@@ -986,6 +1016,12 @@ fn run() -> Result<(), String> {
     let options = Options::parse()?;
     let metadata = WorkloadMetadata::capture(options.workload);
     let (backend, dispatch) = Backend::new(&options);
+    if options.dispatch == DispatchMode::Global {
+        // Each sample is a fresh process. Metadata capture's scoped subscriber
+        // has already been removed. Workers must use the actual global default,
+        // rather than wrapping this dispatch in thread-local scoped defaults.
+        tracing::dispatcher::set_global_default(dispatch.clone()).map_err(|e| e.to_string())?;
+    }
     // Warmup runs the same retention/verification policy, fully drains, and is
     // excluded from all reported intervals and measured counter deltas.
     let timings = measure(&backend, &dispatch, &options, &metadata)?;
@@ -1011,10 +1047,10 @@ fn run() -> Result<(), String> {
         )
     };
     println!(
-        "mode,workload,threads,iters_per_thread,warmup_per_thread,batch_per_thread,capacity,work_iterations,completed_spans,events,dropped,record_wall_ns,record_cpu_ns,drain_wall_ns,drain_cpu_ns,verify_wall_ns,verify_cpu_ns,total_wall_ns,record_cpu_ns_per_iteration,record_cpu_ns_per_span,pipeline_cpu_ns_per_iteration,pipeline_cpu_ns_per_span,sampled_out,recorded_roots,payload_attributes,destroy_wall_ns,destroy_cpu_ns,pipeline_with_destroy_cpu_ns_per_iteration,pipeline_with_destroy_cpu_ns_per_span,attempted_spans"
+        "mode,workload,threads,iters_per_thread,warmup_per_thread,batch_per_thread,capacity,work_iterations,completed_spans,events,dropped,record_wall_ns,record_cpu_ns,drain_wall_ns,drain_cpu_ns,verify_wall_ns,verify_cpu_ns,total_wall_ns,record_cpu_ns_per_iteration,record_cpu_ns_per_span,pipeline_cpu_ns_per_iteration,pipeline_cpu_ns_per_span,sampled_out,recorded_roots,payload_attributes,destroy_wall_ns,destroy_cpu_ns,pipeline_with_destroy_cpu_ns_per_iteration,pipeline_with_destroy_cpu_ns_per_span,attempted_spans,dispatch"
     );
     println!(
-        "{},{},{},{},{},{},{},{},{},{},0,{},{},{},{},{},{},{},{:.3},{},{:.3},{},{},{},{},{},{},{:.3},{},{}",
+        "{},{},{},{},{},{},{},{},{},{},0,{},{},{},{},{},{},{},{:.3},{},{:.3},{},{},{},{},{},{},{:.3},{},{},{}",
         options.mode_name,
         options.workload_name,
         options.threads,
@@ -1043,7 +1079,8 @@ fn run() -> Result<(), String> {
         timings.destroy_cpu,
         pipeline_with_destroy_cpu as f64 / work as f64,
         pipeline_with_destroy_per_span,
-        work * options.workload.spans()
+        work * options.workload.spans(),
+        options.dispatch.name()
     );
     Ok(())
 }

@@ -16,7 +16,9 @@ batch="${BATCH:-64}"
 capacity="${CAPACITY:-4096}"
 warmup="${WARMUP:-100}"
 read -r -a modes <<< "${MODES:-native native-matched fast otel disabled registry}"
+read -r -a dispatches <<< "${DISPATCHES:-scoped}"
 (( ${#modes[@]} > 0 )) || { echo 'MODES must not be empty' >&2; exit 1; }
+(( ${#dispatches[@]} > 0 )) || { echo 'DISPATCHES must not be empty' >&2; exit 1; }
 [[ "$runs" =~ ^[1-9][0-9]*$ ]] || { echo 'RUNS must be positive' >&2; exit 1; }
 {
   date -u
@@ -26,7 +28,7 @@ read -r -a modes <<< "${MODES:-native native-matched fast otel disabled registry
   cargo -V
   git rev-parse HEAD
   git status --porcelain
-  printf 'ITERS=%s THREADS=%s RUNS=%s BATCH=%s CAPACITY=%s WARMUP=%s MODES=%s\n' "$iterations" "$threads" "$runs" "$batch" "$capacity" "$warmup" "${modes[*]}"
+  printf 'ITERS=%s THREADS=%s RUNS=%s BATCH=%s CAPACITY=%s WARMUP=%s MODES=%s DISPATCHES=%s\n' "$iterations" "$threads" "$runs" "$batch" "$capacity" "$warmup" "${modes[*]}" "${dispatches[*]}"
   printf 'RUSTFLAGS=%s CARGO_PROFILE_RELEASE_LTO=%s\n' "${RUSTFLAGS:-}" "${CARGO_PROFILE_RELEASE_LTO:-}"
 } > "$output/provenance.txt"
 cargo build --release -p fast-telemetry-tracing --features bench-tools --bin bench_tracing_backends > "$output/build.log" 2>&1
@@ -40,12 +42,14 @@ for ((run=1; run<=runs; run++)); do
     for thread_count in $threads; do
       for ((offset=0; offset<${#modes[@]}; offset++)); do
         mode="${modes[(run - 1 + offset) % ${#modes[@]}]}"
-        name="run-${run}-${workload}-${thread_count}-${mode}"
-        args=(--mode "$mode" --workload "$workload" --threads "$thread_count" --iters "$iterations" --warmup "$warmup" --batch "$batch" --capacity "$capacity")
-        printf '%q ' "$binary" "${args[@]}" > "$output/$name.command"
-        printf '\n' >> "$output/$name.command"
-        date -u +%FT%TZ > "$output/$name.started"
-        "$binary" "${args[@]}" > "$output/$name.csv" 2> "$output/$name.stderr"
+        for dispatch in "${dispatches[@]}"; do
+          name="run-${run}-${workload}-${thread_count}-${mode}-${dispatch}"
+          args=(--mode "$mode" --dispatch "$dispatch" --workload "$workload" --threads "$thread_count" --iters "$iterations" --warmup "$warmup" --batch "$batch" --capacity "$capacity")
+          printf '%q ' "$binary" "${args[@]}" > "$output/$name.command"
+          printf '\n' >> "$output/$name.command"
+          date -u +%FT%TZ > "$output/$name.started"
+          "$binary" "${args[@]}" > "$output/$name.csv" 2> "$output/$name.stderr"
+        done
       done
     done
   done
@@ -70,10 +74,10 @@ metrics = ['record_cpu_ns_per_iteration', 'record_cpu_ns_per_span', 'pipeline_cp
 medians = {}
 with (root / 'medians.csv').open('w') as stream:
     writer = csv.writer(stream)
-    writer.writerow(['mode', 'workload', 'threads', 'runs'] + metrics)
-    groups = sorted({(r['mode'], r['workload'], r['threads']) for r in rows})
+    writer.writerow(['mode', 'workload', 'threads', 'dispatch', 'runs'] + metrics)
+    groups = sorted({(r['mode'], r['workload'], r['threads'], r['dispatch']) for r in rows})
     for group in groups:
-        members = [r for r in rows if (r['mode'], r['workload'], r['threads']) == group]
+        members = [r for r in rows if (r['mode'], r['workload'], r['threads'], r['dispatch']) == group]
         values = ['NA' if members[0][m] == 'NA' else statistics.median(float(r[m]) for r in members) for m in metrics]
         writer.writerow(list(group) + [len(members)] + values)
         medians[group] = dict(zip(metrics, values))
@@ -82,13 +86,13 @@ with (root / 'medians.csv').open('w') as stream:
 with (root / 'comparisons.csv').open('w') as stream:
     writer = csv.writer(stream)
     ratio_metrics = ['record_cpu_ns_per_span', 'pipeline_cpu_ns_per_span', 'pipeline_with_destroy_cpu_ns_per_span']
-    writer.writerow(['workload', 'threads', 'numerator', 'denominator'] + ['fast_over_baseline_' + m for m in ratio_metrics])
-    for mode, workload, threads in sorted(medians):
+    writer.writerow(['workload', 'threads', 'dispatch', 'numerator', 'denominator'] + ['fast_over_baseline_' + m for m in ratio_metrics])
+    for mode, workload, threads, dispatch in sorted(medians):
         if mode != 'fast':
             continue
         for baseline in ['native', 'native-matched', 'otel']:
-            key = (baseline, workload, threads)
+            key = (baseline, workload, threads, dispatch)
             if key in medians:
-                writer.writerow([workload, threads, 'fast', baseline] + [medians[(mode, workload, threads)][m] / medians[key][m] for m in ratio_metrics])
+                writer.writerow([workload, threads, dispatch, 'fast', baseline] + [medians[(mode, workload, threads, dispatch)][m] / medians[key][m] for m in ratio_metrics])
 PY
 printf 'Retained results and provenance in %s\n' "$output"

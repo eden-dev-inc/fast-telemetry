@@ -16,11 +16,25 @@ other, and no native parity or adapter speedup is asserted before measurements.
 | `disabled` | Same tracing callsites with `NoSubscriber`; no retention |
 | `registry` | Same tracing callsites through Registry alone; lifecycle/enter/exit without retained payloads |
 
-All tracing modes use scoped subscriber defaults explicitly installed on every
-worker. Every script sample starts a fresh process; no process changes global
-subscribers or switches measured backends mid-run. Native recording does not run
-through tracing or `SpanSink`. Historical native-versus-SDK results did not
-measure this adapter or establish equal retention; retain their original scope.
+`--dispatch scoped` (the default) explicitly installs a scoped subscriber on every
+tracing worker. `--dispatch global` installs one process-global subscriber after
+metadata capture and before warmup, and workers use that global default without
+scoped overrides. Every sample starts a fresh process; a global subscriber is set
+once, and no process switches measured backends mid-run. Native recording does
+not run through tracing or `SpanSink`; its selected dispatch setup is still
+performed outside timing for a consistent experiment configuration. Historical
+native-versus-SDK results did not measure this adapter or establish equal
+retention; retain their original scope.
+
+Dispatch installation is a material benchmark input. In tracing-core 0.1.36,
+scoped dispatches own an `Arc`, while the global dispatch uses a static subscriber
+reference. Tracing 0.1.44 clones a dispatch when constructing an enabled span.
+Workers sharing one scoped dispatch can therefore contend on that shared
+reference count. A scoped Registry-only measurement is not an irreducible cost
+floor for applications using a global subscriber. Compare each backend against
+native and the controls under the same dispatch setting; report scoped and global
+results separately. Global setup intentionally retains its subscriber for the
+process lifetime; shutdown is outside timing in both settings.
 
 ## Retention and workload contract
 
@@ -115,12 +129,15 @@ RUNS=5 THREADS='1 2 4 8' ITERS=10000 WARMUP=100 BATCH=64 CAPACITY=4096 \
 
 The script requires a clean committed worktree, builds once in release mode,
 then runs fresh samples with rotated mode order across repetitions. `MODES` can
-select a subset; the default includes all six modes. It retains commands,
+select a subset; the default includes all six modes. `DISPATCHES` defaults to
+`scoped`; set `DISPATCHES='scoped global'` to measure both installations in
+separate fresh processes, or `DISPATCHES=global` for the global control. It retains commands,
 timestamps, CSV rows, stderr, revision, host, kernel, Rust/Cargo versions, build
 log, binary checksum, dependency tree, and a copy/checksum of the resolved ignored
 Cargo.lock. `all-runs.csv` preserves every sample; `medians.csv` summarizes them.
 `comparisons.csv` reports fast/native, fast/native-matched, and fast/OTel CPU cost
-ratios separately. A ratio above one means fast costs more CPU per retained span.
+ratios separately for each dispatch setting. A ratio above one means fast costs
+more CPU per retained span.
 Controls are excluded from these ratios.
 
 `ITERS` and `WARMUP` are **per thread**. For fast/OTel, keep capacity at least
@@ -139,7 +156,8 @@ cargo run --release -p fast-telemetry-tracing --features bench-tools \
   --warmup 100 --batch 64 --capacity 4096
 ```
 
-Repeat with `native-matched`, `fast`, `otel`, `disabled`, and `registry`. Fresh
+Add `--dispatch global` for the global installation. Repeat with
+`native-matched`, `fast`, `otel`, `disabled`, and `registry`. Fresh
 processes and repeated samples are needed for conclusions; one debug run or a
 submission counter is not performance evidence. Preserve the run's lockfile when
 reproducing dependency versions.
@@ -154,6 +172,7 @@ keeps workers alive through the last batch's drain and payload destruction.
 
 | Output | Interval or denominator |
 | --- | --- |
+| `dispatch` | `scoped` worker defaults or one `global` process default; never aggregate them together |
 | `record_wall_ns`, `record_cpu_ns` | Synchronized recording intervals, including barrier coordination and required native worker flushes |
 | `drain_wall_ns`, `drain_cpu_ns` | Moving retained structures out of queues, including OTel force_flush |
 | `verify_wall_ns`, `verify_cpu_ns` | Semantic checks and creation/destruction of verifier temporary structures; excludes destruction of actual retained payloads |
