@@ -415,11 +415,56 @@ impl Subscriber for FastTelemetrySubscriber {
         attrs.record(&mut fields);
         self.metadata_fields(attrs.metadata(), &mut fields);
         let id = Id::from_u64(next_id());
-        let parent_id = if attrs.is_contextual() {
+        let mut parent_id = if attrs.is_contextual() {
             self.current_id()
         } else {
             attrs.parent().cloned()
         };
+        if let Some(parent) = &parent_id {
+            let shard = self.shard(&id);
+            if std::ptr::eq(shard, self.shard(parent)) {
+                // Prepare clock/RNG work before the single parent/child guard.
+                let span_id = SpanId::random();
+                let start_time_ns = now_ns();
+                let mut spans = shard.lock();
+                let context = spans.get_mut(&parent.into_u64()).map(|span| {
+                    Self::retain(span);
+                    span.state.context()
+                });
+                if let Some(context) = context {
+                    // The parent borrow has ended; overflow insertion may rehash.
+                    let state = State {
+                        trace_flags: context.trace_flags,
+                        span: CompletedSpan {
+                            trace_id: context.trace_id,
+                            span_id,
+                            parent_span_id: context.span_id,
+                            name: Cow::Borrowed(attrs.metadata().name()),
+                            kind: SpanKind::Internal,
+                            start_time_ns,
+                            end_time_ns: 0,
+                            status: SpanStatus::Unset,
+                            attributes: fields.0,
+                            events: Vec::new(),
+                        },
+                    };
+                    spans.insert_fresh(
+                        id.into_u64(),
+                        LiveSpan {
+                            metadata: attrs.metadata(),
+                            parent: Some(parent.clone()),
+                            refs: 1,
+                            state,
+                        },
+                    );
+                    return id;
+                }
+                drop(spans);
+                // A missing same-shard parent becomes an ordinary root. Discard
+                // preparation and pay fresh root RNG/clock work after unlocking.
+                parent_id = None;
+            }
+        }
         let parent = parent_id.and_then(|id| {
             let mut spans = self.shard(&id).lock();
             let span = spans.get_mut(&id.into_u64())?;
