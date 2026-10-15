@@ -1,17 +1,21 @@
 # Comparing native spans and tracing backends
 
 `fast-telemetry-tracing` provides `bench_tracing_backends`, an **in-memory
-retention** benchmark with two native fast-telemetry baselines, two tracing
-backends, and two controls. The primary product target is ordinary native span
-performance. The payload-matched native baseline separately diagnoses the cost of
-retaining the adapter's extra metadata. Neither baseline is a substitute for the
-other, and no native parity or adapter speedup is asserted before measurements.
+retention** benchmark with three native fast-telemetry baselines, the composable
+tracing layer, two direct-subscriber profiles, OpenTelemetry, and two controls.
+The primary product target is ordinary native span performance. Exact full and
+user-fields native payload controls separately diagnose metadata and frontend
+cost. These controls do not replace ordinary native, and no native parity or
+adapter speedup is asserted before measurements.
 
 | Mode | Frontend and retained output |
 | --- | --- |
 | `native` | Public `SpanCollector::start_span`, `Span::child`, `enter`, setters, `add_event`, and drop; user payload only |
 | `native-matched` | Same public native API, adding the exact fast-telemetry adapter metadata and event name |
+| `native-user-fields` | Ordinary native user attributes with the exact tracing event name; no automatic metadata |
 | `fast` | Shared tracing callsites through Registry and `FastTelemetryLayer` |
+| `direct` | Same tracing callsites through the standalone `FastTelemetrySubscriber`, default full metadata |
+| `direct-user-fields` | Same direct subscriber with explicit `MetadataPolicy::UserFields` |
 | `otel` | Same tracing callsites through Registry and tracing-opentelemetry 0.32 / OpenTelemetry SDK 0.31 |
 | `disabled` | Same tracing callsites with `NoSubscriber`; no retention |
 | `registry` | Same tracing callsites through Registry alone; lifecycle/enter/exit without retained payloads |
@@ -38,7 +42,8 @@ process lifetime; shutdown is outside timing in both settings.
 
 ## Retention and workload contract
 
-Every recording mode must retain every completed span and event. Fast uses a
+Every recording mode must retain every completed span and event. All three FT
+tracing modes use the same
 bounded immediate `SpanSink` without adaptive sampling. OpenTelemetry uses
 `Sampler::AlwaysOn` and a `SimpleSpanProcessor` with a bounded in-memory exporter.
 Their configured `--capacity` is one shared item limit. Native uses its actual
@@ -74,10 +79,18 @@ configuration, but does not configure native queues.
 Native and tracing explicitly enter every span. The ordinary native mode omits
 automatic tracing metadata and names its event `checkpoint`; this is the standard
 native API target, with a deliberately smaller output than the adapter. The
-`native-matched` and `fast` modes retain the same logical span/event/attribute
+`native-matched`, `fast`, and `direct` modes retain the same logical span/event/attribute
 payloads, including level, target, module, file, line, typed user values, and the
 tracing event name. Native static strings are naturally borrowed; the benchmark
 does not add string copies to imitate adapter ownership costs.
+
+`direct-user-fields` deliberately excludes automatic metadata attributes while
+preserving user fields and tracing span/event names. Its exact native control is
+`native-user-fields`, which uses the ordinary public native API with the
+pre-resolved tracing event name. These two modes retain identical logical
+payloads. Ordinary `native` retains its natural `checkpoint` event name and
+remains the primary product target; do not present a smaller profile as default
+full-metadata parity.
 
 Before backend construction and timing, a metadata-only Layer executes the
 selected workload's exact shared tracing callsites once in **every mode**. It
@@ -91,7 +104,8 @@ callsite registration before warmup in all modes.
 | Mode | Total attributes / iteration: root | attributes | children |
 | --- | ---: | ---: | ---: |
 | `native` | 0 | 6 | 0 |
-| `native-matched`, `fast` | 5 | 21 | 20 |
+| `native-user-fields`, `direct-user-fields` | 0 | 6 | 0 |
+| `native-matched`, `fast`, `direct` | 5 | 21 | 20 |
 | `disabled`, `registry` | 0 | 0 | 0 |
 
 The totals include event attributes and the event's `message` field.
@@ -101,7 +115,7 @@ metadata. Its thread, activity-time, and context-activation extras are disabled
 because this adapter does not provide them.
 
 Every batch verifies actual span/event/root/child/user-field counts, names,
-unique IDs, and parent/trace relationships. Fast and both native modes also check
+unique IDs, and parent/trace relationships. All FT and native modes also check
 exact attribute keys, typed values, metadata values, event placement/name and
 lifecycle timestamps. Worker/iteration payloads must be unique and within the
 current batch. OpenTelemetry payload-limit loss and both bounded sink rejection
@@ -129,18 +143,19 @@ RUNS=5 THREADS='1 2 4 8' ITERS=10000 WARMUP=100 BATCH=64 CAPACITY=4096 \
 
 The script requires a clean committed worktree, builds once in release mode,
 then runs fresh samples with rotated mode order across repetitions. `MODES` can
-select a subset; the default includes all six modes. `DISPATCHES` defaults to
+select a subset; the default includes all nine modes. `DISPATCHES` defaults to
 `scoped`; set `DISPATCHES='scoped global'` to measure both installations in
 separate fresh processes, or `DISPATCHES=global` for the global control. It retains commands,
 timestamps, CSV rows, stderr, revision, host, kernel, Rust/Cargo versions, build
 log, binary checksum, dependency tree, and a copy/checksum of the resolved ignored
 Cargo.lock. `all-runs.csv` preserves every sample; `medians.csv` summarizes them.
-`comparisons.csv` reports fast/native, fast/native-matched, and fast/OTel CPU cost
-ratios separately for each dispatch setting. A ratio above one means fast costs
-more CPU per retained span.
+`comparisons.csv` reports each FT tracing mode over native, native-matched, and
+OTel CPU cost, plus direct-user-fields/native-user-fields, separately for each
+dispatch setting. The `numerator` and `denominator` columns identify each ratio;
+a ratio above one means the numerator costs more CPU per retained span.
 Controls are excluded from these ratios.
 
-`ITERS` and `WARMUP` are **per thread**. For fast/OTel, keep capacity at least
+`ITERS` and `WARMUP` are **per thread**. For FT tracing/OTel, keep capacity at least
 `threads × min(batch, max(iterations, warmup)) × spans_per_iteration` to retain
 both phases; undersizing must fail. Native separately requires
 `min(batch, max(iterations, warmup)) × spans_per_iteration <= 1024` per worker.
@@ -157,7 +172,8 @@ cargo run --release -p fast-telemetry-tracing --features bench-tools \
 ```
 
 Add `--dispatch global` for the global installation. Repeat with
-`native-matched`, `fast`, `otel`, `disabled`, and `registry`. Fresh
+`native-matched`, `native-user-fields`, `fast`, `direct`, `direct-user-fields`,
+`otel`, `disabled`, and `registry`. Fresh
 processes and repeated samples are needed for conclusions; one debug run or a
 submission counter is not performance evidence. Preserve the run's lockfile when
 reproducing dependency versions.
@@ -187,8 +203,9 @@ keeps workers alive through the last batch's drain and payload destruction.
 
 Per-retained-span metrics are `NA` for both controls. Compare controls by CPU per
 iteration or derive CPU per attempted span explicitly; no-retention ratios do not
-establish full-retention parity. Report fast/native **and** fast/native-matched
-side by side, emphasizing record+flush+drain and record+flush+drain+destruction.
+establish full-retention parity. Report each FT backend/native **and** its exact
+native payload control side by side, emphasizing record+flush+drain and
+record+flush+drain+destruction.
 Ordinary native remains the product performance target. The latter matched
 comparison diagnoses metadata cost, not parity with the smaller native output.
 

@@ -9,7 +9,9 @@ use std::time::Instant;
 use fast_telemetry::{
     CompletedSpan, Span, SpanAttribute, SpanCollector, SpanKind, SpanStatus, SpanValue,
 };
-use fast_telemetry_tracing::{FastTelemetryLayer, LayerHandle};
+use fast_telemetry_tracing::{
+    FastTelemetryLayer, FastTelemetrySubscriber, LayerHandle, MetadataPolicy,
+};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_sdk::error::{OTelSdkError, OTelSdkResult};
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, SpanData, SpanExporter};
@@ -22,7 +24,10 @@ use tracing_subscriber::layer::SubscriberExt;
 enum Mode {
     Native,
     NativeMatched,
+    NativeUserFields,
     Fast,
+    Direct,
+    DirectUserFields,
     Otel,
     Disabled,
     Registry,
@@ -30,11 +35,18 @@ enum Mode {
 
 impl Mode {
     fn is_native(self) -> bool {
-        matches!(self, Self::Native | Self::NativeMatched)
+        matches!(
+            self,
+            Self::Native | Self::NativeMatched | Self::NativeUserFields
+        )
     }
 
     fn retains(self) -> bool {
         !matches!(self, Self::Disabled | Self::Registry)
+    }
+
+    fn metadata(self) -> bool {
+        matches!(self, Self::NativeMatched | Self::Fast | Self::Direct)
     }
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -111,11 +123,14 @@ impl Options {
                     options.mode = match value.as_str() {
                         "native" => Mode::Native,
                         "native-matched" => Mode::NativeMatched,
+                        "native-user-fields" => Mode::NativeUserFields,
                         "fast" => Mode::Fast,
+                        "direct" => Mode::Direct,
+                        "direct-user-fields" => Mode::DirectUserFields,
                         "otel" => Mode::Otel,
                         "disabled" => Mode::Disabled,
                         "registry" => Mode::Registry,
-                        _ => return Err("mode must be native, native-matched, fast, otel, disabled, or registry".into()),
+                        _ => return Err("mode must be native, native-matched, native-user-fields, fast, direct, direct-user-fields, otel, disabled, or registry".into()),
                     };
                     options.mode_name = value;
                 }
@@ -309,11 +324,13 @@ fn visit_metadata(metadata: &'static Metadata<'static>, mut emit: impl FnMut(Spa
 #[inline(never)]
 fn instrument_native(
     collector: &Arc<SpanCollector>,
-    metadata: Option<&NativeMetadata>,
+    callsites: &NativeMetadata,
+    mode: Mode,
     workload: Workload,
     worker: usize,
     iteration: usize,
 ) {
+    let metadata = mode.metadata().then_some(callsites);
     let mut root = collector.start_span("root", SpanKind::Internal);
     if workload == Workload::Attributes {
         root.set_attribute("worker", worker as i64);
@@ -344,6 +361,11 @@ fn instrument_native(
                 let event = metadata.event.expect("attributes callsite has an event");
                 visit_metadata(event, |attribute| attributes.push(attribute));
                 event.name()
+            } else if mode == Mode::NativeUserFields {
+                callsites
+                    .event
+                    .expect("attributes callsite has an event")
+                    .name()
             } else {
                 "checkpoint"
             };
@@ -428,7 +450,7 @@ struct Counters {
 impl Backend {
     fn new(options: &Options) -> (Self, Dispatch) {
         match options.mode {
-            Mode::Native | Mode::NativeMatched => (
+            Mode::Native | Mode::NativeMatched | Mode::NativeUserFields => (
                 Self::Native {
                     collector: Arc::new(SpanCollector::new(1, 1)),
                 },
@@ -446,6 +468,21 @@ impl Backend {
                     Self::Fast { collector, handle },
                     Dispatch::new(Registry::default().with(layer)),
                 )
+            }
+            Mode::Direct | Mode::DirectUserFields => {
+                let collector = Arc::new(SpanCollector::new(1, 1));
+                let subscriber = FastTelemetrySubscriber::with_capacity(
+                    collector.clone(),
+                    options.capacity,
+                    options.capacity,
+                )
+                .with_metadata_policy(if options.mode.metadata() {
+                    MetadataPolicy::Full
+                } else {
+                    MetadataPolicy::UserFields
+                });
+                let handle = subscriber.handle();
+                (Self::Fast { collector, handle }, Dispatch::new(subscriber))
             }
             Mode::Otel => {
                 let exporter = BoundedExporter(Arc::new(ExportQueue {
@@ -586,7 +623,7 @@ fn verify_native_payloads(
     iterations: usize,
     metadata: &WorkloadMetadata,
 ) -> Result<(), String> {
-    let with_metadata = options.mode != Mode::Native;
+    let with_metadata = options.mode.metadata();
     let mut root_work = HashSet::new();
     for span in spans {
         let callsite = metadata
@@ -650,7 +687,7 @@ fn verify_native_payloads(
             };
             expected.insert("ok".into(), PayloadValue::Bool(true));
             expected.insert("message".into(), PayloadValue::String("checkpoint".into()));
-            let name = if with_metadata {
+            let name = if options.mode != Mode::Native {
                 callsite.name()
             } else {
                 "checkpoint"
@@ -902,14 +939,14 @@ fn measure(
             let native_metadata = &native_metadata;
             scope.spawn(move || {
                 if let Backend::Native { collector } = backend {
-                    let matched = (options.mode == Mode::NativeMatched).then_some(native_metadata);
                     worker_batches(
                         options,
                         barrier,
                         |iteration| {
                             instrument_native(
                                 collector,
-                                matched,
+                                native_metadata,
+                                options.mode,
                                 options.workload,
                                 worker,
                                 iteration,

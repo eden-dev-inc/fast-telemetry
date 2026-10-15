@@ -19,7 +19,10 @@ fn benchmark_checks_actual_completed_sinks_for_every_mode_and_workload() {
         [
             "native",
             "native-matched",
+            "native-user-fields",
             "fast",
+            "direct",
+            "direct-user-fields",
             "otel",
             "disabled",
             "registry",
@@ -89,8 +92,9 @@ fn benchmark_checks_actual_completed_sinks_for_every_mode_and_workload() {
             );
             if mode != "otel" {
                 let attributes = match (mode, workload) {
-                    ("native", "attributes") => 6,
-                    ("native", _) | ("disabled" | "registry", _) => 0,
+                    ("native" | "native-user-fields" | "direct-user-fields", "attributes") => 6,
+                    ("native" | "native-user-fields" | "direct-user-fields", _)
+                    | ("disabled" | "registry", _) => 0,
                     (_, "root") => 5,
                     (_, "attributes") => 21,
                     (_, "children") => 20,
@@ -114,7 +118,7 @@ fn benchmark_checks_actual_completed_sinks_for_every_mode_and_workload() {
 
 #[test]
 fn native_retains_full_boundary_batches_and_partial_batches_with_workers_alive() {
-    for mode in ["native", "native-matched"] {
+    for mode in ["native", "native-matched", "native-user-fields"] {
         let output = Command::new(env!("CARGO_BIN_EXE_bench_tracing_backends"))
             .args([
                 "--mode",
@@ -149,7 +153,7 @@ fn native_retains_full_boundary_batches_and_partial_batches_with_workers_alive()
 
 #[test]
 fn native_rejects_sampling_pressure_in_measured_and_warmup_batches() {
-    for mode in ["native", "native-matched"] {
+    for mode in ["native", "native-matched", "native-user-fields"] {
         for (iterations, warmup) in [("257", "0"), ("1", "257")] {
             let output = Command::new(env!("CARGO_BIN_EXE_bench_tracing_backends"))
                 .args([
@@ -180,7 +184,7 @@ fn native_rejects_sampling_pressure_in_measured_and_warmup_batches() {
 
 #[test]
 fn benchmark_exits_nonzero_when_real_sinks_lose_spans() {
-    for mode in ["fast", "otel"] {
+    for mode in ["fast", "direct", "direct-user-fields", "otel"] {
         let output = Command::new(env!("CARGO_BIN_EXE_bench_tracing_backends"))
             .args([
                 "--mode",

@@ -15,7 +15,7 @@ runs="${RUNS:-5}"
 batch="${BATCH:-64}"
 capacity="${CAPACITY:-4096}"
 warmup="${WARMUP:-100}"
-read -r -a modes <<< "${MODES:-native native-matched fast otel disabled registry}"
+read -r -a modes <<< "${MODES:-native native-matched native-user-fields fast direct direct-user-fields otel disabled registry}"
 read -r -a dispatches <<< "${DISPATCHES:-scoped}"
 (( ${#modes[@]} > 0 )) || { echo 'MODES must not be empty' >&2; exit 1; }
 (( ${#dispatches[@]} > 0 )) || { echo 'DISPATCHES must not be empty' >&2; exit 1; }
@@ -86,13 +86,16 @@ with (root / 'medians.csv').open('w') as stream:
 with (root / 'comparisons.csv').open('w') as stream:
     writer = csv.writer(stream)
     ratio_metrics = ['record_cpu_ns_per_span', 'pipeline_cpu_ns_per_span', 'pipeline_with_destroy_cpu_ns_per_span']
-    writer.writerow(['workload', 'threads', 'dispatch', 'numerator', 'denominator'] + ['fast_over_baseline_' + m for m in ratio_metrics])
+    writer.writerow(['workload', 'threads', 'dispatch', 'numerator', 'denominator'] + ['numerator_over_baseline_' + m for m in ratio_metrics])
     for mode, workload, threads, dispatch in sorted(medians):
-        if mode != 'fast':
+        if mode not in ['fast', 'direct', 'direct-user-fields']:
             continue
-        for baseline in ['native', 'native-matched', 'otel']:
+        baselines = ['native', 'native-matched', 'otel']
+        if mode == 'direct-user-fields':
+            baselines.append('native-user-fields')
+        for baseline in baselines:
             key = (baseline, workload, threads, dispatch)
             if key in medians:
-                writer.writerow([workload, threads, dispatch, 'fast', baseline] + [medians[(mode, workload, threads, dispatch)][m] / medians[key][m] for m in ratio_metrics])
+                writer.writerow([workload, threads, dispatch, mode, baseline] + [medians[(mode, workload, threads, dispatch)][m] / medians[key][m] for m in ratio_metrics])
 PY
 printf 'Retained results and provenance in %s\n' "$output"

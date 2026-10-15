@@ -7,7 +7,7 @@ homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Optional tracing-subscriber layer for fast-telemetry span collection"
+description = "Optional tracing layer and direct subscriber for fast-telemetry span collection"
 readme = "README.md"
 
 [features]
@@ -18,7 +18,9 @@ bench-tools = ["otlp", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:tracin
 [dependencies]
 fast-telemetry = { workspace = true }
 parking_lot.workspace = true
+thread_local = "1.1"
 tracing = "0.1.44"
+tracing-core = "0.1.36"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"] }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true, features = ["testing"] }

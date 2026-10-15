@@ -1,7 +1,7 @@
 # fast-telemetry-tracing
 
-An optional `tracing-subscriber::Layer` that sends existing `tracing` instrumentation
-through fast-telemetry collection and OTLP conversion. Adding this companion crate
+An optional `tracing-subscriber::Layer` and standalone `Subscriber` that send existing
+`tracing` instrumentation through fast-telemetry collection and OTLP conversion. Adding this companion crate
 does not add `tracing` to the native fast-telemetry API or change its recording path.
 The crate uses edition 2024 and Rust 1.93, like the workspace.
 
@@ -51,6 +51,76 @@ Layers can compose with `.with_filter(...)` and other subscriber layers. Multipl
 fast-telemetry layers on one registry have independent IDs, state, propagation
 handles, queues, and loss counters. A handle queries the span's own subscriber,
 so changing the caller's current subscriber does not change that span's context.
+
+## Direct standalone subscriber
+
+`FastTelemetrySubscriber` provides an optional installation without Registry,
+boxed per-span extensions, or per-span reference-count atomics in this backend.
+It keeps the same span/event payloads, propagation handle, owning immediate
+`SpanSink`, shared capacity limit, loss counters, and final-reference publication.
+Install it **by value as a standalone subscriber**; keep `FastTelemetryLayer` for
+arbitrary layer composition, Registry extensions, `LookupSpan`, and per-layer
+filtering. The direct backend enables every callsite.
+
+```rust
+use std::sync::Arc;
+use fast_telemetry::SpanCollector;
+use fast_telemetry_tracing::FastTelemetrySubscriber;
+
+let collector = Arc::new(SpanCollector::new(1, 1));
+let subscriber = FastTelemetrySubscriber::new(collector.clone());
+let handle = subscriber.handle();
+// Set once during process initialization. Scoped with_default also works.
+tracing::subscriber::set_global_default(subscriber).unwrap();
+{
+    let request = tracing::info_span!("request");
+    let _entered = request.enter();
+    tracing::info!("accepted");
+}
+let mut completed = Vec::new();
+collector.drain_into(&mut completed);
+assert_eq!(completed.len(), 1);
+assert_eq!(completed[0].events.len(), 1);
+assert_eq!(handle.dropped_span_count(), 0);
+```
+
+Global installation matters for performance: tracing 0.1.44 clones the span's
+dispatch, and a scoped default uses a shared `Arc` whereas a global default uses
+a static subscriber reference. Both installations are supported and measured
+separately. This does not establish native performance parity; use the benchmark
+guide and retained-output checks to compare a concrete configuration.
+
+Full automatic metadata is the default. To deliberately omit tracing level,
+target, module, file, and line **attributes**, construct the subscriber with
+`.with_metadata_policy(fast_telemetry_tracing::MetadataPolicy::UserFields)`.
+This retains user fields, namespace escaping, lossless conversions, span/event
+names, standalone event severity, IDs, propagation, timestamps, links, and parent
+selection. The benchmark exposes this smaller payload as `direct-user-fields`,
+with `native-user-fields` as its exact native payload control. It is a separate
+profile, not an optimization that silently removes default metadata.
+
+The subscriber owns 64 sharded live-span maps that retain allocation capacity for
+reuse and free all remaining payloads when the subscriber is dropped. Clones and
+parent references are counted under their span's shard lock. Children keep their
+parents live after the caller drops them; final ancestor release is iterative.
+Entered state is per subscriber and per thread, including Registry's duplicate
+re-entry and out-of-order exit behavior. No native TLS is entered. Globally unique
+nonzero tracing IDs come from checked thread-local blocks of integers; IDs are
+never reused, and exhaustion panics before wrap. Unknown/stale IDs and IDs issued
+by other direct subscriber instances are ignored. Raw IDs from unrelated
+subscriber implementations have no shared namespace and may numerically
+coincide; use a span's own dispatch and the propagation handle. IDs are not
+authentication tokens: supplying the exact numeric ID of a live local span is
+indistinguishable from supplying that span's issued ID.
+
+Arbitrary subscriber wrappers are outside the direct installation contract.
+When a by-value outer wrapper forwards `on_register_dispatch`, final parent
+closures are routed through its dispatch so its `on_close` callbacks run once;
+those callbacks may observe a final parent before its final child. This differs
+from Registry callback ordering. `Arc<FastTelemetrySubscriber>` works standalone,
+including parent cleanup, but `Subscriber for Arc` does not forward registration,
+so combining that shared form with outer layer close callbacks is unsupported.
+The composable layer remains the installation for those integrations.
 
 ## Field and event policy
 
@@ -205,7 +275,8 @@ event is automatically converted into a fake span or silently exported as logs.
 
 The [benchmark guide](../../docs/tracing-benchmark.md) describes the retained-count
 contract, timings, repeated-run script, and limitations. It includes ordinary
-native and payload-matched native baselines, tracing FT/OTel backends, and two
+native and exact full/user-fields native baselines, FT layer/direct profiles,
+the OTel backend, and two
 no-retention controls. There is no speed or native-parity claim for this adapter
 before fresh measurements. Historical native-span versus SDK ratios do not
 establish tracing-layer performance.

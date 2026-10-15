@@ -1,7 +1,8 @@
-//! A `tracing-subscriber` backend for fast-telemetry.
+//! Tracing layer and standalone subscriber backends for fast-telemetry.
 //!
 //! Existing `tracing` macros, `#[instrument]`, and `Instrument` futures retain
-//! their frontend and registry semantics. Completed spans are published directly
+//! their frontend. The composable layer uses Registry; the optional direct
+//! subscriber owns its lifecycle storage. Completed spans are published directly
 //! into a bounded [`SpanSink`], without native span TLS or adaptive sampling.
 //! See the crate README for propagation, field mapping, capacity, and export.
 
@@ -27,6 +28,9 @@ use tracing_subscriber::{Layer, Registry};
 
 #[cfg(feature = "otlp")]
 mod otlp;
+mod subscriber;
+
+pub use subscriber::{FastTelemetrySubscriber, MetadataPolicy};
 
 const PREFIX: &str = "fast_telemetry.";
 static NEXT_LAYER_ID: AtomicU64 = AtomicU64::new(1);
@@ -139,7 +143,7 @@ pub struct FastTelemetryLayer<S = Registry> {
     _subscriber: PhantomData<fn(S)>,
 }
 
-/// An owning handle for propagation, loss counters, and standalone-event drain.
+/// An owning backend handle for propagation, loss counters, and event drain.
 #[derive(Clone)]
 pub struct LayerHandle {
     shared: Arc<Shared>,
@@ -187,9 +191,9 @@ where
 }
 
 impl LayerHandle {
-    /// Get this layer's context for a span, including a span from another
+    /// Get this backend's context for a span, including a span from another
     /// subscriber than the caller's current default. Disabled/filtered spans
-    /// and spans belonging to subscribers without this layer return `None`.
+    /// and spans belonging to subscribers without this backend return `None`.
     pub fn context(&self, span: &tracing::Span) -> Option<SpanContext> {
         let mut result = None;
         self.with_state(span, &mut |state| result = Some(state.context()));
@@ -224,7 +228,11 @@ impl LayerHandle {
 
     fn with_state(&self, span: &tracing::Span, f: &mut dyn FnMut(&mut State)) {
         span.with_subscriber(|(id, dispatch)| {
-            if let Some(access) = dispatch.downcast_ref::<ContextAccess>() {
+            if let Some(subscriber) = dispatch.downcast_ref::<FastTelemetrySubscriber>()
+                && Arc::ptr_eq(&subscriber.shared, &self.shared)
+            {
+                subscriber.with_state(id, f);
+            } else if let Some(access) = dispatch.downcast_ref::<ContextAccess>() {
                 (access.0)(dispatch, id, self.shared.id, f);
             }
         });

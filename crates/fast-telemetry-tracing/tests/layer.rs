@@ -1,11 +1,48 @@
 use std::sync::Arc;
 
 use fast_telemetry::{CompletedSpan, SpanAttribute, SpanCollector, SpanContext, SpanValue};
-use fast_telemetry_tracing::FastTelemetryLayer;
+use fast_telemetry_tracing::{FastTelemetryLayer, FastTelemetrySubscriber, LayerHandle};
 use tracing::{Instrument, info, info_span};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{Layer, Registry};
+
+#[derive(Clone, Copy)]
+enum TestBackend {
+    Layer,
+    Direct,
+}
+
+impl TestBackend {
+    fn install(
+        self,
+        collector: Arc<SpanCollector>,
+        spans: usize,
+        events: usize,
+    ) -> (tracing::Dispatch, LayerHandle) {
+        match self {
+            Self::Layer => {
+                let layer = FastTelemetryLayer::with_capacity(collector, spans, events);
+                let handle = layer.handle();
+                (
+                    tracing::Dispatch::new(Registry::default().with(layer)),
+                    handle,
+                )
+            }
+            Self::Direct => {
+                let subscriber = FastTelemetrySubscriber::with_capacity(collector, spans, events);
+                let handle = subscriber.handle();
+                (tracing::Dispatch::new(subscriber), handle)
+            }
+        }
+    }
+}
+
+fn contract(test: impl Fn(TestBackend)) {
+    for backend in [TestBackend::Layer, TestBackend::Direct] {
+        test(backend);
+    }
+}
 
 fn drain(collector: &SpanCollector) -> Vec<CompletedSpan> {
     let mut output = Vec::new();
@@ -31,10 +68,13 @@ fn text(value: &SpanValue) -> &str {
 
 #[test]
 fn parents_events_and_late_fields_keep_frontend_semantics() {
+    contract(parents_events_and_late_fields_keep_frontend_semantics_contract);
+}
+
+fn parents_events_and_late_fields_keep_frontend_semantics_contract(backend: TestBackend) {
     let collector = Arc::new(SpanCollector::new(1, 1));
-    let layer = FastTelemetryLayer::new(collector.clone());
-    let handle = layer.handle();
-    tracing::subscriber::with_default(Registry::default().with(layer), || {
+    let (dispatch, handle) = backend.install(collector.clone(), 4096, 4096);
+    tracing::dispatcher::with_default(&dispatch, || {
         let root = info_span!("root", late = tracing::field::Empty, value = 1i64);
         root.record("late", "ready");
         root.record("value", 2i64);
@@ -82,9 +122,12 @@ fn parents_events_and_late_fields_keep_frontend_semantics() {
 
 #[test]
 fn clone_final_close_and_concurrent_reentry_publish_once() {
+    contract(clone_final_close_and_concurrent_reentry_publish_once_contract);
+}
+
+fn clone_final_close_and_concurrent_reentry_publish_once_contract(backend: TestBackend) {
     let collector = Arc::new(SpanCollector::new(1, 1));
-    let layer = FastTelemetryLayer::new(collector.clone());
-    let dispatch = tracing::Dispatch::new(Registry::default().with(layer));
+    let (dispatch, _) = backend.install(collector.clone(), 4096, 4096);
     let span = tracing::dispatcher::with_default(&dispatch, || info_span!("shared"));
     let keep_alive = span.clone();
     std::thread::scope(|scope| {
@@ -210,10 +253,14 @@ fn three_filtered_layers_keep_context_fields_and_close_state_independent() {
 
 #[test]
 fn concurrent_close_has_one_global_capacity_and_is_visible_before_workers_exit() {
+    contract(concurrent_close_has_one_global_capacity_and_is_visible_before_workers_exit_contract);
+}
+
+fn concurrent_close_has_one_global_capacity_and_is_visible_before_workers_exit_contract(
+    backend: TestBackend,
+) {
     let collector = Arc::new(SpanCollector::new(1, 1));
-    let layer = FastTelemetryLayer::with_capacity(collector.clone(), 5, 1);
-    let handle = layer.handle();
-    let dispatch = tracing::Dispatch::new(Registry::default().with(layer));
+    let (dispatch, handle) = backend.install(collector.clone(), 5, 1);
     let published = std::sync::Barrier::new(9);
     let drained = std::sync::Barrier::new(9);
     let mut rounds = Vec::new();
@@ -313,9 +360,13 @@ fn handle_uses_spans_own_dispatch_and_filters_compose() {
 
 #[test]
 fn integer_debug_display_and_metadata_keys_are_lossless() {
+    contract(integer_debug_display_and_metadata_keys_are_lossless_contract);
+}
+
+fn integer_debug_display_and_metadata_keys_are_lossless_contract(backend: TestBackend) {
     let collector = Arc::new(SpanCollector::new(1, 1));
-    let layer = FastTelemetryLayer::new(collector.clone());
-    tracing::subscriber::with_default(Registry::default().with(layer), || {
+    let (dispatch, _) = backend.install(collector.clone(), 4096, 4096);
+    tracing::dispatcher::with_default(&dispatch, || {
         let span = info_span!(target: "custom_target", "values",
             small = 42u64, large = u64::MAX, huge = u128::MAX, negative = i128::MIN,
             debug = ?vec![1, 2], display = %"hello", flag = true, ratio = 1.5f64,
@@ -360,12 +411,17 @@ fn integer_debug_display_and_metadata_keys_are_lossless() {
 
 #[test]
 fn static_metadata_is_borrowed_and_dynamic_user_strings_outlive_recording() {
+    contract(static_metadata_is_borrowed_and_dynamic_user_strings_outlive_recording_contract);
+}
+
+fn static_metadata_is_borrowed_and_dynamic_user_strings_outlive_recording_contract(
+    backend: TestBackend,
+) {
     use std::borrow::Cow;
 
     let collector = Arc::new(SpanCollector::new(1, 1));
-    let layer = FastTelemetryLayer::new(collector.clone());
-    let handle = layer.handle();
-    tracing::subscriber::with_default(Registry::default().with(layer), || {
+    let (dispatch, handle) = backend.install(collector.clone(), 4096, 4096);
+    tracing::dispatcher::with_default(&dispatch, || {
         let value = String::from("dynamic user value");
         let span = info_span!(target: "static target", "metadata", user = value.as_str());
         info!(parent: &span, user = value.as_str(), "attached");
@@ -412,6 +468,12 @@ fn static_metadata_is_borrowed_and_dynamic_user_strings_outlive_recording() {
 
 #[test]
 fn debug_formatting_can_emit_tracing_without_extension_lock_deadlock() {
+    contract(debug_formatting_can_emit_tracing_without_extension_lock_deadlock_contract);
+}
+
+fn debug_formatting_can_emit_tracing_without_extension_lock_deadlock_contract(
+    backend: TestBackend,
+) {
     struct Reentrant;
     impl std::fmt::Debug for Reentrant {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -420,8 +482,8 @@ fn debug_formatting_can_emit_tracing_without_extension_lock_deadlock() {
         }
     }
     let collector = Arc::new(SpanCollector::new(1, 1));
-    let layer = FastTelemetryLayer::new(collector.clone());
-    tracing::subscriber::with_default(Registry::default().with(layer), || {
+    let (dispatch, _) = backend.install(collector.clone(), 4096, 4096);
+    tracing::dispatcher::with_default(&dispatch, || {
         let parent = info_span!("parent", value = tracing::field::Empty);
         let _entered = parent.enter();
         parent.record("value", tracing::field::debug(Reentrant));
@@ -443,13 +505,16 @@ fn debug_formatting_can_emit_tracing_without_extension_lock_deadlock() {
 
 #[test]
 fn propagation_links_and_capacity_are_observable() {
+    contract(propagation_links_and_capacity_are_observable_contract);
+}
+
+fn propagation_links_and_capacity_are_observable_contract(backend: TestBackend) {
     let collector = Arc::new(SpanCollector::new(1, 1));
-    let layer = FastTelemetryLayer::with_capacity(collector.clone(), 2, 1);
-    let handle = layer.handle();
+    let (dispatch, handle) = backend.install(collector.clone(), 2, 1);
     let remote =
         SpanContext::from_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00")
             .unwrap();
-    tracing::subscriber::with_default(Registry::default().with(layer), || {
+    tracing::dispatcher::with_default(&dispatch, || {
         let root = info_span!(parent: None, "server");
         assert!(handle.set_parent(&root, remote));
         assert!(handle.traceparent(&root).unwrap().ends_with("-01"));
@@ -494,6 +559,10 @@ async fn instrumented(value: u64) {
 
 #[test]
 fn instrumented_future_moves_threads_and_restores_siblings() {
+    contract(instrumented_future_moves_threads_and_restores_siblings_contract);
+}
+
+fn instrumented_future_moves_threads_and_restores_siblings_contract(backend: TestBackend) {
     // Explicitly poll the same Instrument future on two OS threads. A runtime
     // scheduler is not required to happen to migrate it for this regression.
     struct OncePending(bool);
@@ -515,8 +584,7 @@ fn instrumented_future_moves_threads_and_restores_siblings() {
         }
     }
     let collector = Arc::new(SpanCollector::new(1, 1));
-    let layer = FastTelemetryLayer::new(collector.clone());
-    let dispatch = tracing::Dispatch::new(Registry::default().with(layer));
+    let (dispatch, _) = backend.install(collector.clone(), 4096, 4096);
     let span = tracing::dispatcher::with_default(&dispatch, || info_span!("moving"));
     let mut future = Box::pin(OncePending(false).instrument(span));
     for ready in [false, true] {
@@ -569,10 +637,13 @@ fn instrumented_future_moves_threads_and_restores_siblings() {
 
 #[test]
 fn layer_and_live_span_keep_collector_owned_after_caller_drops_it() {
+    contract(layer_and_live_span_keep_collector_owned_after_caller_drops_it_contract);
+}
+
+fn layer_and_live_span_keep_collector_owned_after_caller_drops_it_contract(backend: TestBackend) {
     let collector = Arc::new(SpanCollector::new(1, 1));
     let weak = Arc::downgrade(&collector);
-    let layer = FastTelemetryLayer::new(collector.clone());
-    let dispatch = tracing::Dispatch::new(Registry::default().with(layer));
+    let (dispatch, _) = backend.install(collector.clone(), 4096, 4096);
     let span = tracing::dispatcher::with_default(&dispatch, || info_span!("owned"));
     drop(collector);
     drop(dispatch);
@@ -584,11 +655,15 @@ fn layer_and_live_span_keep_collector_owned_after_caller_drops_it() {
 #[cfg(feature = "otlp")]
 #[test]
 fn otlp_span_and_standalone_log_preserve_values_and_metadata() {
+    contract(otlp_span_and_standalone_log_preserve_values_and_metadata_contract);
+}
+
+#[cfg(feature = "otlp")]
+fn otlp_span_and_standalone_log_preserve_values_and_metadata_contract(backend: TestBackend) {
     use fast_telemetry::otlp::pb::any_value::Value;
     let collector = Arc::new(SpanCollector::new(1, 1));
-    let layer = FastTelemetryLayer::new(collector.clone());
-    let handle = layer.handle();
-    tracing::subscriber::with_default(Registry::default().with(layer), || {
+    let (dispatch, handle) = backend.install(collector.clone(), 4096, 4096);
+    tracing::dispatcher::with_default(&dispatch, || {
         let span = info_span!("encoded", large = u64::MAX);
         info!(parent: &span, ok = true, "child event");
         drop(span);
