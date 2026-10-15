@@ -131,18 +131,85 @@ impl Hasher for SpanIdHasher {
     }
 }
 
-// Shard cache lines are independent. HashMap storage grows with live spans and
-// retains capacity for reuse; every payload is owned by this subscriber, so
-// dropping it also reclaims spans left open by raw Subscriber API callers.
+// Each aligned shard owns its payloads, including raw-call orphans. The inline
+// slot trades roughly 12 KiB of extra subscriber/constructor storage on 64-bit
+// targets and an overflow ID comparison for fewer map lookups. Overflow retains
+// capacity; live spans are never promoted into a vacant inline slot.
 #[repr(align(64))]
 #[derive(Default)]
-struct Shard(Mutex<SpanMap>);
+struct Shard(Mutex<Store>);
+
+#[derive(Default)]
+struct Store {
+    inline: Option<InlineSpan>,
+    overflow: SpanMap,
+}
+
+struct InlineSpan {
+    id: u64,
+    span: LiveSpan,
+}
 
 struct LiveSpan {
     metadata: &'static Metadata<'static>,
     parent: Option<Id>,
     refs: usize,
     state: State,
+}
+
+impl Store {
+    fn get(&self, id: &u64) -> Option<&LiveSpan> {
+        if let Some(inline) = &self.inline
+            && inline.id == *id
+        {
+            return Some(&inline.span);
+        }
+        self.overflow.get(id)
+    }
+
+    fn get_mut(&mut self, id: &u64) -> Option<&mut LiveSpan> {
+        if let Some(inline) = &mut self.inline
+            && inline.id == *id
+        {
+            return Some(&mut inline.span);
+        }
+        self.overflow.get_mut(id)
+    }
+
+    fn insert_fresh(&mut self, id: u64, span: LiveSpan) {
+        // Only new_span's checked, never-reused allocator supplies IDs here.
+        // The ID is absent from both residences, so no duplicate lookup is needed.
+        if self.inline.is_none() {
+            self.inline = Some(InlineSpan { id, span });
+        } else {
+            let _ = self.overflow.insert(id, span);
+        }
+    }
+
+    fn close_ref(&mut self, id: u64) -> Option<LiveSpan> {
+        let remove_inline = match &mut self.inline {
+            Some(inline) if inline.id == id => {
+                if inline.span.refs > 1 {
+                    inline.span.refs -= 1;
+                    return None;
+                }
+                true
+            }
+            _ => false,
+        };
+        if remove_inline {
+            // The mutable span borrow has ended before taking ownership.
+            return self.inline.take().map(|inline| inline.span);
+        }
+        let Entry::Occupied(mut span) = self.overflow.entry(id) else {
+            return None;
+        };
+        if span.get().refs > 1 {
+            span.get_mut().refs -= 1;
+            return None;
+        }
+        Some(span.remove())
+    }
 }
 
 // ThreadLocal stores entries contiguously with a presence flag. Align the whole
@@ -233,7 +300,7 @@ impl FastTelemetrySubscriber {
         }
     }
 
-    fn shard(&self, id: &Id) -> &Mutex<SpanMap> {
+    fn shard(&self, id: &Id) -> &Mutex<Store> {
         // Keep each thread-local allocation block on one shard so successive
         // spans reuse its map's cache lines. Blocks spread across the shards,
         // with modulo collisions protected by the same locks. The mapping
@@ -277,14 +344,10 @@ impl FastTelemetrySubscriber {
     fn close(&self, id: Id) -> bool {
         let removed = {
             let mut spans = self.shard(&id).lock();
-            let Entry::Occupied(mut span) = spans.entry(id.into_u64()) else {
+            let Some(span) = spans.close_ref(id.into_u64()) else {
                 return false;
             };
-            if span.get().refs > 1 {
-                span.get_mut().refs -= 1;
-                return false;
-            }
-            span.remove()
+            span
         };
         // No map/TLS borrow survives publication or payload destruction.
         let mut state = removed.state;
@@ -379,7 +442,7 @@ impl Subscriber for FastTelemetrySubscriber {
                 events: Vec::new(),
             },
         };
-        self.shard(&id).lock().insert(
+        self.shard(&id).lock().insert_fresh(
             id.into_u64(),
             LiveSpan {
                 metadata: attrs.metadata(),
@@ -459,7 +522,7 @@ impl Subscriber for FastTelemetrySubscriber {
     }
 
     fn enter(&self, id: &Id) {
-        if self.shard(id).lock().contains_key(&id.into_u64()) {
+        if self.shard(id).lock().get(&id.into_u64()).is_some() {
             self.entered.get_or_default().0.borrow_mut().push(id);
         }
     }

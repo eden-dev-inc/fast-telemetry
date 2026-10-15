@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Barrier, Mutex};
 
-use fast_telemetry::{CompletedSpan, SpanCollector};
+use fast_telemetry::{CompletedSpan, SpanCollector, SpanValue};
 use fast_telemetry_tracing::{FastTelemetryLayer, FastTelemetrySubscriber, MetadataPolicy};
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Callsite as _, Dispatch, Subscriber, info, info_span};
@@ -140,6 +140,149 @@ fn foreign_stale_and_unknown_raw_ids_are_harmless_and_never_reissued() {
                 && span.events.is_empty()
                 && !span.attributes.iter().any(|a| a.key == "value"))
     );
+}
+
+#[test]
+fn overlapping_spans_keep_identity_when_closed_and_replaced_out_of_order() {
+    // A fresh worker starts its own ID block. Allocate overlapping lifetimes,
+    // close the first, then allocate again while an older span is still live.
+    std::thread::spawn(|| {
+        let collector = Arc::new(SpanCollector::new(1, 1));
+        let subscriber = FastTelemetrySubscriber::new(collector.clone());
+        let handle = subscriber.handle();
+        let metadata = metadata();
+        let empty = metadata.fields().value_set_all(&[None]);
+        let roots = Attributes::new_root(metadata, &empty);
+        let record = |id: &Id, value: i64| {
+            let values = [Some(&value as &dyn tracing::field::Value)];
+            let values = metadata.fields().value_set_all(&values);
+            subscriber.record(id, &Record::new(&values));
+        };
+        let event = |id: &Id, value: i64| {
+            let metadata = event_metadata();
+            let values = [Some(&value as &dyn tracing::field::Value)];
+            let values = metadata.fields().value_set_all(&values);
+            subscriber.event(&tracing::Event::new_child_of(
+                Some(id.clone()),
+                metadata,
+                &values,
+            ));
+        };
+
+        let a = subscriber.new_span(&roots);
+        let b = subscriber.new_span(&roots);
+        let cloned_b = subscriber.clone_span(&b);
+        assert_eq!(cloned_b, b);
+        record(&a, 11);
+        assert!(subscriber.try_close(a.clone()));
+        let mut completed = drain(&collector);
+        assert_eq!(completed.len(), 1);
+        let c = subscriber.new_span(&roots);
+        assert_ne!(a, c);
+        assert_ne!(b, c);
+
+        subscriber.enter(&b);
+        assert_eq!(subscriber.current_span().id(), Some(&b));
+        let child_b = subscriber.new_span(&Attributes::new(metadata, &empty));
+        subscriber.exit(&b);
+        record(&child_b, 44);
+        assert!(subscriber.try_close(child_b));
+        completed.extend(drain(&collector));
+        subscriber.enter(&c);
+        assert_eq!(subscriber.current_span().id(), Some(&c));
+        let child_c = subscriber.new_span(&Attributes::new(metadata, &empty));
+        record(&child_c, 55);
+        record(&b, 22);
+        record(&c, 33);
+        event(&b, 122);
+        event(&c, 133);
+
+        // Stale callbacks must not address the replacement or another live span.
+        record(&a, 999);
+        subscriber.record_follows_from(&a, &b);
+        subscriber.record_follows_from(&c, &a);
+        subscriber.enter(&a);
+        assert_eq!(subscriber.current_span().id(), Some(&c));
+        subscriber.exit(&a);
+        assert_eq!(subscriber.current_span().id(), Some(&c));
+        assert_eq!(subscriber.clone_span(&a), a);
+        assert!(!subscriber.try_close(a.clone()));
+        event(&a, 999);
+        let independent = subscriber.new_span(&Attributes::child_of(a, metadata, &empty));
+        record(&independent, 66);
+        assert!(subscriber.try_close(independent));
+        completed.extend(drain(&collector));
+
+        assert!(!subscriber.try_close(cloned_b));
+        assert!(!subscriber.try_close(c.clone()));
+        assert!(drain(&collector).is_empty());
+        assert_eq!(subscriber.current_span().id(), Some(&c));
+        assert!(subscriber.try_close(b.clone()));
+        assert!(!subscriber.try_close(b));
+        completed.extend(drain(&collector));
+        assert!(subscriber.try_close(child_c));
+        assert!(subscriber.current_span().id().is_none());
+        subscriber.exit(&c);
+        assert!(!subscriber.try_close(c));
+        completed.extend(drain(&collector));
+
+        let value = |attributes: &[fast_telemetry::SpanAttribute]| {
+            attributes
+                .iter()
+                .find_map(|attribute| match &attribute.value {
+                    SpanValue::I64(value) if attribute.key == "value" => Some(*value),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(completed.len(), 6);
+        assert_eq!(
+            completed
+                .iter()
+                .map(|span| span.span_id)
+                .collect::<HashSet<_>>()
+                .len(),
+            6
+        );
+        let by_value: std::collections::HashMap<_, _> = completed
+            .iter()
+            .map(|span| (value(&span.attributes), span))
+            .collect();
+        assert_eq!(
+            by_value.keys().copied().collect::<HashSet<_>>(),
+            HashSet::from([11, 22, 33, 44, 55, 66])
+        );
+        for (child, parent) in [(44, 22), (55, 33)] {
+            assert_eq!(by_value[&child].trace_id, by_value[&parent].trace_id);
+            assert_eq!(by_value[&child].parent_span_id, by_value[&parent].span_id);
+        }
+        for root in [11, 22, 33, 66] {
+            assert!(by_value[&root].parent_span_id.is_invalid());
+        }
+        for (span_value, span) in by_value {
+            if let Some(expected) = match span_value {
+                22 => Some(122),
+                33 => Some(133),
+                _ => None,
+            } {
+                assert_eq!(span.events.len(), 1);
+                assert_eq!(span.events[0].name, "raw event");
+                assert_eq!(value(&span.events[0].attributes), expected);
+            } else {
+                assert!(span.events.is_empty());
+            }
+        }
+        let mut standalone = Vec::new();
+        handle.drain_events(&mut standalone);
+        assert_eq!(standalone.len(), 1);
+        assert_eq!(value(&standalone[0].event.attributes), 999);
+        assert_eq!(handle.accepted_span_count(), 6);
+        assert_eq!(handle.accepted_event_count(), 1);
+        assert_eq!(handle.dropped_span_count(), 0);
+        assert_eq!(handle.dropped_event_count(), 0);
+    })
+    .join()
+    .unwrap();
 }
 
 #[test]
