@@ -7,7 +7,6 @@
 
 use std::any::TypeId;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -58,10 +57,59 @@ impl State {
     }
 }
 
-// Registry extensions are keyed by TypeId: one map supports any number of
-// independent layers without replacing another layer's state.
-#[derive(Default)]
-struct States(HashMap<u64, State>);
+// Registry extensions are keyed by TypeId. Keep the usual single layer inline;
+// additional layers share this extension without replacing each other's state.
+struct States {
+    first: Option<(u64, State)>,
+    additional: Vec<(u64, State)>,
+}
+
+impl States {
+    fn new(layer_id: u64, state: State) -> Self {
+        Self {
+            first: Some((layer_id, state)),
+            additional: Vec::new(),
+        }
+    }
+
+    fn get(&self, layer_id: u64) -> Option<&State> {
+        self.first
+            .as_ref()
+            .filter(|(id, _)| *id == layer_id)
+            .or_else(|| self.additional.iter().find(|(id, _)| *id == layer_id))
+            .map(|(_, state)| state)
+    }
+
+    fn get_mut(&mut self, layer_id: u64) -> Option<&mut State> {
+        if let Some((id, state)) = &mut self.first
+            && *id == layer_id
+        {
+            return Some(state);
+        }
+        self.additional
+            .iter_mut()
+            .find(|(id, _)| *id == layer_id)
+            .map(|(_, state)| state)
+    }
+
+    fn insert(&mut self, layer_id: u64, state: State) {
+        if let Some(existing) = self.get_mut(layer_id) {
+            *existing = state;
+        } else if self.first.is_none() {
+            self.first = Some((layer_id, state));
+        } else {
+            self.additional.push((layer_id, state));
+        }
+    }
+
+    fn remove(&mut self, layer_id: u64) -> Option<State> {
+        if self.first.as_ref().is_some_and(|(id, _)| *id == layer_id) {
+            return self.first.take().map(|(_, state)| state);
+        }
+        let index = self.additional.iter().position(|(id, _)| *id == layer_id)?;
+        Some(self.additional.swap_remove(index).1)
+    }
+}
 
 struct Shared {
     id: u64,
@@ -215,7 +263,7 @@ where
     if let Some(subscriber) = dispatch.downcast_ref::<S>()
         && let Some(span) = subscriber.span(id)
         && let Some(states) = span.extensions_mut().get_mut::<States>()
-        && let Some(state) = states.0.get_mut(&layer_id)
+        && let Some(state) = states.get_mut(layer_id)
     {
         f(state);
     }
@@ -228,7 +276,7 @@ where
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
         // Arbitrary Debug/Display implementations may emit tracing recursively.
         // Visit all user values before acquiring any registry extensions lock.
-        let mut fields = Fields::default();
+        let mut fields = Fields::with_metadata(attrs.metadata(), attrs.values().len());
         attrs.record(&mut fields);
         metadata_fields(attrs.metadata(), &mut fields.0);
         let parent = if attrs.is_contextual() {
@@ -239,8 +287,7 @@ where
         let parent = parent.and_then(|span| {
             span.extensions()
                 .get::<States>()?
-                .0
-                .get(&self.shared.id)
+                .get(self.shared.id)
                 .map(State::context)
         });
         let state = State {
@@ -260,23 +307,20 @@ where
         };
         if let Some(span) = ctx.span(id) {
             let mut extensions = span.extensions_mut();
-            if extensions.get_mut::<States>().is_none() {
-                extensions.insert(States::default());
+            if let Some(states) = extensions.get_mut::<States>() {
+                states.insert(self.shared.id, state);
+            } else {
+                extensions.insert(States::new(self.shared.id, state));
             }
-            extensions
-                .get_mut::<States>()
-                .expect("inserted states")
-                .0
-                .insert(self.shared.id, state);
         }
     }
 
     fn on_record(&self, id: &Id, record: &Record<'_>, ctx: Context<'_, S>) {
-        let mut fields = Fields::default();
+        let mut fields = Fields(Vec::with_capacity(record.len()));
         record.record(&mut fields);
         if let Some(span) = ctx.span(id)
             && let Some(states) = span.extensions_mut().get_mut::<States>()
-            && let Some(state) = states.0.get_mut(&self.shared.id)
+            && let Some(state) = states.get_mut(self.shared.id)
         {
             for attribute in fields.0 {
                 upsert(&mut state.span.attributes, attribute);
@@ -285,7 +329,7 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        let mut fields = Fields::default();
+        let mut fields = Fields::with_metadata(event.metadata(), event.metadata().fields().len());
         event.record(&mut fields);
         metadata_fields(event.metadata(), &mut fields.0);
         let recorded = SpanEvent {
@@ -296,7 +340,7 @@ where
         // event_span handles contextual, explicit, and parent: None events.
         if let Some(parent) = ctx.event_span(event)
             && let Some(states) = parent.extensions_mut().get_mut::<States>()
-            && let Some(state) = states.0.get_mut(&self.shared.id)
+            && let Some(state) = states.get_mut(self.shared.id)
         {
             state.span.events.push(recorded);
             return;
@@ -320,14 +364,13 @@ where
         let target = ctx.span(follows).and_then(|span| {
             span.extensions()
                 .get::<States>()?
-                .0
-                .get(&self.shared.id)
+                .get(self.shared.id)
                 .map(State::context)
         });
         if let Some(target) = target
             && let Some(span) = ctx.span(id)
             && let Some(states) = span.extensions_mut().get_mut::<States>()
-            && let Some(state) = states.0.get_mut(&self.shared.id)
+            && let Some(state) = states.get_mut(self.shared.id)
         {
             state.span.events.push(SpanEvent {
                 name: Cow::Borrowed("fast_telemetry.follows_from"),
@@ -344,8 +387,7 @@ where
         let state = ctx.span(&id).and_then(|span| {
             span.extensions_mut()
                 .get_mut::<States>()?
-                .0
-                .remove(&self.shared.id)
+                .remove(self.shared.id)
         });
         if let Some(mut state) = state {
             state.span.end_time_ns = now_ns();
@@ -384,10 +426,17 @@ fn upsert(attributes: &mut Vec<SpanAttribute>, attribute: SpanAttribute) {
     }
 }
 
-#[derive(Default)]
 struct Fields(Vec<SpanAttribute>);
 
 impl Fields {
+    fn with_metadata(metadata: &Metadata<'_>, user_fields: usize) -> Self {
+        let metadata_fields = 2
+            + usize::from(metadata.module_path().is_some())
+            + usize::from(metadata.file().is_some())
+            + usize::from(metadata.line().is_some());
+        Self(Vec::with_capacity(user_fields + metadata_fields))
+    }
+
     fn value(&mut self, field: &Field, value: impl Into<SpanValue>) {
         upsert(
             &mut self.0,
@@ -435,26 +484,20 @@ impl Visit for Fields {
     }
 }
 
-fn metadata_fields(metadata: &Metadata<'_>, attributes: &mut Vec<SpanAttribute>) {
+fn metadata_fields(metadata: &'static Metadata<'static>, attributes: &mut Vec<SpanAttribute>) {
     attributes.push(SpanAttribute::new(
         "fast_telemetry.tracing.level",
         metadata.level().as_str(),
     ));
     attributes.push(SpanAttribute::new(
         "fast_telemetry.tracing.target",
-        metadata.target().to_owned(),
+        metadata.target(),
     ));
     if let Some(module) = metadata.module_path() {
-        attributes.push(SpanAttribute::new(
-            "fast_telemetry.code.module",
-            module.to_owned(),
-        ));
+        attributes.push(SpanAttribute::new("fast_telemetry.code.module", module));
     }
     if let Some(file) = metadata.file() {
-        attributes.push(SpanAttribute::new(
-            "fast_telemetry.code.file",
-            file.to_owned(),
-        ));
+        attributes.push(SpanAttribute::new("fast_telemetry.code.file", file));
     }
     if let Some(line) = metadata.line() {
         attributes.push(SpanAttribute::new(

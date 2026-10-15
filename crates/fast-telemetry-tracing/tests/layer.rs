@@ -148,6 +148,127 @@ fn sibling_nested_and_multiple_layer_state_is_isolated() {
 }
 
 #[test]
+fn three_filtered_layers_keep_context_fields_and_close_state_independent() {
+    let collectors: [_; 3] = std::array::from_fn(|_| Arc::new(SpanCollector::new(1, 1)));
+    let first = FastTelemetryLayer::new(collectors[0].clone());
+    let second = FastTelemetryLayer::new(collectors[1].clone());
+    let third = FastTelemetryLayer::new(collectors[2].clone());
+    let handles = [first.handle(), second.handle(), third.handle()];
+    let subscriber = Registry::default()
+        .with(first.with_filter(LevelFilter::INFO))
+        .with(second.with_filter(LevelFilter::WARN))
+        .with(third.with_filter(LevelFilter::DEBUG));
+    tracing::subscriber::with_default(subscriber, || {
+        let root = info_span!("root");
+        assert!(handles[1].context(&root).is_none());
+        let child = tracing::warn_span!(parent: &root, "shared", late = tracing::field::Empty);
+        let contexts = handles
+            .each_ref()
+            .map(|handle| handle.context(&child).unwrap());
+        for (index, context) in contexts.iter().enumerate() {
+            for other in &contexts[index + 1..] {
+                assert_ne!(context.span_id, other.span_id);
+                assert_ne!(context.trace_id, other.trace_id);
+            }
+        }
+        child.record("late", 7i64);
+        tracing::warn!(parent: &child, value = 9i64, "shared event");
+        let grandchild = tracing::debug_span!(parent: &child, "debug child");
+        drop(grandchild);
+        drop(child);
+        drop(root);
+    });
+    for (index, collector) in collectors.iter().enumerate() {
+        let spans = drain(collector);
+        assert_eq!(spans.len(), [2, 1, 3][index]);
+        let child = spans.iter().find(|span| span.name == "shared").unwrap();
+        assert!(matches!(attr(&child.attributes, "late"), SpanValue::I64(7)));
+        assert_eq!(child.events.len(), 1);
+        assert!(matches!(
+            attr(&child.events[0].attributes, "value"),
+            SpanValue::I64(9)
+        ));
+        if index == 1 {
+            assert!(child.parent_span_id.is_invalid());
+        } else {
+            let root = spans.iter().find(|span| span.name == "root").unwrap();
+            assert_eq!(child.parent_span_id, root.span_id);
+            assert_eq!(child.trace_id, root.trace_id);
+        }
+        if index == 2 {
+            let grandchild = spans
+                .iter()
+                .find(|span| span.name == "debug child")
+                .unwrap();
+            assert_eq!(grandchild.parent_span_id, child.span_id);
+            assert_eq!(grandchild.trace_id, child.trace_id);
+        }
+        assert_eq!(handles[index].accepted_span_count(), spans.len() as u64);
+        assert_eq!(handles[index].dropped_span_count(), 0);
+    }
+}
+
+#[test]
+fn concurrent_close_has_one_global_capacity_and_is_visible_before_workers_exit() {
+    let collector = Arc::new(SpanCollector::new(1, 1));
+    let layer = FastTelemetryLayer::with_capacity(collector.clone(), 5, 1);
+    let handle = layer.handle();
+    let dispatch = tracing::Dispatch::new(Registry::default().with(layer));
+    let published = std::sync::Barrier::new(9);
+    let drained = std::sync::Barrier::new(9);
+    let mut rounds = Vec::new();
+    std::thread::scope(|scope| {
+        for worker in 0..8 {
+            let dispatch = dispatch.clone();
+            let published = &published;
+            let drained = &drained;
+            scope.spawn(move || {
+                tracing::dispatcher::with_default(&dispatch, || {
+                    for round in 0..2 {
+                        for item in 0..2 {
+                            let span = info_span!(parent: None, "concurrent", worker, round, item);
+                            drop(span);
+                        }
+                        published.wait();
+                        drained.wait();
+                    }
+                });
+            });
+        }
+        for _ in 0..2 {
+            published.wait();
+            // Every worker is alive and blocked, with no TLS flush or exit.
+            let spans = drain(&collector);
+            let accepted = handle.accepted_span_count();
+            let dropped = handle.dropped_span_count();
+            let empty = collector.is_empty();
+            rounds.push((spans, accepted, dropped, empty));
+            drained.wait();
+        }
+    });
+    for (index, (spans, accepted, dropped, empty)) in rounds.into_iter().enumerate() {
+        assert_eq!(spans.len(), 5);
+        assert_eq!(accepted, (index as u64 + 1) * 5);
+        assert_eq!(dropped, (index as u64 + 1) * 11);
+        assert!(empty);
+        for span in &spans {
+            assert_eq!(span.name, "concurrent");
+            assert!(matches!(
+                attr(&span.attributes, "worker"),
+                SpanValue::I64(0..=7)
+            ));
+            assert!(matches!(
+                attr(&span.attributes, "item"),
+                SpanValue::I64(0..=1)
+            ));
+            assert!(
+                matches!(attr(&span.attributes, "round"), SpanValue::I64(round) if *round == index as i64)
+            );
+        }
+    }
+}
+
+#[test]
 fn handle_uses_spans_own_dispatch_and_filters_compose() {
     let a = Arc::new(SpanCollector::new(1, 1));
     let b = Arc::new(SpanCollector::new(1, 1));
@@ -235,6 +356,58 @@ fn integer_debug_display_and_metadata_keys_are_lossless() {
         "other user level"
     );
     assert!(matches!(attr(attributes, "fast_telemetry.code.line"), SpanValue::I64(v) if *v > 0));
+}
+
+#[test]
+fn static_metadata_is_borrowed_and_dynamic_user_strings_outlive_recording() {
+    use std::borrow::Cow;
+
+    let collector = Arc::new(SpanCollector::new(1, 1));
+    let layer = FastTelemetryLayer::new(collector.clone());
+    let handle = layer.handle();
+    tracing::subscriber::with_default(Registry::default().with(layer), || {
+        let value = String::from("dynamic user value");
+        let span = info_span!(target: "static target", "metadata", user = value.as_str());
+        info!(parent: &span, user = value.as_str(), "attached");
+        drop(span);
+        info!(parent: None, user = value.as_str(), "standalone");
+    });
+    let spans = drain(&collector);
+    let mut events = Vec::new();
+    handle.drain_events(&mut events);
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].events.len(), 1);
+    assert_eq!(events.len(), 1);
+    for attributes in [
+        &spans[0].attributes,
+        &spans[0].events[0].attributes,
+        &events[0].event.attributes,
+    ] {
+        assert_eq!(text(attr(attributes, "user")), "dynamic user value");
+        for key in [
+            "fast_telemetry.tracing.level",
+            "fast_telemetry.tracing.target",
+            "fast_telemetry.code.module",
+            "fast_telemetry.code.file",
+        ] {
+            assert!(matches!(
+                attr(attributes, key),
+                SpanValue::String(Cow::Borrowed(_))
+            ));
+        }
+        assert_eq!(text(attr(attributes, "fast_telemetry.code.file")), file!());
+        assert_eq!(
+            text(attr(attributes, "fast_telemetry.code.module")),
+            module_path!()
+        );
+        assert!(
+            matches!(attr(attributes, "fast_telemetry.code.line"), SpanValue::I64(line) if *line > 0)
+        );
+    }
+    assert_eq!(
+        text(attr(&spans[0].attributes, "fast_telemetry.tracing.target")),
+        "static target"
+    );
 }
 
 #[test]
