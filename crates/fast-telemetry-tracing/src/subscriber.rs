@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::collections::hash_map::{DefaultHasher, Entry};
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -96,12 +98,45 @@ fn next_id() -> u64 {
     IDS.with(|ids| ids.borrow_mut().take(&NEXT_ID))
 }
 
+type SpanMap = HashMap<u64, LiveSpan, BuildHasherDefault<SpanIdHasher>>;
+
+// Only the checked ID allocator inserts keys into this private map. All lookups
+// still compare the complete u64 key, including raw Subscriber API calls.
+#[derive(Default)]
+struct SpanIdHasher(u64);
+
+impl Hasher for SpanIdHasher {
+    #[inline]
+    fn write_u64(&mut self, id: u64) {
+        self.0 = id;
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        // u64 keys use write_u64. Keep a general, non-panicking byte fallback
+        // without adding its state or work to the integer-key path.
+        let mut fallback = DefaultHasher::new();
+        fallback.write_u64(self.0);
+        fallback.write(bytes);
+        self.0 = fallback.finish();
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        // SplitMix64 output finalizer by Sebastiano Vigna, public domain:
+        // https://prng.di.unimi.it/splitmix64.c
+        let mut value = self.0;
+        value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        value ^ (value >> 31)
+    }
+}
+
 // Shard cache lines are independent. HashMap storage grows with live spans and
 // retains capacity for reuse; every payload is owned by this subscriber, so
 // dropping it also reclaims spans left open by raw Subscriber API callers.
 #[repr(align(64))]
 #[derive(Default)]
-struct Shard(Mutex<HashMap<u64, LiveSpan>>);
+struct Shard(Mutex<SpanMap>);
 
 struct LiveSpan {
     metadata: &'static Metadata<'static>,
@@ -191,7 +226,7 @@ impl FastTelemetrySubscriber {
         }
     }
 
-    fn shard(&self, id: &Id) -> &Mutex<HashMap<u64, LiveSpan>> {
+    fn shard(&self, id: &Id) -> &Mutex<SpanMap> {
         // Keep each thread-local allocation block on one shard so successive
         // spans reuse its map's cache lines. Blocks spread across the shards,
         // with modulo collisions protected by the same locks. The mapping
@@ -235,14 +270,14 @@ impl FastTelemetrySubscriber {
     fn close(&self, id: Id) -> bool {
         let removed = {
             let mut spans = self.shard(&id).lock();
-            let Some(span) = spans.get_mut(&id.into_u64()) else {
+            let Entry::Occupied(mut span) = spans.entry(id.into_u64()) else {
                 return false;
             };
-            if span.refs > 1 {
-                span.refs -= 1;
+            if span.get().refs > 1 {
+                span.get_mut().refs -= 1;
                 return false;
             }
-            spans.remove(&id.into_u64()).expect("span exists")
+            span.remove()
         };
         // No map/TLS borrow survives publication or payload destruction.
         let mut state = removed.state;
