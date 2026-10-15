@@ -276,6 +276,10 @@ impl SpanSink {
     ///
     /// Returns ownership of the span on capacity exhaustion. Rejection is also
     /// counted by `rejected_count`; the caller decides whether to retry or drop.
+    #[allow(
+        deprecated,
+        reason = "MSRV 1.93 predates try_update, stabilized in Rust 1.95"
+    )]
     pub fn publish(&self, span: CompletedSpan) -> Result<(), Box<CompletedSpan>> {
         let shard = thread_id() & (self.inner.outboxes.len() - 1);
         let mut queue = self.inner.outboxes[shard].queue.lock();
