@@ -192,9 +192,11 @@ impl FastTelemetrySubscriber {
     }
 
     fn shard(&self, id: &Id) -> &Mutex<HashMap<u64, LiveSpan>> {
-        // Multiplication mixes the high bits of per-thread block IDs into the
-        // shard choice, so concurrent workers do not all begin at one shard.
-        let index = id.into_u64().wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 58;
+        // Keep each thread-local allocation block on one shard so successive
+        // spans reuse its map's cache lines. Blocks spread across the shards,
+        // with modulo collisions protected by the same locks. The mapping
+        // depends only on the ID, including when a span moves between threads.
+        let index = ((id.into_u64() - 1) / ID_BLOCK) & (SHARDS as u64 - 1);
         &self.spans[index as usize].0
     }
 
