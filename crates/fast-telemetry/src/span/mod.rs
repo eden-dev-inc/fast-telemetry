@@ -51,7 +51,7 @@ pub(crate) mod context;
 mod ids;
 mod types;
 
-pub use collector::SpanCollector;
-pub use context::{current_span_id, current_trace_id};
+pub use collector::{SpanCollector, SpanSink};
+pub use context::{SpanContext, current_span_id, current_trace_id};
 pub use ids::{SpanId, TraceId};
 pub use types::{CompletedSpan, Span, SpanAttribute, SpanEvent, SpanKind, SpanStatus, SpanValue};

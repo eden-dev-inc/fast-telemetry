@@ -1,6 +1,6 @@
 //! Span context for W3C trace propagation and thread-local current span.
 //!
-//! `SpanContext` is an internal type used at two boundaries:
+//! `SpanContext` is a propagation value used at two boundaries:
 //! 1. **Cross-service propagation** — parsing/encoding W3C `traceparent` headers
 //! 2. **Logging integration** — thread-local "current span" surfaced via
 //!    [`current_trace_id()`] and [`current_span_id()`]
@@ -14,7 +14,7 @@ use super::ids::{SpanId, TraceId};
 
 /// Lightweight span context for W3C propagation and logging integration.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SpanContext {
+pub struct SpanContext {
     pub trace_id: TraceId,
     pub span_id: SpanId,
     pub trace_flags: u8,
@@ -35,7 +35,7 @@ impl SpanContext {
         let bytes = header.as_bytes();
 
         // Minimum length: 2 + 1 + 32 + 1 + 16 + 1 + 2 = 55
-        if bytes.len() < 55 {
+        if bytes.len() != 55 || !header.is_ascii() {
             return None;
         }
 

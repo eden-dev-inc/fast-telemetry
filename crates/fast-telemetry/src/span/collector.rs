@@ -15,6 +15,7 @@
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 
@@ -196,6 +197,57 @@ pub struct SpanCollector {
     spans_sampled_out: Counter,
 }
 
+/// An owning, bounded publication path for external instrumentation adapters.
+///
+/// Unlike native spans, this sink never uses thread-local buffering or adaptive
+/// sampling. Every accepted span is immediately visible to `drain_into`, even
+/// while the submitting worker stays alive and idle. Clones share one queue and
+/// its counters. The collector is kept alive until the last sink is dropped.
+#[derive(Clone)]
+pub struct SpanSink {
+    inner: Arc<SpanSinkInner>,
+}
+
+struct SpanSinkInner {
+    _collector: Arc<SpanCollector>,
+    outbox: Arc<Outbox>,
+    capacity: usize,
+    accepted: AtomicU64,
+    rejected: AtomicU64,
+}
+
+impl SpanSink {
+    /// Publish one completed span without sampling.
+    ///
+    /// Returns ownership of the span on capacity exhaustion. Rejection is also
+    /// counted by `rejected_count`; the caller decides whether to retry or drop.
+    pub fn publish(&self, span: CompletedSpan) -> Result<(), CompletedSpan> {
+        let mut queue = self.inner.outbox.spans.lock();
+        if queue.len() >= self.inner.capacity {
+            self.inner.rejected.fetch_add(1, Ordering::Relaxed);
+            return Err(span);
+        }
+        queue.push(span);
+        self.inner.accepted.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Total successful publications (including spans already drained).
+    pub fn accepted_count(&self) -> u64 {
+        self.inner.accepted.load(Ordering::Relaxed)
+    }
+
+    /// Total publication attempts rejected because the queue was full.
+    pub fn rejected_count(&self) -> u64 {
+        self.inner.rejected.load(Ordering::Relaxed)
+    }
+
+    /// Maximum number of queued completed spans.
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity
+    }
+}
+
 impl SpanCollector {
     /// Create a new collector.
     ///
@@ -207,6 +259,29 @@ impl SpanCollector {
             outboxes: Mutex::new(Vec::new()),
             spans_recorded: Counter::new(8),
             spans_sampled_out: Counter::new(8),
+        }
+    }
+
+    /// Register a bounded, owning sink for externally completed spans.
+    ///
+    /// Capacity bounds queued spans, not the size of individual spans. A sink's
+    /// outbox remains registered until the collector is dropped, so reuse sinks
+    /// rather than creating one per request. Native submission is unchanged.
+    ///
+    /// # Panics
+    /// Panics if `capacity` is zero.
+    pub fn span_sink(self: &Arc<Self>, capacity: usize) -> SpanSink {
+        assert!(capacity > 0, "span sink capacity must be nonzero");
+        let outbox = Arc::new(Outbox::new());
+        self.outboxes.lock().push(Arc::clone(&outbox));
+        SpanSink {
+            inner: Arc::new(SpanSinkInner {
+                _collector: Arc::clone(self),
+                outbox,
+                capacity,
+                accepted: AtomicU64::new(0),
+                rejected: AtomicU64::new(0),
+            }),
         }
     }
 
