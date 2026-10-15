@@ -198,8 +198,9 @@ item limits; `new` uses 4096 for each. Spans use an owning `SpanSink`, which kee
 the collector alive and bypasses native adaptive sampling and worker-local
 buffers. A completed low-volume span is immediately visible to the exporter,
 including while its worker stays alive and idle. Span publication uses fixed
-producer shards with one shared span-capacity limit; idle shards do not reserve
-capacity, and producer thread exit does not grow the collector's registry.
+producer shards with one shared span-capacity limit. Unused quota transfers
+between shards, so an exhausted shard does not reject while space remains
+elsewhere. Producer thread exit does not grow the collector's registry.
 Newest completed spans or standalone events are dropped at capacity. Inspect
 `accepted_span_count`, `dropped_span_count`, `accepted_event_count`, and
 `dropped_event_count` on the handle. Counts of attached span events are available

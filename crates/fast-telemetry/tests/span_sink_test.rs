@@ -84,22 +84,24 @@ fn sink_owns_collector_and_concurrent_publications_do_not_sample() {
 
 #[test]
 fn one_producer_can_fill_the_entire_capacity_on_every_refill() {
-    let collector = Arc::new(SpanCollector::new(1, 1));
-    let sink = collector.span_sink(37);
-    for round in 0..3 {
-        for _ in 0..sink.capacity() {
-            assert!(sink.publish(completed("accepted")).is_ok());
+    for capacity in [1, 3, 17, 31, 32, 33, 37, 63, 64, 65, 127, 128, 129] {
+        let collector = Arc::new(SpanCollector::new(1, 1));
+        let sink = collector.span_sink(capacity);
+        for round in 0..3 {
+            for _ in 0..sink.capacity() {
+                assert!(sink.publish(completed("accepted")).is_ok());
+            }
+            assert_eq!(collector.len(), capacity);
+            let rejected = sink.publish(completed("retry")).unwrap_err();
+            assert_eq!(rejected.name, "retry");
+            let mut spans = vec![completed("already drained")];
+            collector.drain_into(&mut spans);
+            assert_eq!(spans.len(), capacity + 1);
+            assert_eq!(spans[0].name, "already drained");
+            assert!(collector.is_empty());
+            assert_eq!(sink.accepted_count(), (round + 1) * capacity as u64);
+            assert_eq!(sink.rejected_count(), round + 1);
         }
-        assert_eq!(collector.len(), 37);
-        let rejected = sink.publish(completed("retry")).unwrap_err();
-        assert_eq!(rejected.name, "retry");
-        let mut spans = vec![completed("already drained")];
-        collector.drain_into(&mut spans);
-        assert_eq!(spans.len(), 38);
-        assert_eq!(spans[0].name, "already drained");
-        assert!(collector.is_empty());
-        assert_eq!(sink.accepted_count(), (round + 1) * 37);
-        assert_eq!(sink.rejected_count(), round + 1);
     }
 }
 
