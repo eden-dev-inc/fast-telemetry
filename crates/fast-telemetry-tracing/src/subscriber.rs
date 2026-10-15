@@ -44,7 +44,7 @@ pub struct FastTelemetrySubscriber {
     pub(super) shared: Arc<Shared>,
     metadata: MetadataPolicy,
     spans: [Shard; SHARDS],
-    entered: ThreadLocal<RefCell<Entered>>,
+    entered: ThreadLocal<EnteredCell>,
     dispatch: OnceLock<WeakDispatch>,
     closing: ThreadLocal<Closing>,
 }
@@ -145,6 +145,13 @@ struct LiveSpan {
     state: State,
 }
 
+// ThreadLocal stores entries contiguously with a presence flag. Align the whole
+// RefCell so its borrow flag and Vec header do not share a 128-byte cache region
+// with a neighboring entry's hot state or presence flag.
+#[repr(align(128))]
+#[derive(Default)]
+struct EnteredCell(RefCell<Entered>);
+
 #[derive(Default)]
 struct Entered(Vec<(Id, bool)>);
 
@@ -238,7 +245,7 @@ impl FastTelemetrySubscriber {
     fn current_id(&self) -> Option<Id> {
         self.entered
             .get()
-            .and_then(|entered| entered.borrow().current().cloned())
+            .and_then(|entered| entered.0.borrow().current().cloned())
     }
 
     fn fields(&self, metadata: &'static Metadata<'static>, count: usize) -> Fields {
@@ -453,13 +460,13 @@ impl Subscriber for FastTelemetrySubscriber {
 
     fn enter(&self, id: &Id) {
         if self.shard(id).lock().contains_key(&id.into_u64()) {
-            self.entered.get_or_default().borrow_mut().push(id);
+            self.entered.get_or_default().0.borrow_mut().push(id);
         }
     }
 
     fn exit(&self, id: &Id) {
         if let Some(entered) = self.entered.get() {
-            entered.borrow_mut().pop(id);
+            entered.0.borrow_mut().pop(id);
         }
     }
 
