@@ -221,11 +221,11 @@ impl SpanSink {
     ///
     /// Returns ownership of the span on capacity exhaustion. Rejection is also
     /// counted by `rejected_count`; the caller decides whether to retry or drop.
-    pub fn publish(&self, span: CompletedSpan) -> Result<(), CompletedSpan> {
+    pub fn publish(&self, span: CompletedSpan) -> Result<(), Box<CompletedSpan>> {
         let mut queue = self.inner.outbox.spans.lock();
         if queue.len() >= self.inner.capacity {
             self.inner.rejected.fetch_add(1, Ordering::Relaxed);
-            return Err(span);
+            return Err(Box::new(span));
         }
         queue.push(span);
         self.inner.accepted.fetch_add(1, Ordering::Relaxed);

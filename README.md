@@ -13,6 +13,7 @@ and custom in-process visitors.
 | --- | --- |
 | [`fast-telemetry`](crates/fast-telemetry) | Sharded metrics, spans, and format serialization |
 | [`fast-telemetry-macros`](crates/fast-telemetry-macros) | `ExportMetrics` and `LabelEnum` derive macros |
+| [`fast-telemetry-tracing`](crates/fast-telemetry-tracing) | Optional `tracing-subscriber` layer, propagation handle, and standalone event drain |
 | [`fast-telemetry-export`](crates/fast-telemetry-export) | DogStatsD, acknowledged OTLP/HTTP, ClickHouse, span export, and stale-series sweeping |
 
 ## Install
@@ -96,6 +97,8 @@ metrics.queue_depth.set(12);
 - [Getting started](docs/getting-started.md)
 - [Shared runtime guide](docs/runtime.md)
 - [Metrics and spans](docs/metrics-and-spans.md)
+- [Tracing compatibility layer](crates/fast-telemetry-tracing/README.md)
+- [Matched tracing backend benchmark](docs/tracing-benchmark.md)
 - [Export adapters](docs/exporters.md)
 - [API reference](docs/reference.md)
 - [Benchmark harness](crates/fast-telemetry/bench/README.md)
