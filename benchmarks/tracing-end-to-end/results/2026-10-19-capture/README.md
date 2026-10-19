@@ -123,8 +123,9 @@ cycles per sample. Its attributed payload differs from the two-span sender
 fixture. Positive values are additional CPU, not a speedup. The safety guard is
 retained despite that cost. [All guard samples](borrow-guard-all-runs.csv) and
 [summaries](borrow-guard-summary.json) preserve every successful timing sample.
-The [baseline patch](borrow-guard-baseline.patch), applied to e5adb39, reconstructs
-the unchecked comparison source for valid non-reentrant benchmark workloads only.
+The [baseline patch](borrow-guard-baseline.patch), applied to e5adb39 with
+`git apply --unidiff-zero`, reconstructs the unchecked comparison source for
+valid non-reentrant benchmark workloads only.
 
 Profiles point toward attribute/event storage reuse and parallel export work,
 but this pass adds no new page, timestamp-source or sampling architecture. Such
