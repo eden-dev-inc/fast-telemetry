@@ -18,7 +18,7 @@ jobs:
       RUSTFLAGS: -Dwarnings
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.93.0
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -45,6 +45,14 @@ jobs:
         run: python3 benchmarks/span-export-tradeoff/run.py caps --output "$RUNNER_TEMP/span-export-observation"
       - name: Observe acknowledged HTTP, gzip and delayed receivers
         run: python3 benchmarks/span-export-tradeoff/run.py http --output "$RUNNER_TEMP/span-export-observation"
+      - name: Prepare figure tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/span-export-plots"
+          "$RUNNER_TEMP/span-export-plots/bin/pip" install matplotlib==3.10.0
+      - name: Summarize observations and export figures
+        env:
+          MPLCONFIGDIR: ${{ runner.temp }}/span-export-matplotlib
+        run: '"$RUNNER_TEMP/span-export-plots/bin/python" benchmarks/span-export-tradeoff/summarize.py "$RUNNER_TEMP/span-export-observation" --plot'
       - name: Retain observations and admission receipts
         if: always()
         uses: actions/upload-artifact@v4

@@ -8,6 +8,9 @@ license = "Apache-2.0"
 
 [workspace]
 
+[features]
+otlp-logs = ["fast-telemetry/otlp-logs"]
+
 [dependencies]
 fast-telemetry = { path = "../../crates/fast-telemetry", default-features = false, features = ["otlp"] }
 libc = "0.2"
