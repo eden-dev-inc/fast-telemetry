@@ -202,9 +202,10 @@ strings. For a complete native batch, `encode_native_trace_export_request`
 encodes directly from borrowed completed spans into an `EncodedTraceRequest`.
 It preserves the same protobuf bytes and uses one output allocation per batch,
 without intermediate protobuf span objects or string/ID copies. The first-party
-span exporter uses `encode_native_trace_export_request_batches` to read producer
-buffers directly, releases native payloads before awaiting HTTP, and retains
-empty bucket allocations for reuse. `OtlpHttpClient::export_native_traces`
+span exporter uses `encode_native_trace_export_request_chunks` to read producer
+buffers directly and split the complete drain into bounded requests. It releases
+native payloads before awaiting HTTP and retains empty bucket allocations for
+reuse. `OtlpHttpClient::export_native_traces`
 transfers the body into the shared gzip/HTTP transport and uses its encoded span
 count for acknowledgements. Uncompressed export transfers the body directly.
 
@@ -329,9 +330,15 @@ partial batches. Keep a local-flush deadline for low-volume workers.
 
 This is a publication target, not a hard per-producer HTTP request size or an
 export delay timer. The exporter drains all available producer buffers together.
-Its separate `SpanExportConfig::max_batch_size` defaults to 512 total spans and
-currently discards excess drained spans. Set that limit for the aggregate drain
-volume; for example, eight full default producer batches contain 3,072 spans.
+Its separate `SpanExportConfig::max_batch_size` defaults to 512 spans per HTTP
+request and must be positive. Larger drains are split without truncation in
+both periodic and shutdown export; eight full default producer batches contain
+3,072 spans and produce six requests. Each request is attempted once, including
+requests after a failure or partial rejection. Failed or rejected spans are not
+replayed. Any request failure or partial rejection backs off the next cycle.
+This limit does not cap total work or memory for an export cycle: the exporter
+encodes all drained spans, releases their native payloads, then sends the
+requests sequentially. The request timeout applies separately to each request.
 External tracing adapters use immediate `SpanSink` publication and do not use
 the native producer target.
 

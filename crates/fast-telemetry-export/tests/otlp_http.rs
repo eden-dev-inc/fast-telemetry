@@ -36,9 +36,7 @@ fn collector(
                 .send(read_request(&mut stream))
                 .expect("capture request");
             stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: application/x-protobuf\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                )
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-protobuf\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                 .expect("write response");
         }
     });
@@ -283,6 +281,26 @@ async fn periodic_span_export_sends_all_drained_spans_in_bounded_requests() {
 #[tokio::test]
 async fn final_span_export_honors_the_request_cap_without_losing_spans() {
     check_chunked_native_export(true, ("200 OK".into(), Vec::new())).await;
+}
+
+#[tokio::test]
+async fn failed_middle_request_does_not_discard_or_replay_other_chunks() {
+    for final_export in [false, true] {
+        check_chunked_native_export(final_export, ("503 Service Unavailable".into(), Vec::new()))
+            .await;
+    }
+}
+
+#[tokio::test]
+async fn partial_rejection_does_not_discard_or_replay_other_chunks() {
+    let mut response = pb::ExportTraceServiceResponse::default();
+    let partial = response.partial_success.get_or_insert_default();
+    partial.rejected_spans = 3;
+    partial.error_message = "rejected fixture".into();
+    for final_export in [false, true] {
+        check_chunked_native_export(final_export, ("200 OK".into(), response.encode_to_vec()))
+            .await;
+    }
 }
 
 #[tokio::test]

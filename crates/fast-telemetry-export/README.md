@@ -38,6 +38,13 @@ can be awaited during shutdown. `spans::spawn_standalone(...)` remains
 available when a dedicated telemetry thread and private Tokio runtime are an
 explicit isolation choice.
 
+The span exporter splits both periodic and final drains into requests of at
+most `SpanExportConfig::max_batch_size` spans (default 512, must be positive).
+All drained spans are attempted once, preserving order, including chunks after
+a failed or partially rejected request. Requests are not replayed. The cap is
+per request; total drain memory and shutdown time depend on the available spans.
+Flush producers before cancelling, then await the exporter for the final drain.
+
 The `otlp::OtlpHttpClient` is the shared, non-logging transport used by the
 Tokio metric and span loops. With `otlp-logs`, callers can submit an
 `ExportLogsServiceRequest` and receive a structured acknowledgement, partial

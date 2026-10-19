@@ -16,7 +16,7 @@ use crate::{
 };
 pub use traces::{
     EncodedTraceRequest, encode_native_trace_export_request,
-    encode_native_trace_export_request_batches,
+    encode_native_trace_export_request_batches, encode_native_trace_export_request_chunks,
 };
 
 /// Re-export proto types so downstream crates (and the derive macro) can reference them.

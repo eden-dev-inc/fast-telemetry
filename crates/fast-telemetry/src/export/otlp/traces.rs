@@ -68,6 +68,42 @@ pub fn encode_native_trace_export_request_batches(
     )
 }
 
+/// Encode every span in a batch as bounded requests, preserving drain order.
+///
+/// Requests are encoded lazily, with one owned body allocation per request.
+/// Native payloads remain borrowed and unchanged; no span records are flattened
+/// or cloned. An empty batch yields no requests. Collect the requests before
+/// clearing the batch if native payloads must be released before network I/O.
+///
+/// # Panics
+/// Panics if `max_spans_per_request` is zero.
+pub fn encode_native_trace_export_request_chunks<'a>(
+    resource: &'a pb::Resource,
+    scope_name: &'a str,
+    batch: &'a crate::SpanBatch,
+    max_spans_per_request: usize,
+) -> impl Iterator<Item = EncodedTraceRequest> + 'a {
+    assert!(
+        max_spans_per_request > 0,
+        "request span limit must be positive"
+    );
+    let mut spans = batch.iter();
+    let mut remaining = batch.len();
+    std::iter::from_fn(move || {
+        if remaining == 0 {
+            return None;
+        }
+        let count = remaining.min(max_spans_per_request);
+        let request = encode_trace_iter(resource, scope_name, spans.clone().take(count), count);
+        // Advance through the existing producer slices, retaining their backing
+        // storage. The count came from the same immutable batch as the cursor.
+        let last = spans.nth(count - 1);
+        debug_assert!(last.is_some());
+        remaining -= count;
+        Some(request)
+    })
+}
+
 fn encode_trace_iter<'a>(
     resource: &pb::Resource,
     scope_name: &str,
@@ -433,6 +469,102 @@ mod tests {
                 pointers
             );
         }
+        for limit in [1, 15, 16, 17, 384, 511, 512, 513, 768, 1024, usize::MAX] {
+            let mut offset = 0;
+            for request in
+                encode_native_trace_export_request_chunks(&resource, "scope", &batch, limit)
+            {
+                let count = limit.min(batch.len() - offset);
+                let expected = build_trace_export_request(
+                    &resource,
+                    "scope",
+                    batch
+                        .iter()
+                        .skip(offset)
+                        .take(count)
+                        .map(CompletedSpan::to_otlp)
+                        .collect(),
+                )
+                .encode_to_vec();
+                assert_eq!(
+                    request.as_bytes(),
+                    expected,
+                    "limit={limit}, offset={offset}"
+                );
+                assert_eq!(request.span_count(), count as u64);
+                offset += count;
+            }
+            assert_eq!(offset, 768);
+            assert_eq!(batch.len(), 768);
+            assert_eq!(
+                batch.buffers().map(|b| b.as_ptr()).collect::<Vec<_>>(),
+                pointers
+            );
+        }
+    }
+
+    #[test]
+    fn empty_batch_yields_no_chunk_requests() {
+        let batch = crate::SpanBatch::new();
+        let resource = pb::Resource::default();
+        assert_eq!(
+            encode_native_trace_export_request_chunks(&resource, "", &batch, 512).count(),
+            0
+        );
+    }
+
+    #[test]
+    fn chunk_requests_preserve_mixed_owned_payloads_across_sink_buckets() {
+        let collector = std::sync::Arc::new(crate::SpanCollector::new(1, 2048));
+        let sink = collector.span_sink(1025);
+        for index in 0..1025 {
+            let span = super::super::tests::ownership_span(
+                index % 2 == 0,
+                SpanKind::Client,
+                crate::SpanId::INVALID,
+                index % 3,
+            );
+            sink.publish(span).expect("fixture fits sink");
+        }
+        let mut batch = crate::SpanBatch::new();
+        collector.drain_batches(&mut batch);
+        assert_eq!(batch.len(), 1025);
+        let resource = build_resource("mixed chunks Σ", &[("version", "1")]);
+        for limit in [1, 15, 16, 17, 384, 512, 513, usize::MAX] {
+            let mut offset = 0;
+            for request in
+                encode_native_trace_export_request_chunks(&resource, "scope", &batch, limit)
+            {
+                let count = (batch.len() - offset).min(limit);
+                let expected = build_trace_export_request(
+                    &resource,
+                    "scope",
+                    batch
+                        .iter()
+                        .skip(offset)
+                        .take(count)
+                        .map(CompletedSpan::to_otlp)
+                        .collect(),
+                )
+                .encode_to_vec();
+                assert_eq!(
+                    request.as_bytes(),
+                    expected,
+                    "limit={limit}, offset={offset}"
+                );
+                assert_eq!(request.span_count(), count as u64);
+                offset += count;
+            }
+            assert_eq!(offset, batch.len());
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "request span limit must be positive")]
+    fn chunk_requests_reject_zero_limit() {
+        let batch = crate::SpanBatch::new();
+        let resource = pb::Resource::default();
+        let _ = encode_native_trace_export_request_chunks(&resource, "", &batch, 0);
     }
 
     fn equivalent(resource: &pb::Resource, scope: &str, spans: &[CompletedSpan]) {

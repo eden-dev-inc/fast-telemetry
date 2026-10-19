@@ -43,13 +43,19 @@ Highlights:
 - Added `SpanCollectorConfig::with_producer_batch_size` and
   `RuntimeConfig::with_span_config` to select 1–1,024 completed spans per native
   producer publication. The 384-span default follows the measured 256–384
-  batch-size knee. This target is separate from the exporter's total request cap;
+  batch-size knee. This target is separate from the exporter's per-request cap;
   tracing adapter sinks retain immediate publication. Larger native defaults can
   delay low-volume publication, so keep an explicit local-flush deadline.
 - Added direct native OTLP encoding and consuming `CompletedSpan::into_otlp`.
   The span exporter reads bucket storage directly and transfers encoded bodies
   through the existing acknowledged HTTP transport. Added lossless sender and
   sustained-retention benchmark harnesses with payload verification.
+- Fixed span export truncation when a periodic drain exceeds `max_batch_size`.
+  Periodic and final shutdown drains now split every span into bounded requests
+  (default 512 spans per request), including chunks after a failed or partially
+  rejected request. Requests are attempted once without replay. Positive request
+  limits and export intervals are validated before draining. Span backoff jitter
+  now varies in both directions and respects its five-minute maximum.
 - Added the `otlp-logs` feature and
   `fast_telemetry::otlp::build_log_export_request`.
 - Added `OtlpHttpConfig`, `OtlpTlsConfig`, and `OtlpHttpClient` with custom
