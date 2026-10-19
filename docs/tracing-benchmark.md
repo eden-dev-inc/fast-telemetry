@@ -4,6 +4,10 @@ Use two complementary benchmarks: the backend lifecycle comparison below, and
 [the complete sender pipeline](../benchmarks/tracing-end-to-end/README.md).
 Both verify actual retained payloads; their timing boundaries differ.
 
+The [2026-10-19 review report](../benchmarks/tracing-end-to-end/results/2026-10-19-capture/README.md)
+includes raw lossless sender and Full/UserFields lifecycle samples, profiles,
+source identities, and the measured cost of checked native TLS borrowing.
+
 | Benchmark | Included | Excluded |
 | --- | --- | --- |
 | `bench_tracing_backends` | Recording, required local flush, drain; separate actual payload destruction | Protobuf encoding, compression, network |

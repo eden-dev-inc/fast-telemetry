@@ -1,0 +1,1920 @@
+[
+  {
+    "fixture": "allocations-drop-in-attributes-16",
+    "row": {
+      "mode": "DropIn",
+      "workload": "Attributes",
+      "transport": "capture",
+      "threads": "16",
+      "batch_spans_per_thread": "256",
+      "cycles": "4",
+      "warmup": "16",
+      "verified_traces": "8192",
+      "verified_spans": "16384",
+      "verified_events": "8192",
+      "wire_requests": "4",
+      "wire_bytes": "2072824",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "5413.869",
+      "pipeline_cpu_ns_per_span": "2706.934",
+      "pipeline_wall_ns_per_trace": "870.979",
+      "pipeline_traces_per_sec": "1148133.624",
+      "pipeline_spans_per_sec": "2296267.248",
+      "process_cpu_ns": "44350412",
+      "wall_ns": "7135058"
+    },
+    "phases": {
+      "1": {
+        "calls": 64,
+        "cpu_ns": 38350952,
+        "wall_ns": 38339438
+      },
+      "2": {
+        "calls": 4,
+        "cpu_ns": 152550,
+        "wall_ns": 153602
+      },
+      "3": {
+        "calls": 4,
+        "cpu_ns": 2872450,
+        "wall_ns": 2873315
+      },
+      "4": {
+        "calls": 8,
+        "cpu_ns": 15080,
+        "wall_ns": 15280
+      },
+      "5": {
+        "calls": 4,
+        "cpu_ns": 1404730,
+        "wall_ns": 1405747
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4,
+        "cpu_ns": 81950,
+        "wall_ns": 2669474
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 57344,
+        "requested_bytes": 4669440,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 4,
+        "requested_bytes": 2072824,
+        "frees": 0
+      },
+      "4": {
+        "calls": 28,
+        "requested_bytes": 5364,
+        "frees": 24
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 57352
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 32,
+      "3": 3,
+      "5": 2
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "allocations-drop-in-children-16",
+    "row": {
+      "mode": "DropIn",
+      "workload": "Children",
+      "transport": "capture",
+      "threads": "16",
+      "batch_spans_per_thread": "256",
+      "cycles": "4",
+      "warmup": "16",
+      "verified_traces": "4096",
+      "verified_spans": "16384",
+      "verified_events": "0",
+      "wire_requests": "4",
+      "wire_bytes": "1077496",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "1757.866",
+      "pipeline_cpu_ns_per_span": "439.467",
+      "pipeline_wall_ns_per_trace": "304.174",
+      "pipeline_traces_per_sec": "3287596.467",
+      "pipeline_spans_per_sec": "13150385.867",
+      "process_cpu_ns": "7200220",
+      "wall_ns": "1245895"
+    },
+    "phases": {
+      "1": {
+        "calls": 64,
+        "cpu_ns": 5120630,
+        "wall_ns": 5107562
+      },
+      "2": {
+        "calls": 4,
+        "cpu_ns": 150040,
+        "wall_ns": 151012
+      },
+      "3": {
+        "calls": 4,
+        "cpu_ns": 402270,
+        "wall_ns": 403224
+      },
+      "4": {
+        "calls": 8,
+        "cpu_ns": 10370,
+        "wall_ns": 10691
+      },
+      "5": {
+        "calls": 4,
+        "cpu_ns": 46500,
+        "wall_ns": 47201
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4,
+        "cpu_ns": 97870,
+        "wall_ns": 616577
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 4,
+        "requested_bytes": 1077496,
+        "frees": 0
+      },
+      "4": {
+        "calls": 28,
+        "requested_bytes": 5364,
+        "frees": 24
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 8
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {},
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "allocations-drop-in-root-16",
+    "row": {
+      "mode": "DropIn",
+      "workload": "Root",
+      "transport": "capture",
+      "threads": "16",
+      "batch_spans_per_thread": "256",
+      "cycles": "4",
+      "warmup": "16",
+      "verified_traces": "16384",
+      "verified_spans": "16384",
+      "verified_events": "0",
+      "wire_requests": "4",
+      "wire_bytes": "917752",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "435.443",
+      "pipeline_cpu_ns_per_span": "435.443",
+      "pipeline_wall_ns_per_trace": "73.016",
+      "pipeline_traces_per_sec": "13695630.004",
+      "pipeline_spans_per_sec": "13695630.004",
+      "process_cpu_ns": "7134290",
+      "wall_ns": "1196294"
+    },
+    "phases": {
+      "1": {
+        "calls": 64,
+        "cpu_ns": 4892380,
+        "wall_ns": 4879575
+      },
+      "2": {
+        "calls": 4,
+        "cpu_ns": 152230,
+        "wall_ns": 153292
+      },
+      "3": {
+        "calls": 4,
+        "cpu_ns": 365960,
+        "wall_ns": 367014
+      },
+      "4": {
+        "calls": 8,
+        "cpu_ns": 9960,
+        "wall_ns": 10210
+      },
+      "5": {
+        "calls": 4,
+        "cpu_ns": 45970,
+        "wall_ns": 46750
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4,
+        "cpu_ns": 100590,
+        "wall_ns": 601918
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 4,
+        "requested_bytes": 917752,
+        "frees": 0
+      },
+      "4": {
+        "calls": 28,
+        "requested_bytes": 5364,
+        "frees": 24
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 8
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {},
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "allocations-native-attributes-16",
+    "row": {
+      "mode": "Native",
+      "workload": "Attributes",
+      "transport": "capture",
+      "threads": "16",
+      "batch_spans_per_thread": "256",
+      "cycles": "4",
+      "warmup": "16",
+      "verified_traces": "8192",
+      "verified_spans": "16384",
+      "verified_events": "8192",
+      "wire_requests": "4",
+      "wire_bytes": "2072824",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "3145.858",
+      "pipeline_cpu_ns_per_span": "1572.929",
+      "pipeline_wall_ns_per_trace": "653.619",
+      "pipeline_traces_per_sec": "1529943.527",
+      "pipeline_spans_per_sec": "3059887.055",
+      "process_cpu_ns": "25770872",
+      "wall_ns": "5354446"
+    },
+    "phases": {
+      "1": {
+        "calls": 64,
+        "cpu_ns": 20331200,
+        "wall_ns": 20312296
+      },
+      "2": {
+        "calls": 4,
+        "cpu_ns": 15690,
+        "wall_ns": 16000
+      },
+      "3": {
+        "calls": 4,
+        "cpu_ns": 2678952,
+        "wall_ns": 2680022
+      },
+      "4": {
+        "calls": 8,
+        "cpu_ns": 28530,
+        "wall_ns": 28760
+      },
+      "5": {
+        "calls": 4,
+        "cpu_ns": 1066240,
+        "wall_ns": 1067063
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4,
+        "cpu_ns": 105470,
+        "wall_ns": 1544081
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 32768,
+        "requested_bytes": 6160384,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 4,
+        "requested_bytes": 2072824,
+        "frees": 0
+      },
+      "4": {
+        "calls": 28,
+        "requested_bytes": 5364,
+        "frees": 24
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 32776
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 27,
+      "3": 2,
+      "5": 1
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "allocations-native-children-16",
+    "row": {
+      "mode": "Native",
+      "workload": "Children",
+      "transport": "capture",
+      "threads": "16",
+      "batch_spans_per_thread": "256",
+      "cycles": "4",
+      "warmup": "16",
+      "verified_traces": "4096",
+      "verified_spans": "16384",
+      "verified_events": "0",
+      "wire_requests": "4",
+      "wire_bytes": "1077496",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "1391.985",
+      "pipeline_cpu_ns_per_span": "347.996",
+      "pipeline_wall_ns_per_trace": "258.264",
+      "pipeline_traces_per_sec": "3872000.877",
+      "pipeline_spans_per_sec": "15488003.509",
+      "process_cpu_ns": "5701570",
+      "wall_ns": "1057851"
+    },
+    "phases": {
+      "1": {
+        "calls": 64,
+        "cpu_ns": 3551990,
+        "wall_ns": 3685979
+      },
+      "2": {
+        "calls": 4,
+        "cpu_ns": 9150,
+        "wall_ns": 9150
+      },
+      "3": {
+        "calls": 4,
+        "cpu_ns": 477440,
+        "wall_ns": 478436
+      },
+      "4": {
+        "calls": 8,
+        "cpu_ns": 12490,
+        "wall_ns": 12700
+      },
+      "5": {
+        "calls": 4,
+        "cpu_ns": 65100,
+        "wall_ns": 65930
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4,
+        "cpu_ns": 90540,
+        "wall_ns": 474315
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 4,
+        "requested_bytes": 1077496,
+        "frees": 0
+      },
+      "4": {
+        "calls": 28,
+        "requested_bytes": 5364,
+        "frees": 24
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 8
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 16
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "allocations-native-root-16",
+    "row": {
+      "mode": "Native",
+      "workload": "Root",
+      "transport": "capture",
+      "threads": "16",
+      "batch_spans_per_thread": "256",
+      "cycles": "4",
+      "warmup": "16",
+      "verified_traces": "16384",
+      "verified_spans": "16384",
+      "verified_events": "0",
+      "wire_requests": "4",
+      "wire_bytes": "917752",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "304.815",
+      "pipeline_cpu_ns_per_span": "304.815",
+      "pipeline_wall_ns_per_trace": "59.440",
+      "pipeline_traces_per_sec": "16823738.887",
+      "pipeline_spans_per_sec": "16823738.887",
+      "process_cpu_ns": "4994091",
+      "wall_ns": "973862"
+    },
+    "phases": {
+      "1": {
+        "calls": 64,
+        "cpu_ns": 3016050,
+        "wall_ns": 3002693
+      },
+      "2": {
+        "calls": 4,
+        "cpu_ns": 8890,
+        "wall_ns": 8971
+      },
+      "3": {
+        "calls": 4,
+        "cpu_ns": 434371,
+        "wall_ns": 435335
+      },
+      "4": {
+        "calls": 8,
+        "cpu_ns": 11240,
+        "wall_ns": 11540
+      },
+      "5": {
+        "calls": 4,
+        "cpu_ns": 48840,
+        "wall_ns": 49630
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4,
+        "cpu_ns": 91860,
+        "wall_ns": 451205
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 4,
+        "requested_bytes": 917752,
+        "frees": 0
+      },
+      "4": {
+        "calls": 28,
+        "requested_bytes": 5364,
+        "frees": 24
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 8
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {},
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "allocations-otel-attributes-16",
+    "row": {
+      "mode": "Otel",
+      "workload": "Attributes",
+      "transport": "capture",
+      "threads": "16",
+      "batch_spans_per_thread": "256",
+      "cycles": "4",
+      "warmup": "16",
+      "verified_traces": "8192",
+      "verified_spans": "16384",
+      "verified_events": "8192",
+      "wire_requests": "4",
+      "wire_bytes": "2203896",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "13957.561",
+      "pipeline_cpu_ns_per_span": "6978.781",
+      "pipeline_wall_ns_per_trace": "4908.916",
+      "pipeline_traces_per_sec": "203710.961",
+      "pipeline_spans_per_sec": "407421.922",
+      "process_cpu_ns": "114340340",
+      "wall_ns": "40213840"
+    },
+    "phases": {
+      "1": {
+        "calls": 64,
+        "cpu_ns": 77695812,
+        "wall_ns": 77814316
+      },
+      "2": {
+        "calls": 4,
+        "cpu_ns": 44210,
+        "wall_ns": 34943253
+      },
+      "3": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "4": {
+        "calls": 4,
+        "cpu_ns": 3060,
+        "wall_ns": 3420
+      },
+      "5": {
+        "calls": 4,
+        "cpu_ns": 5480,
+        "wall_ns": 5480
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4,
+        "cpu_ns": 82430,
+        "wall_ns": 5249226
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 90112,
+        "requested_bytes": 14770176,
+        "frees": 40960
+      },
+      "2": {
+        "calls": 12,
+        "requested_bytes": 608,
+        "frees": 16
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 8
+      },
+      "6": {
+        "calls": 196724,
+        "requested_bytes": 18039580,
+        "frees": 229436
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 94,
+      "6": 34
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "allocations-otel-children-16",
+    "row": {
+      "mode": "Otel",
+      "workload": "Children",
+      "transport": "capture",
+      "threads": "16",
+      "batch_spans_per_thread": "256",
+      "cycles": "4",
+      "warmup": "16",
+      "verified_traces": "4096",
+      "verified_spans": "16384",
+      "verified_events": "0",
+      "wire_requests": "4",
+      "wire_bytes": "1208568",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "16385.224",
+      "pipeline_cpu_ns_per_span": "4096.306",
+      "pipeline_wall_ns_per_trace": "3397.669",
+      "pipeline_traces_per_sec": "294319.413",
+      "pipeline_spans_per_sec": "1177277.650",
+      "process_cpu_ns": "67113879",
+      "wall_ns": "13916853"
+    },
+    "phases": {
+      "1": {
+        "calls": 64,
+        "cpu_ns": 55440666,
+        "wall_ns": 55443902
+      },
+      "2": {
+        "calls": 4,
+        "cpu_ns": 54930,
+        "wall_ns": 9993694
+      },
+      "3": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "4": {
+        "calls": 4,
+        "cpu_ns": 3390,
+        "wall_ns": 3690
+      },
+      "5": {
+        "calls": 4,
+        "cpu_ns": 5710,
+        "wall_ns": 5651
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4,
+        "cpu_ns": 109750,
+        "wall_ns": 3900568
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 28672,
+        "requested_bytes": 6356992,
+        "frees": 28672
+      },
+      "2": {
+        "calls": 12,
+        "requested_bytes": 608,
+        "frees": 16
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 8
+      },
+      "6": {
+        "calls": 61556,
+        "requested_bytes": 12165916,
+        "frees": 61500
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 41,
+      "6": 9
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "allocations-otel-root-16",
+    "row": {
+      "mode": "Otel",
+      "workload": "Root",
+      "transport": "capture",
+      "threads": "16",
+      "batch_spans_per_thread": "256",
+      "cycles": "4",
+      "warmup": "16",
+      "verified_traces": "16384",
+      "verified_spans": "16384",
+      "verified_events": "0",
+      "wire_requests": "4",
+      "wire_bytes": "1048824",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "3801.036",
+      "pipeline_cpu_ns_per_span": "3801.036",
+      "pipeline_wall_ns_per_trace": "773.271",
+      "pipeline_traces_per_sec": "1293207.181",
+      "pipeline_spans_per_sec": "1293207.181",
+      "process_cpu_ns": "62276174",
+      "wall_ns": "12669277"
+    },
+    "phases": {
+      "1": {
+        "calls": 64,
+        "cpu_ns": 51924450,
+        "wall_ns": 51969498
+      },
+      "2": {
+        "calls": 4,
+        "cpu_ns": 39990,
+        "wall_ns": 8957121
+      },
+      "3": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "4": {
+        "calls": 4,
+        "cpu_ns": 2900,
+        "wall_ns": 3230
+      },
+      "5": {
+        "calls": 4,
+        "cpu_ns": 4850,
+        "wall_ns": 4870
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4,
+        "cpu_ns": 85510,
+        "wall_ns": 3692115
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 16384,
+        "requested_bytes": 4980736,
+        "frees": 16384
+      },
+      "2": {
+        "calls": 12,
+        "requested_bytes": 608,
+        "frees": 16
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 8
+      },
+      "6": {
+        "calls": 49268,
+        "requested_bytes": 11871004,
+        "frees": 49212
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 52,
+      "6": 9
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "controls-drop-in-attributes-8",
+    "row": {
+      "mode": "DropIn",
+      "workload": "Attributes",
+      "transport": "capture",
+      "threads": "8",
+      "batch_spans_per_thread": "64",
+      "cycles": "4096",
+      "warmup": "16",
+      "verified_traces": "1048576",
+      "verified_spans": "2097152",
+      "verified_events": "1048576",
+      "wire_requests": "4096",
+      "wire_bytes": "266465280",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "2576.469",
+      "pipeline_cpu_ns_per_span": "1288.235",
+      "pipeline_wall_ns_per_trace": "889.242",
+      "pipeline_traces_per_sec": "1124553.164",
+      "pipeline_spans_per_sec": "2249106.329",
+      "process_cpu_ns": "2701623601",
+      "wall_ns": "932437908"
+    },
+    "phases": {
+      "1": {
+        "calls": 32768,
+        "cpu_ns": 1463041117,
+        "wall_ns": 1465573620
+      },
+      "2": {
+        "calls": 4096,
+        "cpu_ns": 25190623,
+        "wall_ns": 25293169
+      },
+      "3": {
+        "calls": 4096,
+        "cpu_ns": 302301062,
+        "wall_ns": 303084089
+      },
+      "4": {
+        "calls": 8192,
+        "cpu_ns": 9984176,
+        "wall_ns": 10148001
+      },
+      "5": {
+        "calls": 4096,
+        "cpu_ns": 197985176,
+        "wall_ns": 198471425
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4096,
+        "cpu_ns": 53320284,
+        "wall_ns": 377577075
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 926,
+      "2": 27,
+      "3": 241,
+      "4": 21,
+      "5": 257,
+      "7": 62
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "controls-drop-in-children-8",
+    "row": {
+      "mode": "DropIn",
+      "workload": "Children",
+      "transport": "capture",
+      "threads": "8",
+      "batch_spans_per_thread": "64",
+      "cycles": "4096",
+      "warmup": "16",
+      "verified_traces": "524288",
+      "verified_spans": "2097152",
+      "verified_events": "0",
+      "wire_requests": "4096",
+      "wire_bytes": "138141696",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "2547.550",
+      "pipeline_cpu_ns_per_span": "636.887",
+      "pipeline_wall_ns_per_trace": "637.570",
+      "pipeline_traces_per_sec": "1568456.200",
+      "pipeline_spans_per_sec": "6273824.802",
+      "process_cpu_ns": "1335649723",
+      "wall_ns": "334270093"
+    },
+    "phases": {
+      "1": {
+        "calls": 32768,
+        "cpu_ns": 681950737,
+        "wall_ns": 679742077
+      },
+      "2": {
+        "calls": 4096,
+        "cpu_ns": 26509116,
+        "wall_ns": 26695497
+      },
+      "3": {
+        "calls": 4096,
+        "cpu_ns": 57536676,
+        "wall_ns": 57775109
+      },
+      "4": {
+        "calls": 8192,
+        "cpu_ns": 8907804,
+        "wall_ns": 9062318
+      },
+      "5": {
+        "calls": 4096,
+        "cpu_ns": 8690191,
+        "wall_ns": 8764716
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4096,
+        "cpu_ns": 50248305,
+        "wall_ns": 214568465
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 598,
+      "2": 38,
+      "3": 63,
+      "4": 11,
+      "5": 15,
+      "7": 55
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "controls-drop-in-root-8",
+    "row": {
+      "mode": "DropIn",
+      "workload": "Root",
+      "transport": "capture",
+      "threads": "8",
+      "batch_spans_per_thread": "64",
+      "cycles": "4096",
+      "warmup": "16",
+      "verified_traces": "2097152",
+      "verified_spans": "2097152",
+      "verified_events": "0",
+      "wire_requests": "4096",
+      "wire_bytes": "117694464",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "590.820",
+      "pipeline_cpu_ns_per_span": "590.820",
+      "pipeline_wall_ns_per_trace": "156.242",
+      "pipeline_traces_per_sec": "6400332.459",
+      "pipeline_spans_per_sec": "6400332.459",
+      "process_cpu_ns": "1239038622",
+      "wall_ns": "327662979"
+    },
+    "phases": {
+      "1": {
+        "calls": 32768,
+        "cpu_ns": 579282536,
+        "wall_ns": 577826268
+      },
+      "2": {
+        "calls": 4096,
+        "cpu_ns": 25697820,
+        "wall_ns": 25977699
+      },
+      "3": {
+        "calls": 4096,
+        "cpu_ns": 57113919,
+        "wall_ns": 57507233
+      },
+      "4": {
+        "calls": 8192,
+        "cpu_ns": 10243314,
+        "wall_ns": 10428331
+      },
+      "5": {
+        "calls": 4096,
+        "cpu_ns": 10015425,
+        "wall_ns": 10231554
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4096,
+        "cpu_ns": 56566675,
+        "wall_ns": 205190637
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 550,
+      "2": 29,
+      "3": 59,
+      "4": 16,
+      "5": 14,
+      "7": 41
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "controls-otel-attributes-8",
+    "row": {
+      "mode": "Otel",
+      "workload": "Attributes",
+      "transport": "capture",
+      "threads": "8",
+      "batch_spans_per_thread": "64",
+      "cycles": "4096",
+      "warmup": "16",
+      "verified_traces": "1048576",
+      "verified_spans": "2097152",
+      "verified_events": "1048576",
+      "wire_requests": "4096",
+      "wire_bytes": "283242496",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "8856.025",
+      "pipeline_cpu_ns_per_span": "4428.012",
+      "pipeline_wall_ns_per_trace": "4683.614",
+      "pipeline_traces_per_sec": "213510.317",
+      "pipeline_spans_per_sec": "427020.633",
+      "process_cpu_ns": "9286215237",
+      "wall_ns": "4911125683"
+    },
+    "phases": {
+      "1": {
+        "calls": 32768,
+        "cpu_ns": 4436533245,
+        "wall_ns": 4437465785
+      },
+      "2": {
+        "calls": 4096,
+        "cpu_ns": 41854532,
+        "wall_ns": 4145498435
+      },
+      "3": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "4": {
+        "calls": 4096,
+        "cpu_ns": 2943302,
+        "wall_ns": 2978917
+      },
+      "5": {
+        "calls": 4096,
+        "cpu_ns": 4254441,
+        "wall_ns": 4240179
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4096,
+        "cpu_ns": 59772278,
+        "wall_ns": 745923197
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 4371,
+      "2": 29,
+      "4": 9,
+      "5": 6,
+      "6": 3666,
+      "7": 40
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "controls-otel-children-8",
+    "row": {
+      "mode": "Otel",
+      "workload": "Children",
+      "transport": "capture",
+      "threads": "8",
+      "batch_spans_per_thread": "64",
+      "cycles": "4096",
+      "warmup": "16",
+      "verified_traces": "524288",
+      "verified_spans": "2097152",
+      "verified_events": "0",
+      "wire_requests": "4096",
+      "wire_bytes": "154918912",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "10937.231",
+      "pipeline_cpu_ns_per_span": "2734.308",
+      "pipeline_wall_ns_per_trace": "3680.168",
+      "pipeline_traces_per_sec": "271726.736",
+      "pipeline_spans_per_sec": "1086906.942",
+      "process_cpu_ns": "5734259157",
+      "wall_ns": "1929467849"
+    },
+    "phases": {
+      "1": {
+        "calls": 32768,
+        "cpu_ns": 3852953372,
+        "wall_ns": 3854684758
+      },
+      "2": {
+        "calls": 4096,
+        "cpu_ns": 34293421,
+        "wall_ns": 1274163187
+      },
+      "3": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "4": {
+        "calls": 4096,
+        "cpu_ns": 3119880,
+        "wall_ns": 3152034
+      },
+      "5": {
+        "calls": 4096,
+        "cpu_ns": 5036761,
+        "wall_ns": 5049940
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4096,
+        "cpu_ns": 54602423,
+        "wall_ns": 635202747
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 1829,
+      "2": 17,
+      "4": 6,
+      "5": 10,
+      "6": 801,
+      "7": 40
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "controls-otel-root-8",
+    "row": {
+      "mode": "Otel",
+      "workload": "Root",
+      "transport": "capture",
+      "threads": "8",
+      "batch_spans_per_thread": "64",
+      "cycles": "4096",
+      "warmup": "16",
+      "verified_traces": "2097152",
+      "verified_spans": "2097152",
+      "verified_events": "0",
+      "wire_requests": "4096",
+      "wire_bytes": "134471680",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "2737.218",
+      "pipeline_cpu_ns_per_span": "2737.218",
+      "pipeline_wall_ns_per_trace": "857.472",
+      "pipeline_traces_per_sec": "1166219.041",
+      "pipeline_spans_per_sec": "1166219.041",
+      "process_cpu_ns": "5740362698",
+      "wall_ns": "1798248807"
+    },
+    "phases": {
+      "1": {
+        "calls": 32768,
+        "cpu_ns": 4006694445,
+        "wall_ns": 4007560279
+      },
+      "2": {
+        "calls": 4096,
+        "cpu_ns": 33739447,
+        "wall_ns": 1145920541
+      },
+      "3": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "4": {
+        "calls": 4096,
+        "cpu_ns": 3150391,
+        "wall_ns": 3194321
+      },
+      "5": {
+        "calls": 4096,
+        "cpu_ns": 4850630,
+        "wall_ns": 4915377
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 4096,
+        "cpu_ns": 52872131,
+        "wall_ns": 632340986
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 3403,
+      "2": 29,
+      "4": 5,
+      "5": 3,
+      "6": 938,
+      "7": 46
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "native-native-attributes-8",
+    "row": {
+      "mode": "Native",
+      "workload": "Attributes",
+      "transport": "capture",
+      "threads": "8",
+      "batch_spans_per_thread": "512",
+      "cycles": "2048",
+      "warmup": "16",
+      "verified_traces": "4194304",
+      "verified_spans": "8388608",
+      "verified_events": "4194304",
+      "wire_requests": "2048",
+      "wire_bytes": "1065381888",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "1142.006",
+      "pipeline_cpu_ns_per_span": "571.003",
+      "pipeline_wall_ns_per_trace": "552.207",
+      "pipeline_traces_per_sec": "1810916.084",
+      "pipeline_spans_per_sec": "3621832.168",
+      "process_cpu_ns": "4789918948",
+      "wall_ns": "2316122783"
+    },
+    "phases": {
+      "1": {
+        "calls": 16384,
+        "cpu_ns": 2586933233,
+        "wall_ns": 2587093538
+      },
+      "2": {
+        "calls": 2048,
+        "cpu_ns": 4319670,
+        "wall_ns": 4386033
+      },
+      "3": {
+        "calls": 2048,
+        "cpu_ns": 1299223143,
+        "wall_ns": 1299927142
+      },
+      "4": {
+        "calls": 4096,
+        "cpu_ns": 8118491,
+        "wall_ns": 8196815
+      },
+      "5": {
+        "calls": 2048,
+        "cpu_ns": 459247076,
+        "wall_ns": 459797391
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 2048,
+        "cpu_ns": 34211784,
+        "wall_ns": 534483752
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 2077,
+      "2": 3,
+      "3": 1333,
+      "4": 14,
+      "5": 449,
+      "7": 30
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "native-native-children-8",
+    "row": {
+      "mode": "Native",
+      "workload": "Children",
+      "transport": "capture",
+      "threads": "8",
+      "batch_spans_per_thread": "512",
+      "cycles": "2048",
+      "warmup": "16",
+      "verified_traces": "2097152",
+      "verified_spans": "8388608",
+      "verified_events": "0",
+      "wire_requests": "2048",
+      "wire_bytes": "551677952",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "876.432",
+      "pipeline_cpu_ns_per_span": "219.108",
+      "pipeline_wall_ns_per_trace": "266.392",
+      "pipeline_traces_per_sec": "3753860.970",
+      "pipeline_spans_per_sec": "15015443.879",
+      "process_cpu_ns": "1838010528",
+      "wall_ns": "558665336"
+    },
+    "phases": {
+      "1": {
+        "calls": 16384,
+        "cpu_ns": 1176474639,
+        "wall_ns": 1171870417
+      },
+      "2": {
+        "calls": 2048,
+        "cpu_ns": 3954710,
+        "wall_ns": 3985746
+      },
+      "3": {
+        "calls": 2048,
+        "cpu_ns": 251447231,
+        "wall_ns": 251906843
+      },
+      "4": {
+        "calls": 4096,
+        "cpu_ns": 6038260,
+        "wall_ns": 6186560
+      },
+      "5": {
+        "calls": 2048,
+        "cpu_ns": 24666932,
+        "wall_ns": 25059704
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 2048,
+        "cpu_ns": 30488372,
+        "wall_ns": 262235540
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 1113,
+      "2": 8,
+      "3": 251,
+      "4": 18,
+      "5": 27,
+      "7": 24
+    },
+    "instrumented_timings_not_performance_results": true
+  },
+  {
+    "fixture": "native-native-root-8",
+    "row": {
+      "mode": "Native",
+      "workload": "Root",
+      "transport": "capture",
+      "threads": "8",
+      "batch_spans_per_thread": "512",
+      "cycles": "2048",
+      "warmup": "16",
+      "verified_traces": "8388608",
+      "verified_spans": "8388608",
+      "verified_events": "0",
+      "wire_requests": "2048",
+      "wire_bytes": "469889024",
+      "sampled_out": "0",
+      "dropped": "0",
+      "pipeline_cpu_ns_per_trace": "233.597",
+      "pipeline_cpu_ns_per_span": "233.597",
+      "pipeline_wall_ns_per_trace": "65.752",
+      "pipeline_traces_per_sec": "15208696.500",
+      "pipeline_spans_per_sec": "15208696.500",
+      "process_cpu_ns": "1959551519",
+      "wall_ns": "551566533"
+    },
+    "phases": {
+      "1": {
+        "calls": 16384,
+        "cpu_ns": 1314840557,
+        "wall_ns": 1310645207
+      },
+      "2": {
+        "calls": 2048,
+        "cpu_ns": 3430082,
+        "wall_ns": 3431669
+      },
+      "3": {
+        "calls": 2048,
+        "cpu_ns": 234830607,
+        "wall_ns": 235411054
+      },
+      "4": {
+        "calls": 4096,
+        "cpu_ns": 5635991,
+        "wall_ns": 5728748
+      },
+      "5": {
+        "calls": 2048,
+        "cpu_ns": 25116504,
+        "wall_ns": 25469079
+      },
+      "6": {
+        "calls": 0,
+        "cpu_ns": 0,
+        "wall_ns": 0
+      },
+      "7": {
+        "calls": 2048,
+        "cpu_ns": 27527255,
+        "wall_ns": 272552836
+      }
+    },
+    "allocations": {
+      "1": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "2": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "3": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "4": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "5": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "6": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      },
+      "7": {
+        "calls": 0,
+        "requested_bytes": 0,
+        "frees": 0
+      }
+    },
+    "sample_totals": {
+      "1": 1103,
+      "2": 4,
+      "3": 245,
+      "4": 6,
+      "5": 28,
+      "7": 32
+    },
+    "instrumented_timings_not_performance_results": true
+  }
+]

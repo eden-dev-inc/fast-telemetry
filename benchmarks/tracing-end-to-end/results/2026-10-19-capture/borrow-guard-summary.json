@@ -1,0 +1,44 @@
+[
+  {
+    "workload": "root",
+    "encoding": "record",
+    "before_ns": 117.794,
+    "final_ns": 127.505,
+    "paired_change_pct": 8.256392045454541
+  },
+  {
+    "workload": "root",
+    "encoding": "native",
+    "before_ns": 146.383,
+    "final_ns": 156.268,
+    "paired_change_pct": 6.782126585057924
+  },
+  {
+    "workload": "children",
+    "encoding": "record",
+    "before_ns": 431.512,
+    "final_ns": 445.815,
+    "paired_change_pct": 2.927612673575708
+  },
+  {
+    "workload": "children",
+    "encoding": "native",
+    "before_ns": 557.656,
+    "final_ns": 570.888,
+    "paired_change_pct": 2.48056149310687
+  },
+  {
+    "workload": "attributes",
+    "encoding": "record",
+    "before_ns": 1105.183,
+    "final_ns": 1126.108,
+    "paired_change_pct": 1.967197149836486
+  },
+  {
+    "workload": "attributes",
+    "encoding": "native",
+    "before_ns": 1371.405,
+    "final_ns": 1393.399,
+    "paired_change_pct": 1.6037567312354728
+  }
+]

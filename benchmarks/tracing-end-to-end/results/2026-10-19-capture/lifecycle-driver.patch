@@ -1,0 +1,14 @@
+--- repository-benchmark
++++ diagnostic-benchmark
+@@ -547,10 +547,8 @@
+                     .with_tracer(provider.tracer("matched-tracing-benchmark"))
+                     .with_location(true)
+                     .with_level(true)
+-                    .with_target(true)
+                     .with_threads(false)
+-                    .with_tracked_inactivity(false)
+-                    .with_context_activation(false);
++                    .with_tracked_inactivity(false);
+                 (
+                     Self::Otel { provider, exporter },
+                     Dispatch::new(Registry::default().with(layer)),

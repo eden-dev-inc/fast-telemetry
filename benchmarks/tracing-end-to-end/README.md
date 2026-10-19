@@ -2,6 +2,9 @@
 
 This standalone Linux benchmark compares three complete recording backends:
 
+See the [2026-10-19 review measurements](results/2026-10-19-capture/README.md)
+for retained sample data, profiling results and source/dependency provenance.
+
 | Mode | Path |
 | --- | --- |
 | `native` | Native fast-telemetry spans → thread-local buckets → direct OTLP encoder |

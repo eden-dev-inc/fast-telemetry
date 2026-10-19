@@ -1,0 +1,62 @@
+[
+  {
+    "threads": 1,
+    "workload": "root",
+    "native": 129.92149999999998,
+    "native-matched": 264.7075,
+    "fast": 433.694,
+    "direct": 307.0775,
+    "native-user-fields": 130.1945,
+    "direct-user-fields": 225.541
+  },
+  {
+    "threads": 1,
+    "workload": "children",
+    "native": 376.4275,
+    "native-matched": 886.5029999999999,
+    "fast": 1903.0865,
+    "direct": 1134.6640000000002,
+    "native-user-fields": 376.49800000000005,
+    "direct-user-fields": 831.7180000000001
+  },
+  {
+    "threads": 1,
+    "workload": "attributes",
+    "native": 409.567,
+    "native-matched": 629.235,
+    "fast": 1383.499,
+    "direct": 968.6975,
+    "native-user-fields": 418.0365,
+    "direct-user-fields": 734.7339999999999
+  },
+  {
+    "threads": 8,
+    "workload": "root",
+    "native": 350.819,
+    "native-matched": 687.6855,
+    "fast": 880.637,
+    "direct": 663.224,
+    "native-user-fields": 367.629,
+    "direct-user-fields": 445.0715
+  },
+  {
+    "threads": 8,
+    "workload": "children",
+    "native": 838.7375,
+    "native-matched": 1936.2334999999998,
+    "fast": 3611.5885,
+    "direct": 1940.9279999999999,
+    "native-user-fields": 810.621,
+    "direct-user-fields": 1285.0525
+  },
+  {
+    "threads": 8,
+    "workload": "attributes",
+    "native": 980.8015,
+    "native-matched": 1669.3165,
+    "fast": 2635.188,
+    "direct": 1986.179,
+    "native-user-fields": 1001.4265,
+    "direct-user-fields": 1499.242
+  }
+]
