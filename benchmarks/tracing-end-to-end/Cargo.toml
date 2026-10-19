@@ -1,0 +1,31 @@
+[package]
+name = "tracing-end-to-end"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+# Keep the pinned comparison stack separate from workspace SDK benchmarks.
+[workspace]
+
+[dependencies]
+async-trait = "0.1"
+bytes = "1"
+fast-telemetry = { path = "../../crates/fast-telemetry", features = ["otlp"] }
+fast-telemetry-tracing = { path = "../../crates/fast-telemetry-tracing" }
+futures-executor = "0.3"
+http = "1"
+libc = "0.2"
+opentelemetry = { version = "=0.30.0", default-features = false, features = ["trace"] }
+opentelemetry-http = { version = "=0.30.0", features = ["reqwest"] }
+opentelemetry-otlp = { version = "=0.30.0", default-features = false, features = ["trace", "http-proto"] }
+opentelemetry_sdk = { version = "=0.30.0", default-features = false, features = ["trace"] }
+parking_lot = "0.12"
+prost = "0.13"
+reqwest = { version = "=0.12.28", default-features = false, features = ["blocking", "rustls-tls"] }
+tracing = "=0.1.44"
+tracing-opentelemetry = { version = "=0.31.0", default-features = false }
+tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["registry", "std"] }
+
+[profile.release]
+strip = true

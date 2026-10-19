@@ -534,11 +534,11 @@ impl Subscriber for FastTelemetrySubscriber {
         let mut fields = self.fields(event.metadata(), event.metadata().fields().len());
         event.record(&mut fields);
         self.metadata_fields(event.metadata(), &mut fields);
-        let mut recorded = Some(SpanEvent {
+        let recorded = SpanEvent {
             name: Cow::Borrowed(event.metadata().name()),
             time_ns: now_ns(),
             attributes: fields.0,
-        });
+        };
         let parent = if event.is_contextual() {
             self.current_id()
         } else {
@@ -547,12 +547,10 @@ impl Subscriber for FastTelemetrySubscriber {
         if let Some(id) = parent {
             let mut spans = self.shard(&id).lock();
             if let Some(span) = spans.get_mut(&id.into_u64()) {
-                span.state.span.events.push(recorded.take().unwrap());
+                span.state.span.events.push(recorded);
+                return;
             }
         }
-        let Some(recorded) = recorded else {
-            return;
-        };
         let mut events = self.shared.events.lock();
         if events.len() >= self.shared.event_capacity {
             self.shared.events_dropped.fetch_add(1, Ordering::Relaxed);

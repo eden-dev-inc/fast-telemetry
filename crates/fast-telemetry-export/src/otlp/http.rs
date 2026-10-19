@@ -346,6 +346,24 @@ impl OtlpHttpClient {
         Ok(export_outcome(sent, rejected, message))
     }
 
+    /// Export a native batch encoded by fast-telemetry without protobuf objects.
+    ///
+    /// Uses the same compression, response bounds and acknowledgement handling
+    /// as [`Self::export_traces`]. The request owns its bytes and span count.
+    pub async fn export_native_traces(
+        &self,
+        request: fast_telemetry::otlp::EncodedTraceRequest,
+    ) -> Result<OtlpExportOutcome, OtlpHttpError> {
+        let sent = request.span_count();
+        let response: pb::ExportTraceServiceResponse =
+            self.send_body("/v1/traces", request.into_body()).await?;
+        let (rejected, message) = response
+            .partial_success
+            .map(|partial| (partial.rejected_spans, partial.error_message))
+            .unwrap_or_default();
+        Ok(export_outcome(sent, rejected, message))
+    }
+
     async fn send_protobuf<M, R>(&self, path: &str, message: &M) -> Result<R, OtlpHttpError>
     where
         M: Message,
@@ -359,7 +377,14 @@ impl OtlpHttpClient {
             )
         })?;
 
-        let (body, compressed) = gzip(&body, self.gzip_threshold)?;
+        self.send_body(path, body).await
+    }
+
+    async fn send_body<R>(&self, path: &str, body: Vec<u8>) -> Result<R, OtlpHttpError>
+    where
+        R: Message + Default,
+    {
+        let (body, compressed) = gzip(body, self.gzip_threshold)?;
         let mut request = self
             .client
             .post(format!("{}{path}", self.endpoint))
@@ -472,12 +497,12 @@ fn non_empty(value: String) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-fn gzip(body: &[u8], threshold: usize) -> Result<(Vec<u8>, bool), OtlpHttpError> {
+fn gzip(body: Vec<u8>, threshold: usize) -> Result<(Vec<u8>, bool), OtlpHttpError> {
     if body.len() < threshold {
-        return Ok((body.to_vec(), false));
+        return Ok((body, false));
     }
     let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
-    encoder.write_all(body).map_err(|error| {
+    encoder.write_all(&body).map_err(|error| {
         OtlpHttpError::new(
             OtlpHttpErrorKind::Encode,
             format!("failed to gzip OTLP request: {error}"),
@@ -627,11 +652,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn uncompressed_payload_transfers_existing_allocation() {
+        for (length, capacity, threshold) in [(0, 0, 1), (0, 64, 1), (1, 64, 2), (255, 512, 256)] {
+            let mut body = Vec::with_capacity(capacity);
+            body.extend((0..length).map(|index| index as u8));
+            let pointer = body.as_ptr();
+            let capacity = body.capacity();
+            let (encoded, compressed) = gzip(body, threshold).expect("uncompressed transfer");
+            assert!(!compressed);
+            assert_eq!(encoded.len(), length);
+            assert_eq!(encoded.capacity(), capacity);
+            assert_eq!(encoded.as_ptr(), pointer);
+            assert!(
+                encoded
+                    .iter()
+                    .enumerate()
+                    .all(|(index, byte)| *byte == index as u8)
+            );
+        }
+    }
+
     #[hegel::test(test_cases = 250)]
     fn generated_gzip_payloads_round_trip_at_every_threshold(tc: TestCase) {
         let body = tc.draw(gs::binary().max_size(16 * 1024));
         let threshold = tc.draw(gs::integers::<u16>().max_value(16 * 1024)) as usize;
-        let (encoded, compressed) = gzip(&body, threshold).expect("in-memory gzip");
+        let (encoded, compressed) = gzip(body.clone(), threshold).expect("in-memory gzip");
 
         assert_eq!(compressed, body.len() >= threshold);
         if compressed {

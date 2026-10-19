@@ -2,15 +2,16 @@
 //!
 //! Exports completed spans from an [`fast_telemetry::span::SpanCollector`] to an
 //! OTLP-compatible collector via HTTP POST to `/v1/traces`.
-//! Larger payloads are gzip-compressed automatically, and failed exports retry
-//! with exponential backoff.
+//! Larger payloads are gzip-compressed automatically. Consecutive failures delay
+//! later export cycles with exponential backoff.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use fast_telemetry::otlp::{build_resource, build_trace_export_request, pb};
-use fast_telemetry::span::SpanCollector;
-use prost::Message;
+use fast_telemetry::otlp::{
+    EncodedTraceRequest, build_resource, encode_native_trace_export_request_batches, pb,
+};
+use fast_telemetry::span::{SpanBatch, SpanCollector};
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
@@ -295,7 +296,7 @@ pub async fn run(
 
     let mut consecutive_failures: u32 = 0;
     let mut bufs = SpanExportBufs {
-        spans: Vec::with_capacity(config.max_batch_size),
+        spans: SpanBatch::new(),
     };
 
     let ctx = SpanExportContext {
@@ -331,7 +332,7 @@ pub async fn run(
         }
 
         bufs.spans.clear();
-        collector.drain_into(&mut bufs.spans);
+        collector.drain_batches(&mut bufs.spans);
 
         if bufs.spans.is_empty() {
             continue;
@@ -339,8 +340,7 @@ pub async fn run(
 
         let total_drained = bufs.spans.len();
         let dropped = total_drained.saturating_sub(config.max_batch_size);
-        bufs.spans.truncate(config.max_batch_size);
-        let span_count = bufs.spans.len();
+        let span_count = total_drained.min(config.max_batch_size);
 
         if dropped > 0 {
             crate::logging::log_debug!(
@@ -348,12 +348,16 @@ pub async fn run(
             );
         }
 
-        let otlp_spans: Vec<_> = bufs.spans.iter().map(|s| s.to_otlp()).collect();
-        let request = build_trace_export_request(&resource, &config.scope_name, otlp_spans);
+        let request = encode_trace_request(
+            &resource,
+            &config.scope_name,
+            &mut bufs.spans,
+            config.max_batch_size,
+        );
 
-        let body_len = request.encoded_len();
+        let body_len = request.as_bytes().len();
 
-        match client.export_traces(&request).await {
+        match client.export_native_traces(request).await {
             Ok(outcome) if outcome.rejected == 0 => {
                 consecutive_failures = 0;
                 crate::logging::log_debug!("Exported {span_count} spans ({body_len} bytes)");
@@ -385,21 +389,25 @@ struct SpanExportContext<'a> {
 }
 
 struct SpanExportBufs {
-    spans: Vec<fast_telemetry::span::CompletedSpan>,
+    spans: SpanBatch,
 }
 
 async fn export_once(ctx: &SpanExportContext<'_>, bufs: &mut SpanExportBufs) {
     bufs.spans.clear();
-    ctx.collector.drain_into(&mut bufs.spans);
+    ctx.collector.drain_batches(&mut bufs.spans);
 
     if bufs.spans.is_empty() {
         return;
     }
 
-    let otlp_spans: Vec<_> = bufs.spans.iter().map(|s| s.to_otlp()).collect();
-    let request = build_trace_export_request(ctx.resource, &ctx.config.scope_name, otlp_spans);
+    let request = encode_trace_request(
+        ctx.resource,
+        &ctx.config.scope_name,
+        &mut bufs.spans,
+        usize::MAX,
+    );
 
-    match ctx.client.export_traces(&request).await {
+    match ctx.client.export_native_traces(request).await {
         Ok(outcome) if outcome.rejected > 0 => {
             crate::logging::log_warn!(
                 "Final span export partially rejected {} spans: {}",
@@ -413,6 +421,19 @@ async fn export_once(ctx: &SpanExportContext<'_>, bufs: &mut SpanExportBufs) {
         Err(e) => crate::logging::log_warn!("Final span export failed: {e}"),
         _ => {}
     }
+}
+
+fn encode_trace_request(
+    resource: &pb::Resource,
+    scope_name: &str,
+    spans: &mut SpanBatch,
+    max_spans: usize,
+) -> EncodedTraceRequest {
+    let request =
+        encode_native_trace_export_request_batches(resource, scope_name, spans, max_spans);
+    // Release the actual payload before awaiting HTTP; keep the drain allocation.
+    spans.clear();
+    request
 }
 
 fn backoff_with_jitter(consecutive_failures: u32) -> Duration {
@@ -436,6 +457,43 @@ fn backoff_with_jitter(consecutive_failures: u32) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fast_telemetry::CompletedSpan;
+    use fast_telemetry::otlp::build_trace_export_request;
+    use prost::Message;
+
+    #[test]
+    fn native_trace_requests_preserve_batch_storage_order_and_wire_bytes() {
+        let collector = Arc::new(SpanCollector::new(1, 64));
+        let resource = build_resource("owned export", &[("version", "1")]);
+        let mut spans = SpanBatch::new();
+        for cycle in 0..4 {
+            for index in 0..2 {
+                let mut span = collector.start_span(
+                    format!("owned-{cycle}-{index}"),
+                    fast_telemetry::SpanKind::Server,
+                );
+                span.set_attribute(format!("key-{index}"), format!("value-{cycle}-{index}"));
+            }
+            collector.flush_local();
+            collector.drain_batches(&mut spans);
+            let expected = build_trace_export_request(
+                &resource,
+                "scope",
+                spans.iter().map(CompletedSpan::to_otlp).collect(),
+            );
+            let pointers = spans.buffers().map(|b| b.as_ptr()).collect::<Vec<_>>();
+            let request = encode_trace_request(&resource, "scope", &mut spans, usize::MAX);
+            assert!(spans.is_empty());
+            assert!(!pointers.is_empty());
+            assert_eq!(request.span_count(), 2);
+            assert_eq!(request.as_bytes(), expected.encode_to_vec());
+            let decoded = pb::ExportTraceServiceRequest::decode(request.as_bytes())
+                .expect("decode native export");
+            let exported = &decoded.resource_spans[0].scope_spans[0].spans;
+            assert_eq!(exported[0].name, format!("owned-{cycle}-0"));
+            assert_eq!(exported[1].name, format!("owned-{cycle}-1"));
+        }
+    }
 
     #[test]
     fn span_exporter_can_run_on_parent_tokio_runtime() {

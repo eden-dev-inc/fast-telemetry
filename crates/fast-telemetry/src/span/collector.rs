@@ -1,70 +1,79 @@
-//! Thread-local span collector with zero-atomic submit path.
+//! Per-OS-thread double-buffered span collection.
 //!
-//! Each thread buffers completed spans in a thread-local [`Vec`] — avoiding atomics,
-//! CAS loops, and hopefully cache-line contention.  When the buffer reaches
-//! [`FLUSH_THRESHOLD`] spans (or on thread exit), it is moved to a shared
-//! outbox that the exporter drains via [`SpanCollector::drain_into`].
-//!
-//! The outbox transfer uses a [`parking_lot::Mutex`] that is per-thread and
-//! therefore uncontended during normal operation (the exporter only touches it
-//! every few seconds).
-//!
-//! Each outbox is capped at [`OUTBOX_CAPACITY`] spans to bound memory.
-//! When the outbox is full, flushes are silently dropped.
-//!
-//! External adapters can use an owning [`SpanSink`] instead. It publishes
-//! immediately through fixed producer shards with one shared capacity limit,
-//! bypassing native thread-local buffering and adaptive sampling.
+//! Native writers fill contiguous buckets and publish ownership in batches.
+//! Exporters swap bucket allocations into reusable [`SpanBatch`] storage. The
+//! native path uses no mutex for recording or draining; registration publishes
+//! immutable nodes. External [`SpanSink`] adapters retain their bounded shards.
 
 use std::borrow::Cow;
-use std::cell::UnsafeCell;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::{Arc, Weak};
 
 use crossbeam_utils::CachePadded;
 use parking_lot::Mutex;
 
+#[cfg(test)]
+use super::buckets::BATCH_SIZE;
+use super::buckets::{Registry, SpanBatch, Writer};
 use super::context::SpanContext;
 use super::types::{CollectorRef, CompletedSpan, Span, SpanKind};
-use crate::metric::Counter;
 use crate::thread_id::thread_id;
 
-/// Number of spans buffered thread-locally before flushing to the shared outbox.
-/// Higher values amortize the mutex cost but increase latency to export.
-const FLUSH_THRESHOLD: usize = 64;
+/// Completed spans per native publication boundary.
+#[cfg(test)]
+const FLUSH_THRESHOLD: usize = BATCH_SIZE;
 
-/// Maximum number of spans held per outbox.  When a flush would exceed this
-/// limit the batch is silently dropped, bounding memory to
-/// `OUTBOX_CAPACITY × num_threads × sizeof(CompletedSpan)`.
+/// Spread root statistics across wider worker pools while keeping reads and
+/// counter storage bounded independently of registered producer lifetimes.
+const ROOT_COUNTER_SHARDS: usize = 32;
+
+const ROOT_RECORDED: usize = 0;
+const ROOT_SAMPLED_OUT: usize = 1;
+
+/// Related native statistics share a padded row for each thread stripe.
+/// The fixed array makes the shard bound known at compile time while retaining
+/// one immediately visible relaxed atomic update for every root decision.
+struct RootCounters {
+    rows: Box<[CachePadded<[AtomicIsize; 2]>; ROOT_COUNTER_SHARDS]>,
+}
+
+impl RootCounters {
+    fn new() -> Self {
+        const { assert!(ROOT_COUNTER_SHARDS.is_power_of_two()) };
+        Self {
+            rows: Box::new(std::array::from_fn(|_| {
+                CachePadded::new([AtomicIsize::new(0), AtomicIsize::new(0)])
+            })),
+        }
+    }
+
+    #[inline]
+    fn inc(&self, counter: usize) {
+        self.rows[thread_id() & (ROOT_COUNTER_SHARDS - 1)][counter].fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn sum(&self, counter: usize) -> isize {
+        self.rows
+            .iter()
+            .map(|row| row[counter].load(Ordering::Relaxed))
+            .sum()
+    }
+}
+
+/// Maximum queued native spans per producer, excluding batches already owned
+/// by exporters. Each of its two contiguous allocations can retain this many
+/// slots; initial allocations hold one publication batch each.
 const OUTBOX_CAPACITY: usize = 4096;
 
 /// Fixed adapter shards bound registry size independently of producer lifetimes.
 const SINK_SHARDS: usize = 32;
 
 /// Reuse small bursts per producer without preallocating storage on idle shards.
-const SINK_RETAINED_BATCH: usize = FLUSH_THRESHOLD * 4;
+const SINK_RETAINED_BATCH: usize = 256;
 
 /// Maximum unused quota moved to a producer in one rebalance.
-const SINK_QUOTA_CHUNK: usize = FLUSH_THRESHOLD;
-
-/// A shared outbox that a single thread flushes into and the exporter drains.
-struct Outbox {
-    spans: Mutex<Vec<CompletedSpan>>,
-}
-
-impl Outbox {
-    fn new() -> Self {
-        Self {
-            spans: Mutex::new(Vec::with_capacity(FLUSH_THRESHOLD * 2)),
-        }
-    }
-}
-
-/// Native outboxes keep their original buffering and allocation policy.
-enum RegisteredOutbox {
-    Native(Arc<Outbox>),
-    Sink(Arc<SinkOutbox>),
-}
+const SINK_QUOTA_CHUNK: usize = 64;
 
 /// Shard quotas sum to this capacity. A full certificate is set only while all
 /// shards are locked and occupied, and invalidated before a drain removes spans.
@@ -104,66 +113,70 @@ impl SinkOutbox {
 
 /// Per-thread buffer for a single [`SpanCollector`].
 struct ThreadBuffer {
-    /// Thread-local span buffer.  `push()` is a plain Vec append — zero atomics.
-    buffer: Vec<CompletedSpan>,
-    /// Shared outbox registered with the collector.
-    outbox: Arc<Outbox>,
+    writer: Writer,
+    /// Keep this allocation's identity unique until the TLS entry is removed.
+    /// This does not keep a discarded collector or its metric storage alive.
+    collector: Weak<CollectorState>,
     /// Adaptive sampling: log2 of the sampling denominator.
     /// 0 = record every span, 5 = 1/32, 6 = 1/64, 7 = 1/128.
     sample_shift: u32,
     /// Monotonic counter for sampling decisions.
     span_counter: u64,
+    recycled: u64,
 }
 
 impl ThreadBuffer {
-    fn new(outbox: Arc<Outbox>) -> Self {
+    fn new(collector: Weak<CollectorState>) -> Self {
         Self {
-            buffer: Vec::with_capacity(FLUSH_THRESHOLD),
-            outbox,
+            writer: Writer::new(),
+            collector,
             sample_shift: 0,
             span_counter: 0,
+            recycled: 0,
         }
     }
 
-    /// Returns `true` if the next span should be recorded, based on the
-    /// current adaptive sampling rate.  Pure thread-local arithmetic —
-    /// zero atomics.
     #[inline]
     fn should_record(&mut self) -> bool {
         self.span_counter = self.span_counter.wrapping_add(1);
         if self.sample_shift == 0 {
             return true;
         }
-        (self.span_counter & ((1u64 << self.sample_shift) - 1)) == 0
+        // Recover promptly after export instead of needing another 64 sampled
+        // spans (up to 8192 attempted roots) to notice the freed storage.
+        if self.span_counter & 63 == 0 {
+            let recycled = self.writer.outbox.recycled.load(Ordering::Relaxed);
+            if recycled != self.recycled {
+                self.recycled = recycled;
+                self.sample_shift = 0;
+                return true;
+            }
+        }
+        self.span_counter & ((1u64 << self.sample_shift) - 1) == 0
     }
 
     #[inline]
     fn push(&mut self, span: CompletedSpan) {
-        self.buffer.push(span);
-        if self.buffer.len() >= FLUSH_THRESHOLD {
-            self.flush();
+        if let Some(occupancy) = self.writer.push(span) {
+            self.pressure(occupancy);
         }
     }
 
+    fn pressure(&mut self, occupancy: usize) {
+        self.sample_shift = if occupancy <= OUTBOX_CAPACITY / 4 {
+            0
+        } else if occupancy <= OUTBOX_CAPACITY / 2 {
+            5
+        } else if occupancy <= OUTBOX_CAPACITY * 3 / 4 {
+            6
+        } else {
+            7
+        };
+    }
+
     fn flush(&mut self) {
-        if !self.buffer.is_empty() {
-            let mut outbox = self.outbox.spans.lock();
-            let occupancy = outbox.len();
-            if occupancy < OUTBOX_CAPACITY {
-                outbox.append(&mut self.buffer);
-            } else {
-                self.buffer.clear();
-            }
-            // Adjust sampling rate based on outbox pressure.
-            self.sample_shift = if occupancy <= OUTBOX_CAPACITY / 4 {
-                0 // ≤25% full — record everything
-            } else if occupancy <= OUTBOX_CAPACITY / 2 {
-                5 // ≤50% — 1/32
-            } else if occupancy <= OUTBOX_CAPACITY * 3 / 4 {
-                6 // ≤75% — 1/64
-            } else {
-                7 // >75% — 1/128
-            };
+        if let Some(occupancy) = self.writer.flush() {
+            self.pressure(occupancy);
         }
     }
 }
@@ -176,12 +189,13 @@ impl Drop for ThreadBuffer {
 
 /// Per-thread state: maps collector pointer → thread buffer.
 ///
-/// Uses a raw pointer as key to avoid Arc overhead on the collector itself.
-/// This is safe because `submit()` is called through a `CollectorRef` that
-/// is guaranteed to outlive the span (see `CollectorRef` safety comments).
+/// Raw addresses remain unique while the entry's Weak retains the collector state
+/// allocation. Spans borrow their Arc owner; hot lookups update no refcounts.
+/// Registration removes dead entries so collector churn does not accumulate
+/// unreachable native buffers indefinitely.
 struct ThreadLocalState {
-    /// Sorted by collector pointer for binary search.  In practice there is
-    /// one collector per process, so this is a single-element vec.
+    /// Searched by collector address. In practice there is one active collector
+    /// per process, so this is a single-element vector.
     entries: Vec<(usize, ThreadBuffer)>,
 }
 
@@ -193,8 +207,8 @@ impl ThreadLocalState {
     }
 
     #[inline]
-    fn get_or_register(&mut self, collector: &SpanCollector) -> &mut ThreadBuffer {
-        let key = collector as *const SpanCollector as usize;
+    fn get_or_register(&mut self, collector: &CollectorState) -> &mut ThreadBuffer {
+        let key = collector as *const CollectorState as usize;
         // Fast path: check if we already have an entry for this collector.
         let pos = self.entries.iter().position(|(k, _)| *k == key);
         if let Some(pos) = pos {
@@ -204,14 +218,12 @@ impl ThreadLocalState {
     }
 
     #[cold]
-    fn register(&mut self, collector: &SpanCollector, key: usize) -> &mut ThreadBuffer {
-        // Register a new outbox with the collector.
-        let outbox = Arc::new(Outbox::new());
-        collector
-            .outboxes
-            .lock()
-            .push(RegisteredOutbox::Native(Arc::clone(&outbox)));
-        self.entries.push((key, ThreadBuffer::new(outbox)));
+    fn register(&mut self, collector: &CollectorState, key: usize) -> &mut ThreadBuffer {
+        self.entries
+            .retain(|(_, buffer)| buffer.collector.strong_count() != 0);
+        let buffer = ThreadBuffer::new(collector.weak_self.clone());
+        collector.native.register(Arc::clone(&buffer.writer.outbox));
+        self.entries.push((key, buffer));
         &mut self.entries.last_mut().expect("just pushed").1
     }
 }
@@ -228,33 +240,61 @@ impl Drop for ThreadLocalState {
 thread_local! {
     /// Thread-local span state.
     ///
-    /// Uses `UnsafeCell` rather than `RefCell` to skip the runtime borrow
-    /// check on the per-span hot path (~5 cycles saved per submit). Safety
-    /// is preserved by enforcing two invariants:
-    ///   1. All access is single-threaded (`thread_local!`).
-    ///   2. Every `&mut` borrow is fully consumed inside the closure passed
-    ///      to `LOCAL.with`. No closure recursively re-enters `with`, and
-    ///      none of the called methods (`get_or_register`, `push`,
-    ///      `should_record`) re-enter the cell.
-    static LOCAL: UnsafeCell<ThreadLocalState> = UnsafeCell::new(ThreadLocalState::new());
+    /// Checked borrowing rejects reentry before creating aliased mutable
+    /// references. Registration and vector growth may invoke allocator callbacks,
+    /// so single-thread confinement alone is not a sufficient exclusivity proof.
+    static LOCAL: RefCell<ThreadLocalState> = RefCell::new(ThreadLocalState::new());
 }
 
-/// Thread-local span collector with zero-atomic submit path.
+/// Per-thread contiguous span buckets with atomic batch handoffs.
 ///
 /// Completed spans are buffered in a thread-local [`Vec`] and periodically
-/// flushed to a shared outbox.  The exporter calls
-/// [`drain_into`](SpanCollector::drain_into) to harvest all pending spans.
+/// published by ownership transfer. The exporter calls
+/// [`drain_batches`](SpanCollector::drain_batches) to preserve those buffers.
 ///
 /// Created explicitly and held as `Arc<SpanCollector>`.
+/// Reentering native recording, completion or flushing from an allocator
+/// callback while native TLS is borrowed panics before creating another borrow.
 pub struct SpanCollector {
-    /// Native per-thread outboxes and fixed adapter shards. The registry lock
-    /// is taken for registration, drains, and queue-length queries, never for
-    /// individual adapter publications.
-    outboxes: Mutex<Vec<RegisteredOutbox>>,
-    /// Spans that were recorded (passed sampling).
-    spans_recorded: Counter,
-    /// Spans that were dropped by adaptive sampling.
-    spans_sampled_out: Counter,
+    state: Arc<CollectorState>,
+}
+
+/// Stable allocation used as native TLS identity, independently of outer moves.
+pub(crate) struct CollectorState {
+    native: Registry,
+    /// External adapter shards retain their existing publication policy.
+    outboxes: Mutex<Vec<Arc<SinkOutbox>>>,
+    has_sinks: AtomicBool,
+    /// Recorded and sampled-out roots, grouped by thread stripe.
+    root_counts: RootCounters,
+    /// Retain allocation identity in native TLS without owning the state.
+    weak_self: Weak<CollectorState>,
+}
+
+impl CollectorState {
+    /// Check the thread-local adaptive sampling counter.
+    ///
+    /// The unpressured path uses local arithmetic. A throttled producer checks
+    /// for recycled buckets every 64 root attempts.
+    #[inline]
+    fn should_record(&self) -> bool {
+        LOCAL.with(|cell| {
+            let mut state = cell.borrow_mut();
+            state.get_or_register(self).should_record()
+        })
+    }
+
+    /// Submit a completed span.  Called by [`Span::drop`].
+    ///
+    /// Pushes to a thread-local `Vec` — zero atomics on the fast path.
+    /// Batch boundaries publish bucket ownership with an atomic handoff.
+    #[inline]
+    pub(crate) fn submit(&self, span: CompletedSpan) {
+        LOCAL.with(|cell| {
+            let mut state = cell.borrow_mut();
+            state.get_or_register(self).push(span);
+        });
+    }
 }
 
 /// An owning, bounded publication path for external instrumentation adapters.
@@ -387,13 +427,23 @@ impl SpanCollector {
     ///
     /// The `_num_shards` and `_capacity_per_shard` parameters are accepted for
     /// API compatibility but are no longer used — each thread gets its own
-    /// buffer automatically, and buffers are unbounded.
+    /// buffer automatically. Native queues use fixed flush and outbox limits.
     pub fn new(_num_shards: usize, _capacity_per_shard: usize) -> Self {
         Self {
-            outboxes: Mutex::new(Vec::new()),
-            spans_recorded: Counter::new(8),
-            spans_sampled_out: Counter::new(8),
+            state: Arc::new_cyclic(|weak_self| CollectorState {
+                native: Registry::new(),
+                outboxes: Mutex::new(Vec::new()),
+                has_sinks: AtomicBool::new(false),
+                root_counts: RootCounters::new(),
+                weak_self: weak_self.clone(),
+            }),
         }
+    }
+
+    /// Borrow the stable state without incrementing its Arc count.
+    #[inline]
+    pub(crate) fn borrowed_state(&self) -> &CollectorState {
+        &self.state
     }
 
     /// Register a bounded, owning sink for externally completed spans.
@@ -435,11 +485,11 @@ impl SpanCollector {
                 })
             })
             .collect();
-        self.outboxes.lock().extend(
-            outboxes
-                .iter()
-                .map(|outbox| RegisteredOutbox::Sink(Arc::clone(outbox))),
-        );
+        self.state
+            .outboxes
+            .lock()
+            .extend(outboxes.iter().map(Arc::clone));
+        self.state.has_sinks.store(true, Ordering::Release);
         SpanSink {
             inner: Arc::new(SpanSinkInner {
                 _collector: Arc::clone(self),
@@ -458,13 +508,13 @@ impl SpanCollector {
         self: &Arc<Self>,
         name: impl Into<Cow<'static, str>>,
         kind: SpanKind,
-    ) -> Span {
+    ) -> Span<'_> {
         let collector_ref = CollectorRef::from_arc(self);
-        if self.should_record() {
-            self.spans_recorded.inc();
+        if self.state.should_record() {
+            self.state.root_counts.inc(ROOT_RECORDED);
             Span::new_root(name, kind, collector_ref)
         } else {
-            self.spans_sampled_out.inc();
+            self.state.root_counts.inc(ROOT_SAMPLED_OUT);
             Span::noop(collector_ref)
         }
     }
@@ -481,46 +531,17 @@ impl SpanCollector {
         traceparent: Option<&str>,
         name: impl Into<Cow<'static, str>>,
         kind: SpanKind,
-    ) -> Span {
+    ) -> Span<'_> {
         let collector_ref = CollectorRef::from_arc(self);
-        if !self.should_record() {
-            self.spans_sampled_out.inc();
+        if !self.state.should_record() {
+            self.state.root_counts.inc(ROOT_SAMPLED_OUT);
             return Span::noop(collector_ref);
         }
-        self.spans_recorded.inc();
+        self.state.root_counts.inc(ROOT_RECORDED);
         match traceparent.and_then(SpanContext::from_traceparent) {
             Some(remote_ctx) => Span::new_from_remote(name, kind, remote_ctx, collector_ref),
             None => Span::new_root(name, kind, collector_ref),
         }
-    }
-
-    /// Check the thread-local adaptive sampling counter.
-    ///
-    /// Returns `true` if the next span should be recorded. Pure thread-local
-    /// arithmetic — zero atomics, zero contention.
-    #[inline]
-    fn should_record(&self) -> bool {
-        LOCAL.with(|cell| {
-            // SAFETY: see LOCAL definition. Single-thread access; the &mut
-            // borrow is fully consumed before this closure returns.
-            let state = unsafe { &mut *cell.get() };
-            state.get_or_register(self).should_record()
-        })
-    }
-
-    /// Submit a completed span.  Called by [`Span::drop`].
-    ///
-    /// Pushes to a thread-local `Vec` — zero atomics on the fast path.
-    /// Every [`FLUSH_THRESHOLD`] spans, the buffer is moved to the shared
-    /// outbox under a per-thread mutex (uncontended).
-    #[inline]
-    pub(crate) fn submit(&self, span: CompletedSpan) {
-        LOCAL.with(|cell| {
-            // SAFETY: see LOCAL definition. Single-thread access; the &mut
-            // borrow is fully consumed before this closure returns.
-            let state = unsafe { &mut *cell.get() };
-            state.get_or_register(self).push(span);
-        });
     }
 
     /// Flush the current thread's local buffer to the shared outbox.
@@ -532,55 +553,74 @@ impl SpanCollector {
     /// exit.
     pub fn flush_local(&self) {
         LOCAL.with(|cell| {
-            // SAFETY: see LOCAL definition.
-            let state = unsafe { &mut *cell.get() };
-            let key = self as *const SpanCollector as usize;
+            let mut state = cell.borrow_mut();
+            let key = Arc::as_ptr(&self.state) as usize;
             if let Some(pos) = state.entries.iter().position(|(k, _)| *k == key) {
                 state.entries[pos].1.flush();
             }
         });
     }
 
-    /// Drain all pending spans into the provided buffer.
+    /// Drain published spans into one flat vector, appending to existing data.
     ///
-    /// This is the primary method for exporters.  It collects spans from all
-    /// registered thread outboxes.  Spans still in thread-local buffers below
-    /// the flush threshold are NOT included unless [`flush_local`](Self::flush_local)
-    /// is called first (or the thread exits).
-    ///
-    /// The caller can reuse the buffer across export cycles to avoid repeated
-    /// allocation.
+    /// Use [`drain_batches`](Self::drain_batches) to preserve contiguous producer
+    /// buffers without copying spans. This compatibility API flattens batches;
+    /// the first batch exchanges storage when the destination is empty.
     pub fn drain_into(&self, buf: &mut Vec<CompletedSpan>) {
-        let outboxes = self.outboxes.lock();
-        for outbox in outboxes.iter() {
-            match outbox {
-                RegisteredOutbox::Native(outbox) => {
-                    let mut spans = outbox.spans.lock();
-                    buf.append(&mut spans);
-                    // Preserve native outboxes' allocation policy.
-                    spans.shrink_to(FLUSH_THRESHOLD * 2);
+        self.state.native.visit(|outbox| {
+            outbox.drain(|spans| {
+                if buf.is_empty() {
+                    std::mem::swap(buf, spans);
+                } else {
+                    buf.append(spans);
                 }
-                RegisteredOutbox::Sink(outbox) => outbox.drain_into(buf),
+            })
+        });
+        if self.state.has_sinks.load(Ordering::Acquire) {
+            for outbox in self.state.outboxes.lock().iter() {
+                outbox.drain_into(buf);
             }
         }
     }
 
-    /// Number of spans that were dropped.
+    /// Transfer whole contiguous native buffers without copying their spans.
     ///
-    /// Always returns 0.  Retained for API compatibility; use
-    /// [`sampled_out_count`](Self::sampled_out_count) for adaptive sampling stats.
+    /// Reuse a [`SpanBatch`] across export cycles: clear its payloads, call this
+    /// method, then encode directly from its buffers. Each native handoff swaps
+    /// a vector descriptor and returns an empty allocation to the producer. At
+    /// most two published buckets per producer are visited per call. Unflushed
+    /// local spans require [`flush_local`](Self::flush_local) or thread exit.
+    /// External adapter spans are appended through their existing shard locks.
+    pub fn drain_batches(&self, batch: &mut SpanBatch) {
+        self.state
+            .native
+            .visit(|outbox| outbox.drain(|spans| batch.take(spans)));
+        if self.state.has_sinks.load(Ordering::Acquire) {
+            for outbox in self.state.outboxes.lock().iter() {
+                outbox.drain_into(batch.sink_buffer());
+                batch.finish_sink();
+            }
+        }
+    }
+
+    /// Completed native spans rejected when both per-thread buckets are busy
+    /// or full. Adaptive sampling and adapter rejections are counted separately.
     pub fn dropped_count(&self) -> u64 {
-        0
+        let mut total = 0u64;
+        self.state
+            .native
+            .visit(|outbox| total = total.wrapping_add(outbox.dropped()));
+        total
     }
 
     /// Total spans that passed adaptive sampling and were recorded.
     pub fn recorded_count(&self) -> u64 {
-        self.spans_recorded.sum() as u64
+        self.state.root_counts.sum(ROOT_RECORDED) as u64
     }
 
     /// Total spans that were dropped by adaptive sampling.
     pub fn sampled_out_count(&self) -> u64 {
-        self.spans_sampled_out.sum() as u64
+        self.state.root_counts.sum(ROOT_SAMPLED_OUT) as u64
     }
 
     /// Current number of spans waiting across all outboxes.
@@ -588,26 +628,24 @@ impl SpanCollector {
     /// Does not include spans still in thread-local buffers that haven't
     /// been flushed yet.
     pub fn len(&self) -> usize {
-        let outboxes = self.outboxes.lock();
-        outboxes
-            .iter()
-            .map(|outbox| match outbox {
-                RegisteredOutbox::Native(outbox) => outbox.spans.lock().len(),
-                RegisteredOutbox::Sink(outbox) => outbox.queue.lock().spans.len(),
-            })
-            .sum()
+        let mut total = 0;
+        self.state.native.visit(|outbox| total += outbox.len());
+        if self.state.has_sinks.load(Ordering::Acquire) {
+            total += self
+                .state
+                .outboxes
+                .lock()
+                .iter()
+                .map(|o| o.queue.lock().spans.len())
+                .sum::<usize>();
+        }
+        total
     }
 
-    /// Returns `true` if all outboxes are empty.
-    ///
-    /// Does not account for spans in thread-local buffers below the flush
-    /// threshold.
+    /// Whether no published spans are waiting. Concurrent reads are snapshots;
+    /// spans in a producer's active bucket are excluded until publication.
     pub fn is_empty(&self) -> bool {
-        let outboxes = self.outboxes.lock();
-        outboxes.iter().all(|outbox| match outbox {
-            RegisteredOutbox::Native(outbox) => outbox.spans.lock().is_empty(),
-            RegisteredOutbox::Sink(outbox) => outbox.queue.lock().spans.is_empty(),
-        })
+        self.len() == 0
     }
 }
 
@@ -615,6 +653,48 @@ impl SpanCollector {
 mod tests {
     use super::*;
     use crate::{SpanId, SpanStatus, TraceId};
+
+    #[test]
+    fn native_sampling_recovers_within_64_attempts_after_export() {
+        let collector = Arc::new(SpanCollector::new(1, 4096));
+        let mut local = ThreadLocalState::new();
+        let buffer = local.get_or_register(collector.borrowed_state());
+        for _ in 0..2048 {
+            buffer.push(completed_span("pressure"));
+        }
+        buffer.flush();
+        assert!(buffer.sample_shift > 0);
+        let mut batch = SpanBatch::new();
+        collector.drain_batches(&mut batch);
+        assert_eq!(batch.len(), 2048);
+        for _ in 0..64 {
+            buffer.should_record();
+        }
+        assert_eq!(buffer.sample_shift, 0);
+        for _ in 0..64 {
+            assert!(buffer.should_record());
+        }
+    }
+
+    #[test]
+    fn batch_drain_appends_native_and_adapter_data_and_reuses_after_clear() {
+        let collector = Arc::new(SpanCollector::new(1, 64));
+        let sink = collector.span_sink(4);
+        let mut batch = SpanBatch::new();
+        for _ in 0..4 {
+            drop(collector.start_span("native", SpanKind::Internal));
+            collector.flush_local();
+            assert!(sink.publish(completed_span("adapter")).is_ok());
+            collector.drain_batches(&mut batch);
+        }
+        assert_eq!(batch.len(), 8);
+        assert_eq!(batch.iter().filter(|s| s.name == "native").count(), 4);
+        assert_eq!(batch.iter().filter(|s| s.name == "adapter").count(), 4);
+        assert!(collector.is_empty());
+        batch.clear();
+        collector.drain_batches(&mut batch);
+        assert!(batch.is_empty());
+    }
 
     fn completed_span(name: &'static str) -> CompletedSpan {
         CompletedSpan {
@@ -654,6 +734,278 @@ mod tests {
     fn flush_and_drain(collector: &SpanCollector, buf: &mut Vec<CompletedSpan>) {
         collector.flush_local();
         collector.drain_into(buf);
+    }
+
+    #[test]
+    fn grouped_root_counters_preserve_independent_totals_under_contention() {
+        let counters = RootCounters::new();
+        std::thread::scope(|scope| {
+            for _ in 0..64 {
+                let counters = &counters;
+                scope.spawn(move || {
+                    for _ in 0..1000 {
+                        counters.inc(ROOT_RECORDED);
+                        counters.inc(ROOT_SAMPLED_OUT);
+                        counters.inc(ROOT_SAMPLED_OUT);
+                    }
+                });
+            }
+        });
+        assert_eq!(counters.sum(ROOT_RECORDED), 64_000);
+        assert_eq!(counters.sum(ROOT_SAMPLED_OUT), 128_000);
+    }
+
+    #[test]
+    fn grouped_root_counters_share_padding_and_keep_signed_wrap_behavior() {
+        let counters = RootCounters::new();
+        let paired = std::mem::size_of_val(counters.rows.as_ref());
+        let separate = 2 * ROOT_COUNTER_SHARDS * std::mem::size_of::<CachePadded<AtomicIsize>>();
+        assert!(paired <= separate);
+        let row = &counters.rows[thread_id() & (ROOT_COUNTER_SHARDS - 1)];
+        row[ROOT_RECORDED].store(isize::MAX, Ordering::Relaxed);
+        counters.inc(ROOT_RECORDED);
+        assert_eq!(counters.sum(ROOT_RECORDED), isize::MIN);
+        assert_eq!(counters.sum(ROOT_SAMPLED_OUT), 0);
+    }
+
+    #[test]
+    fn native_flush_survives_unwrapping_collector_owner() {
+        let collector = Arc::new(SpanCollector::new(1, 64));
+        let span = collector.start_span("before move", SpanKind::Internal);
+        let id = span.span_id();
+        drop(span);
+        let collector = match Arc::try_unwrap(collector) {
+            Ok(collector) => collector,
+            Err(_) => panic!("native spans must not retain a strong owner"),
+        };
+        let mut spans = Vec::new();
+        flush_and_drain(&collector, &mut spans);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].span_id, id);
+        assert_eq!(collector.recorded_count(), 1);
+    }
+
+    #[test]
+    fn native_replacement_at_same_address_registers_a_distinct_buffer() {
+        let mut collector = Arc::new(SpanCollector::new(1, 64));
+        drop(collector.start_span("first", SpanKind::Internal));
+        let mut spans = Vec::new();
+        flush_and_drain(&collector, &mut spans);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].name, "first");
+        spans.clear();
+        let allocation = Arc::as_ptr(&collector);
+        *Arc::get_mut(&mut collector).expect("native TLS must not retain an outer Weak") =
+            SpanCollector::new(1, 64);
+        assert_eq!(Arc::as_ptr(&collector), allocation);
+        drop(collector.start_span("replacement", SpanKind::Internal));
+        flush_and_drain(&collector, &mut spans);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].name, "replacement");
+        assert_eq!(collector.recorded_count(), 1);
+        assert_eq!(collector.sampled_out_count(), 0);
+    }
+
+    #[test]
+    fn native_tls_retains_identity_and_releases_dead_collector_buffers() {
+        let collector = Arc::new(SpanCollector::new(1, 64));
+        let mut state = ThreadLocalState::new();
+        let outbox = Arc::downgrade(
+            &state
+                .get_or_register(collector.borrowed_state())
+                .writer
+                .outbox,
+        );
+        assert_eq!(Arc::weak_count(&collector.state), 2);
+        let address = Arc::as_ptr(&collector.state);
+        drop(collector);
+        assert!(outbox.upgrade().is_some());
+
+        // The TLS Weak keeps the old allocation's address unavailable for reuse
+        // until registration removes the dead entry.
+        let replacement = Arc::new(SpanCollector::new(1, 64));
+        assert_ne!(Arc::as_ptr(&replacement.state), address);
+        assert!(
+            state
+                .get_or_register(replacement.borrowed_state())
+                .should_record()
+        );
+        assert!(outbox.upgrade().is_none());
+        assert_eq!(state.entries.len(), 1);
+        let mut registered = 0;
+        replacement.state.native.visit(|_| registered += 1);
+        assert_eq!(registered, 1);
+        assert_eq!(Arc::weak_count(&replacement.state), 2);
+    }
+
+    #[test]
+    fn native_tls_pruning_preserves_live_collector_sampling_and_payloads() {
+        let live = Arc::new(SpanCollector::new(1, 64));
+        let discarded = Arc::new(SpanCollector::new(1, 64));
+        let mut state = ThreadLocalState::new();
+        let live_buffer = state.get_or_register(live.borrowed_state());
+        live_buffer.sample_shift = 3;
+        live_buffer.span_counter = 7;
+        live_buffer.push(completed_span("live"));
+        state.get_or_register(discarded.borrowed_state());
+        drop(discarded);
+
+        let replacement = Arc::new(SpanCollector::new(1, 64));
+        state.get_or_register(replacement.borrowed_state());
+        assert_eq!(state.entries.len(), 2);
+        let live_buffer = state.get_or_register(live.borrowed_state());
+        assert_eq!(live_buffer.sample_shift, 3);
+        assert!(live_buffer.should_record());
+        assert_eq!(live_buffer.span_counter, 8);
+        let mut registered = 0;
+        live.state.native.visit(|_| registered += 1);
+        assert_eq!(registered, 1);
+        drop(state);
+        let mut spans = Vec::new();
+        live.drain_into(&mut spans);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].name, "live");
+    }
+
+    #[test]
+    fn root_counts_are_visible_before_flush_and_survive_worker_exit() {
+        let collector = Arc::new(SpanCollector::new(1, 64));
+        let sink = collector.span_sink(4);
+        assert!(sink.publish(completed_span("external")).is_ok());
+        assert_eq!(collector.recorded_count(), 0);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let worker_collector = Arc::clone(&collector);
+            let worker = scope.spawn(move || {
+                let root = worker_collector.start_span("root", SpanKind::Internal);
+                let child = root.child("child", SpanKind::Internal);
+                let remote = worker_collector.start_span_from_traceparent(
+                    Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+                    "remote",
+                    SpanKind::Server,
+                );
+                ready_tx.send(()).expect("publish readiness");
+                release_rx.recv().expect("wait for count snapshot");
+                drop((child, remote, root));
+            });
+            ready_rx.recv().expect("worker has active spans");
+            let counts = (
+                collector.recorded_count(),
+                collector.sampled_out_count(),
+                collector.len(),
+            );
+            release_tx.send(()).expect("release worker");
+            worker.join().expect("join native producer");
+            assert_eq!(counts.0, 2);
+            assert_eq!(counts.1, 0);
+            // Only the sink publication is queued; every native span is active.
+            assert_eq!(counts.2, 1);
+        });
+        let mut spans = Vec::new();
+        collector.drain_into(&mut spans);
+        assert_eq!(spans.len(), 4);
+        assert_eq!(collector.recorded_count(), 2);
+        assert_eq!(collector.sampled_out_count(), 0);
+    }
+
+    #[test]
+    fn reentrant_native_access_rejects_aliases_and_recovers_after_unwind() {
+        let collector = Arc::new(SpanCollector::new(1, 64));
+        drop(collector.start_span("warmup", SpanKind::Internal));
+        collector.flush_local();
+        LOCAL.with(|cell| {
+            let _exclusive = cell.borrow_mut();
+            let flush = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                collector.flush_local();
+            }));
+            assert!(flush.is_err());
+            let root = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                drop(collector.start_span("reentrant", SpanKind::Internal));
+            }));
+            assert!(root.is_err());
+        });
+        drop(collector.start_span("after unwind", SpanKind::Internal));
+        collector.flush_local();
+        let mut spans = Vec::new();
+        collector.drain_into(&mut spans);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].name, "warmup");
+        assert_eq!(spans[1].name, "after unwind");
+        assert_eq!(collector.recorded_count(), 2);
+        assert_eq!(collector.sampled_out_count(), 0);
+        assert_eq!(collector.dropped_count(), 0);
+    }
+
+    #[test]
+    fn both_root_constructors_publish_sampled_and_recorded_totals() {
+        let collector = Arc::new(SpanCollector::new(1, 64));
+        LOCAL.with(|cell| {
+            let mut state = cell.borrow_mut();
+            state
+                .get_or_register(collector.borrowed_state())
+                .sample_shift = 1;
+        });
+        for attempt in 0_u64..8 {
+            let root = if attempt % 4 < 2 {
+                collector.start_span("root", SpanKind::Internal)
+            } else {
+                collector.start_span_from_traceparent(
+                    Some("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+                    "remote",
+                    SpanKind::Server,
+                )
+            };
+            let _child = root.child("child", SpanKind::Internal);
+            let decisions = attempt + 1;
+            assert_eq!(collector.recorded_count(), decisions / 2);
+            assert_eq!(collector.sampled_out_count(), decisions.div_ceil(2));
+            assert_eq!(root.trace_id().is_invalid(), attempt % 2 == 0);
+        }
+        let mut spans = Vec::new();
+        flush_and_drain(&collector, &mut spans);
+        assert_eq!(spans.len(), 8);
+        assert_eq!(spans.iter().filter(|span| span.name == "root").count(), 2);
+        assert_eq!(spans.iter().filter(|span| span.name == "remote").count(), 2);
+        assert_eq!(collector.recorded_count(), 4);
+        assert_eq!(collector.sampled_out_count(), 4);
+    }
+
+    #[test]
+    fn producer_root_totals_accumulate_across_threads_and_drains() {
+        let collector = Arc::new(SpanCollector::new(1, 64));
+        std::thread::scope(|scope| {
+            let mut workers = Vec::new();
+            for _ in 0..8 {
+                let collector = Arc::clone(&collector);
+                workers.push(scope.spawn(move || {
+                    for _ in 0..128 {
+                        let root = collector.start_span("root", SpanKind::Internal);
+                        let _child = root.child("child", SpanKind::Internal);
+                    }
+                }));
+            }
+            for worker in workers {
+                worker.join().expect("join native producer");
+            }
+        });
+        assert_eq!(collector.recorded_count(), 1024);
+        assert_eq!(collector.sampled_out_count(), 0);
+        let mut spans = Vec::new();
+        collector.drain_into(&mut spans);
+        assert_eq!(spans.len(), 2048);
+        assert_eq!(
+            spans
+                .iter()
+                .filter(|span| span.parent_span_id.is_invalid())
+                .count(),
+            1024
+        );
+        spans.clear();
+        collector.drain_into(&mut spans);
+        assert!(spans.is_empty());
+        assert_eq!(collector.recorded_count(), 1024);
+        assert_eq!(collector.sampled_out_count(), 0);
     }
 
     #[test]
@@ -977,7 +1329,7 @@ mod tests {
 
         let collector = Arc::new(SpanCollector::new(1, 1));
         let sink = collector.span_sink(4096);
-        let registered = collector.outboxes.lock().len();
+        let registered = collector.state.outboxes.lock().len();
         assert!(registered <= SINK_SHARDS);
         assert!(
             sink.inner
@@ -1000,7 +1352,7 @@ mod tests {
             assert_eq!(spans.len(), 512);
             spans.clear();
         }
-        assert_eq!(collector.outboxes.lock().len(), registered);
+        assert_eq!(collector.state.outboxes.lock().len(), registered);
         assert_eq!(sink.accepted_count(), (SINK_SHARDS * 2 * 512) as u64);
         assert_eq!(sink.rejected_count(), 0);
         let retained: usize = sink

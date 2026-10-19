@@ -73,3 +73,30 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+
+  tracing-pipeline:
+    name: Tracing pipeline verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: benchmarks/tracing-end-to-end
+      - run: cargo test --release --locked --manifest-path benchmarks/tracing-end-to-end/Cargo.toml
+      - run: cargo clippy --release --locked --all-targets --manifest-path benchmarks/tracing-end-to-end/Cargo.toml -- -D warnings
+      - run: cargo fmt --manifest-path benchmarks/tracing-end-to-end/Cargo.toml -- --check
+      - name: Verify retained sender payloads
+        shell: bash
+        run: |
+          cargo build --release --locked --manifest-path benchmarks/tracing-end-to-end/Cargo.toml
+          for mode in native drop-in otel; do
+            for workload in root children attributes; do
+              for threads in 1 8 16; do
+                benchmarks/tracing-end-to-end/target/release/tracing-end-to-end \
+                  "$mode" "$workload" "$threads" "$((512 / threads))" 2 1 capture
+              done
+            done
+          done

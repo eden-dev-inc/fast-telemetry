@@ -23,7 +23,7 @@ otlp = ["dep:opentelemetry-proto", "dep:prost", "opentelemetry-proto/gen-tonic",
 otlp-logs = ["otlp", "opentelemetry-proto/logs"]
 clickhouse = ["dep:indexmap", "dep:klickhouse"]
 shuttle-tests = ["dep:shuttle"]
-bench-tools = ["dep:libc", "dep:metrics", "dep:metrics-util", "dep:opentelemetry", "dep:opentelemetry_sdk"]
+bench-tools = ["dep:metrics", "dep:metrics-util", "dep:opentelemetry", "dep:opentelemetry_sdk"]
 eviction = []
 
 [dependencies]
@@ -32,7 +32,7 @@ fast-telemetry-macros = { workspace = true, optional = true }
 indexmap = { workspace = true, optional = true }
 itoa = { workspace = true }
 klickhouse = { workspace = true, optional = true }
-libc = { version = "0.2", optional = true }
+libc = "0.2"
 metrics = { workspace = true, optional = true }
 metrics-util = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
@@ -59,3 +59,15 @@ required-features = ["otlp"]
 [[bin]]
 name = "bench_dynamic_series"
 required-features = ["eviction"]
+
+[[bin]]
+name = "bench_span_propagation"
+required-features = ["bench-tools"]
+
+[[bin]]
+name = "bench_span_export"
+required-features = ["bench-tools", "otlp"]
+
+[[bin]]
+name = "bench_span_pipeline"
+required-features = ["bench-tools", "otlp"]

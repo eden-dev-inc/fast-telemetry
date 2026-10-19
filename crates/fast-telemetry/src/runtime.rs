@@ -95,7 +95,7 @@ impl Runtime {
     ///
     /// This forwards to the runtime's shared [`SpanCollector`], keeping the
     /// collector service shared across crate boundaries.
-    pub fn start_span(&self, name: impl Into<Cow<'static, str>>, kind: SpanKind) -> Span {
+    pub fn start_span(&self, name: impl Into<Cow<'static, str>>, kind: SpanKind) -> Span<'_> {
         self.span_collector.start_span(name, kind)
     }
 
@@ -107,7 +107,7 @@ impl Runtime {
         traceparent: Option<&str>,
         name: impl Into<Cow<'static, str>>,
         kind: SpanKind,
-    ) -> Span {
+    ) -> Span<'_> {
         self.span_collector
             .start_span_from_traceparent(traceparent, name, kind)
     }

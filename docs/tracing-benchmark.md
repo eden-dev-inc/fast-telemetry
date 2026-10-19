@@ -1,5 +1,82 @@
 # Comparing native spans and tracing backends
 
+Use two complementary benchmarks: the backend lifecycle comparison below, and
+[the complete sender pipeline](../benchmarks/tracing-end-to-end/README.md).
+Both verify actual retained payloads; their timing boundaries differ.
+
+| Benchmark | Included | Excluded |
+| --- | --- | --- |
+| `bench_tracing_backends` | Recording, required local flush, drain; separate actual payload destruction | Protobuf encoding, compression, network |
+| `tracing-end-to-end`, `capture` | Recording, collection, real OTLP encoding, HTTP request construction, actual payload destruction | Compression, sockets, collector processing |
+| `tracing-end-to-end`, HTTP | Sender pipeline plus HTTP response and OTLP acknowledgement validation | Compression, TLS, retries, downstream collector processing |
+| Saturation binaries | Concurrent recording, drain, validation, destruction | Encoding and network; adaptive sampling and queue rejection may occur |
+
+Process CPU sums time across threads. Wall throughput includes scheduling and
+coordination. A `children` iteration is a complete four-span trace; distinguish
+per-span and per-trace values. Registry and disabled controls retain no spans.
+Saturation results must report attempted, sampled, rejected and collected counts
+alongside complete-trace bounds; attempted no-op rate is not retained throughput.
+
+## Implementation under measurement
+
+The compatibility layer and standalone subscriber publish completed spans
+immediately through an owning, bounded `SpanSink`. They retain every enabled
+span until queue capacity is reached and do not use native adaptive sampling.
+The default metadata policy is `Full`. Explicit `UserFields` measures a smaller
+payload, with its own exact native control; it does not establish default-policy
+parity. See [the adapter contract](../crates/fast-telemetry-tracing/README.md).
+
+Native spans borrow their collector owner, use compact active records, and
+materialize `CompletedSpan` at completion. Optional metadata uses a bounded cache
+of empty boxes. Each producer owns two span buckets; publication normally occurs
+at 256 spans, or on explicit local flush and thread exit. `SpanBatch` transfers
+bucket allocations to export without flattening records. The queued-payload
+limit remains 4,096 spans per producer; exporter-owned batches and retained empty
+allocations are additional memory. Low-volume workers must flush explicitly.
+The flat `drain_into` API remains available.
+
+Native root counters use 32 padded stripes with immediately visible atomic
+updates. Native Linux 64-bit timestamps use the OS monotonic clock with a fixed
+Unix anchor; other platforms use `Instant`. The clock keeps its original
+resolution and ordering, without cached readings or hardware-counter calibration.
+Propagation uses fixed-size hexadecimal encoding and validates the W3C version-00
+header. See [native spans and migration notes](metrics-and-spans.md#spans).
+
+The direct OTLP encoder reads borrowed native payloads and writes one owned
+request buffer, avoiding intermediate protobuf objects and string/ID copies.
+Golden tests compare complete bytes with `CompletedSpan::to_otlp`, including
+nested attributes, event fields, statuses and batch limits. Batches of 16–512
+spans cache lengths in a bounded 4 KiB stack frame on 64-bit targets. Other sizes
+recompute lengths. The first-party exporter releases native payloads before
+awaiting HTTP and transfers uncompressed bodies without an extra copy. Existing
+compression, response bounds, acknowledgement and best-effort delivery policies
+still apply; the exporter does not retain failed drained batches for replay.
+
+## Profiling and performance claims
+
+Use optimized, immutable binaries and preserve their hashes, lockfiles, commands,
+raw samples and host configuration. Rotate process order and repeat each fixture.
+Verify warmup and measured output, including IDs, parent relationships, typed
+fields, timestamps, actual serialized counts and zero sampling or loss for
+lossless comparisons. Include actual payload destruction in complete-pipeline
+figures. Keep instrumented profiles separate from uninstrumented timings.
+
+Phase profiles distinguish recording, collection, encoding, transport construction
+and cleanup. Per-thread CPU sampling can locate hot functions when hardware
+performance counters are unavailable. Allocation profiling should run separately
+from performance measurements. Profiles identify candidates; accept an
+optimization only after repeated complete-pipeline measurements and regression
+checks. Do not multiply improvements from separate experiments or combine results
+from different revisions, payload policies, batch sizes or drivers.
+
+The native parity, sub-100 ns complete pipeline and approximately 10 ns trace
+performance goals are investigation targets, not guarantees. A faster native
+backend alone does not prove native parity through existing `tracing` macros.
+HTTP capture does not establish collector delivery, and a bounded in-memory queue
+does not establish durability.
+
+## Benchmark modes
+
 `fast-telemetry-tracing` provides `bench_tracing_backends`, an **in-memory
 retention** benchmark with three native fast-telemetry baselines, the composable
 tracing layer, two direct-subscriber profiles, OpenTelemetry, and two controls.
@@ -62,7 +139,7 @@ immediate batch retention rather than a production asynchronous exporter.
 Native preflight rejects a configuration whose maximum measured **or warmup**
 batch exceeds 1024 completed spans per worker. Draining each batch below this
 pressure boundary keeps the ordinary native adaptive sampler at full retention;
-no native API or sampling policy is changed. Both phases independently require
+the pressure checks apply to both the record and export drivers. Both phases independently require
 `sampled_out_count` delta zero and `recorded_count` delta equal to verified roots.
 Native's recorded counter counts `start_span` roots, not `Span::child` children,
 and its legacy dropped counter always returns zero. Exact inspection of **all
@@ -129,10 +206,10 @@ propagation, filtering, standalone logs, or durability. Focused tests cover thos
 semantics separately. Different frontend semantics and queue policies remain
 material limitations even when payloads match.
 
-## Run on Adam
+## Run the backend comparison
 
-Run through the engineering coordinator after exact-head static review and Adam's
-disk/resource gate. No benchmark is added to CI. Rust 1.93 or newer is required.
+Run the host's resource checks before building or measuring. Rust 1.93 or newer
+is required. Timing benchmarks are separate from the CI correctness checks.
 
 ```sh
 cargo test -p fast-telemetry-tracing --all-features
@@ -170,6 +247,30 @@ cargo run --release -p fast-telemetry-tracing --features bench-tools \
   --mode native --workload attributes --threads 4 --iters 10000 \
   --warmup 100 --batch 64 --capacity 4096
 ```
+
+For single-thread hot-path measurements, add `--execution inline --threads 1`.
+This runs recording and draining on the calling thread, removing worker barriers
+and wakeups from the recording interval. It uses the same instrumentation,
+warmup, explicit native flush, payload verification, counters, and timed payload
+destruction. Native sampling pressure limits still apply. The default
+`--execution workers` retains the resident-worker experiment and supports
+multiple threads. Results include an `execution` column; compare the same driver.
+
+The script accepts `EXECUTION=inline THREADS=1`. Its summaries keep execution
+drivers separate. To interpret the requested 10–100 ns target, report both
+`pipeline_with_destroy_cpu_ns_per_span` and
+`pipeline_with_destroy_cpu_ns_per_iteration`: a `children` iteration is a complete
+four-span trace. Neither metric includes encoding or network export.
+
+`--drain-storage fresh` is the default and drops the drained vectors after each
+batch. `--drain-storage reuse` clears every actual span and event payload inside
+the destruction interval, retaining the empty vector allocations across batches
+and warmup. The production span exporter also clears and reuses its drain vector.
+For OpenTelemetry, reusable storage is returned to the exporter queue at the
+next drain. Final empty buffer release is outside the per-batch destruction
+interval. Recording, verification and retention requirements are identical.
+The script accepts `DRAIN_STORAGE=reuse`; CSV output and summary groups identify
+the `drain_storage` policy. Keep fresh and reuse results separate.
 
 Add `--dispatch global` for the global installation. Repeat with
 `native-matched`, `native-user-fields`, `fast`, `direct`, `direct-user-fields`,

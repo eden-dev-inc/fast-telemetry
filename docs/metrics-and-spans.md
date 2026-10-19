@@ -194,6 +194,20 @@ but they come with a lifecycle worth planning for:
 
 ## Spans
 
+With the `otlp` feature, `CompletedSpan::to_otlp()` converts a borrowed span.
+Use `CompletedSpan::into_otlp()` when transferring an owned completed span to
+protobuf: owned names, string attribute values, event fields, and error messages
+move into the request. Borrowed strings are copied because protobuf owns its
+strings. For a complete native batch, `encode_native_trace_export_request`
+encodes directly from borrowed completed spans into an `EncodedTraceRequest`.
+It preserves the same protobuf bytes and uses one output allocation per batch,
+without intermediate protobuf span objects or string/ID copies. The first-party
+span exporter uses `encode_native_trace_export_request_batches` to read producer
+buffers directly, releases native payloads before awaiting HTTP, and retains
+empty bucket allocations for reuse. `OtlpHttpClient::export_native_traces`
+transfers the body into the shared gzip/HTTP transport and uses its encoded span
+count for acknowledgements. Uncompressed export transfers the body directly.
+
 ```rust
 use std::sync::Arc;
 use fast_telemetry::{
@@ -225,13 +239,107 @@ collector.flush_local();
 collector.drain_into(&mut completed);
 ```
 
+A native `Span<'collector>` borrows its collector owner. Keep the collector
+alive until all spans finish. A child can finish after its parent while sharing
+that collector lifetime. Functions or structs that retain a native span must
+carry this lifetime explicitly:
+
+```rust
+use std::sync::Arc;
+use fast_telemetry::{Span, SpanCollector, SpanKind};
+
+fn request_span<'a>(collector: &'a Arc<SpanCollector>) -> Span<'a> {
+    collector.start_span("request", SpanKind::Server)
+}
+```
+
+Create spans inside spawned tasks after moving a collector handle into the task;
+clone that handle once per task during setup. Scoped threads can also receive an
+existing borrowed span. Native span operations update no Arc reference counts.
+
+Active spans keep identifiers, name and start time in a compact record.
+Attributes, events and errors create optional metadata storage when first used;
+setting `Ok` or `Unset` alone does not create it. Finishing transfers all owned
+values to `CompletedSpan`. Each thread retains at most 32 empty metadata boxes
+for reuse, without retaining payload values or collector references. Cold use,
+deep nesting beyond the cache, or moving spans between threads can require an
+additional box allocation. Repeated same-thread metadata spans reuse those boxes.
+
+Each collector has one shared internal state allocation. TLS registrations use
+weak references to that state to preserve identity across moves and prevent
+address reuse from selecting another collector's buffer. Cold registration
+removes dead entries and releases their unused native buffers. These weak
+references do not retain discarded collector values or metric storage.
+
 Call `flush_local()` before `drain_into()` when you are draining on the same
 thread that just recorded spans. `SpanCollector::new(shards, capacity)` keeps
 its historical signature for compatibility, but those tuning arguments are
 currently ignored because buffers are now managed per thread.
 
+Each OS thread owns two contiguous native span buckets. The active vector's
+metadata stays thread-local, so ordinary completion is a local `Vec::push`.
+At a 256-span boundary, ownership is published atomically and the producer
+switches to an empty bucket. If the other bucket is busy, the active bucket can
+grow up to the remaining per-producer queue budget of 4,096 spans. Explicit
+`flush_local()` and thread exit also publish partial buckets. Low-volume workers
+must flush explicitly or run a periodic local flusher; the exporter cannot take
+a vector that a worker is still filling.
+
+Use `SpanBatch` and `drain_batches()` for export. Handoffs swap vector descriptors
+(pointer, length, capacity); each bucket remains contiguous and its completed
+spans are neither cloned nor flattened. The OTLP encoder reads those buffers
+in place. Serialization still writes the protobuf byte payload. `SpanBatch::clear()`
+drops span payloads and retains empty allocations to return on subsequent drains.
+Allocation-free records with borrowed names skip redundant destructor work;
+owned strings and metadata storage are still released, including empty vectors
+that retain capacity. Mixed buffers skip the verified plain prefix and destroy
+the remaining records in place.
+Reuse one batch rather than constructing new storage for each export cycle.
+The compatibility `drain_into()` method appends to a flat vector and can copy
+spans when combining multiple buckets.
+
+The native registry, handoff and drain paths use no mutex. Acquire/release tags
+ensure only one producer or draining consumer can own a bucket. Under ordinary
+load there are no ownership atomics between publication boundaries; root
+statistics still update one relaxed atomic per decision. If both buckets are
+busy or full, recording drops completed spans rather than waiting. `dropped_count()`
+now reports those rejections; `sampled_out_count()` separately counts sampled-out
+roots. Once a drain returns storage, adaptive sampling notices within 64 root
+attempts. External `SpanSink` adapters retain their shard locks and policy.
+
+Both producer allocations initially hold 256 spans and can each retain up to
+4,096 slots. Export batches own additional reusable allocations; these are
+separate from the 4,096-span queued-payload budget. Variable-size attributes,
+events and owned strings use their existing separate storage. Allocation growth
+and cold registration may call the allocator; this is not a claim that all
+tracing, including allocation, is formally lock-free. Registered outboxes remain
+until their collector is dropped. Registry snapshots of more than 64 producers
+also use temporary pointer storage during draining.
+
+Native TLS uses checked mutable borrowing. Reentering native recording,
+completion or flushing from an allocator callback while that state is borrowed
+panics instead of creating aliased mutable references. Allocator callbacks should
+avoid recording telemetry through the native collector.
+
+The recorded-root and sampled-root counters share 32 fixed, padded stripes to
+reduce contention in larger worker pools. Updates remain immediately visible to
+counter reads. On the measured x86_64 target, the paired counters occupy 4 KiB
+per collector in one allocation. Their storage and read cost do not grow with
+the number of registered producers.
+
+Span timestamps use a fixed Unix wall-time/monotonic anchor. On 64-bit Linux,
+the collector reads `CLOCK_MONOTONIC` and converts the offset directly to integer
+nanoseconds. Other targets use `Instant`. Readings retain the OS clock's
+resolution and ordering; subsequent timestamps follow the monotonic clock
+independently of wall-clock steps.
+
 For manual cross-service propagation, use an incoming W3C `traceparent` header
 to start a span and `traceparent()` on the current span for outgoing requests:
+
+Header encoding writes the 24 ID bytes and trace flags directly into a fixed
+55-byte ASCII buffer and allocates the returned string once. ID formatting
+also uses fixed buffers; identifier bytes, lowercase output, and trace flags
+are preserved.
 
 ```rust
 let mut inbound = collector.start_span_from_traceparent(

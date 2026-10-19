@@ -10,7 +10,7 @@
 
 use std::cell::Cell;
 
-use super::ids::{SpanId, TraceId};
+use super::ids::{SpanId, TraceId, encode_hex};
 
 /// Lightweight span context for W3C propagation and logging integration.
 #[derive(Clone, Copy, Debug)]
@@ -33,32 +33,23 @@ impl SpanContext {
     /// Example: `00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`
     pub fn from_traceparent(header: &str) -> Option<Self> {
         let bytes = header.as_bytes();
-
-        // Version 00 has exactly 2 + 1 + 32 + 1 + 16 + 1 + 2 = 55 ASCII bytes.
-        if bytes.len() != 55 || !header.is_ascii() {
+        if bytes.len() != 55
+            || bytes[0] != b'0'
+            || bytes[1] != b'0'
+            || bytes[2] != b'-'
+            || bytes[35] != b'-'
+            || bytes[52] != b'-'
+        {
             return None;
         }
-
-        // Version check (only support version 00)
-        if bytes[0] != b'0' || bytes[1] != b'0' {
-            return None;
-        }
-        if bytes[2] != b'-' || bytes[35] != b'-' || bytes[52] != b'-' {
-            return None;
-        }
-
-        let trace_id = TraceId::from_hex(&header[3..35])?;
-        let span_id = SpanId::from_hex(&header[36..52])?;
-
-        let flags_hi = hex_digit(bytes[53])?;
-        let flags_lo = hex_digit(bytes[54])?;
-        let trace_flags = (flags_hi << 4) | flags_lo;
-
-        // Reject all-zero IDs per W3C spec.
+        // Slice bytes so malformed multibyte text cannot cross a str boundary.
+        // Every hex byte is checked by the decoder; no ASCII prepass is needed.
+        let trace_id = TraceId(decode_hex(&bytes[3..35])?);
+        let span_id = SpanId(decode_hex(&bytes[36..52])?);
+        let trace_flags = decode_hex::<1>(&bytes[53..55])?[0];
         if trace_id.is_invalid() || span_id.is_invalid() {
             return None;
         }
-
         Some(Self {
             trace_id,
             span_id,
@@ -68,20 +59,41 @@ impl SpanContext {
 
     /// Encode as a W3C `traceparent` header value.
     pub fn to_traceparent(self) -> String {
-        format!(
-            "00-{}-{}-{:02x}",
-            self.trace_id, self.span_id, self.trace_flags
-        )
+        let mut encoded = *b"00-00000000000000000000000000000000-0000000000000000-00";
+        encode_hex(self.trace_id.as_bytes(), &mut encoded[3..35]);
+        encode_hex(self.span_id.as_bytes(), &mut encoded[36..52]);
+        encode_hex(&[self.trace_flags], &mut encoded[53..55]);
+        String::from_utf8(encoded.to_vec()).expect("traceparent encoding is ASCII")
     }
 }
 
-fn hex_digit(c: u8) -> Option<u8> {
-    match c {
-        b'0'..=b'9' => Some(c - b'0'),
-        b'a'..=b'f' => Some(c - b'a' + 10),
-        b'A'..=b'F' => Some(c - b'A' + 10),
-        _ => None,
+#[inline]
+fn decode_digit(value: u8) -> u8 {
+    let decimal = value.wrapping_sub(b'0');
+    let alpha = (value | 0x20).wrapping_sub(b'a');
+    if decimal < 10 {
+        decimal
+    } else if alpha < 6 {
+        alpha + 10
+    } else {
+        u8::MAX
     }
+}
+
+#[inline]
+fn decode_hex<const N: usize>(encoded: &[u8]) -> Option<[u8; N]> {
+    if encoded.len() != N * 2 {
+        return None;
+    }
+    let mut decoded = [0; N];
+    let mut invalid = 0;
+    for (slot, pair) in decoded.iter_mut().zip(encoded.chunks_exact(2)) {
+        let hi = decode_digit(pair[0]);
+        let lo = decode_digit(pair[1]);
+        invalid |= hi | lo;
+        *slot = (hi << 4) | lo;
+    }
+    (invalid < 16).then_some(decoded)
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +142,7 @@ pub(crate) struct SpanEnterGuard {
 impl SpanEnterGuard {
     /// Enter a span context: set it as current and return a guard that
     /// restores the previous context on drop.
+    #[inline]
     pub fn enter(ctx: SpanContext) -> Self {
         let prev = CURRENT.with(|cell| cell.replace(ctx));
         Self { prev }
@@ -137,6 +150,7 @@ impl SpanEnterGuard {
 }
 
 impl Drop for SpanEnterGuard {
+    #[inline]
     fn drop(&mut self) {
         CURRENT.with(|cell| cell.set(self.prev));
     }
@@ -145,6 +159,41 @@ impl Drop for SpanEnterGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn traceparent_encoding_matches_bytewise_reference_for_all_flags() {
+        for value in 0..=u8::MAX {
+            let context = SpanContext {
+                trace_id: TraceId(std::array::from_fn(|i| value.wrapping_add(i as u8))),
+                span_id: SpanId(std::array::from_fn(|i| value.wrapping_sub(i as u8))),
+                trace_flags: value,
+            };
+            let trace_hex: String = context
+                .trace_id
+                .0
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            let span_hex: String = context
+                .span_id
+                .0
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            let expected = format!("00-{trace_hex}-{span_hex}-{value:02x}");
+            let encoded = context.to_traceparent();
+            assert_eq!(encoded, expected);
+            assert_eq!(encoded.len(), 55);
+            let decoded = SpanContext::from_traceparent(&encoded).expect("decode encoded context");
+            assert_eq!(decoded.trace_id, context.trace_id);
+            assert_eq!(decoded.span_id, context.span_id);
+            assert_eq!(decoded.trace_flags, value);
+        }
+        assert_eq!(
+            SpanContext::INVALID.to_traceparent(),
+            "00-00000000000000000000000000000000-0000000000000000-00"
+        );
+    }
 
     #[test]
     fn traceparent_roundtrip() {
@@ -256,5 +305,94 @@ mod tests {
         // Restored to invalid after outer guard drops.
         assert!(current_trace_id().is_none());
         assert!(current_span_id().is_none());
+    }
+    fn reference_parse(header: &str) -> Option<SpanContext> {
+        let bytes = header.as_bytes();
+
+        // Version 00 has exactly 2 + 1 + 32 + 1 + 16 + 1 + 2 = 55 ASCII bytes.
+        if bytes.len() != 55 || !header.is_ascii() {
+            return None;
+        }
+
+        // Version check (only support version 00)
+        if bytes[0] != b'0' || bytes[1] != b'0' {
+            return None;
+        }
+        if bytes[2] != b'-' || bytes[35] != b'-' || bytes[52] != b'-' {
+            return None;
+        }
+
+        let trace_id = TraceId::from_hex(&header[3..35])?;
+        let span_id = SpanId::from_hex(&header[36..52])?;
+
+        let flags_hi = legacy_hex_digit(bytes[53])?;
+        let flags_lo = legacy_hex_digit(bytes[54])?;
+        let trace_flags = (flags_hi << 4) | flags_lo;
+
+        // Reject all-zero IDs per W3C spec.
+        if trace_id.is_invalid() || span_id.is_invalid() {
+            return None;
+        }
+
+        Some(SpanContext {
+            trace_id,
+            span_id,
+            trace_flags,
+        })
+    }
+
+    fn legacy_hex_digit(c: u8) -> Option<u8> {
+        match c {
+            b'0'..=b'9' => Some(c - b'0'),
+            b'a'..=b'f' => Some(c - b'a' + 10),
+            b'A'..=b'F' => Some(c - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn incoming_header_ascii_mutations_match_the_legacy_parser() {
+        let header = b"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-a7";
+        for position in 0..header.len() {
+            for value in 0..=127 {
+                let mut bytes = *header;
+                bytes[position] = value;
+                let text = std::str::from_utf8(&bytes).expect("ASCII fixture");
+                let fields = |value: Option<SpanContext>| {
+                    value.map(|v| (v.trace_id, v.span_id, v.trace_flags))
+                };
+                assert_eq!(
+                    fields(SpanContext::from_traceparent(text)),
+                    fields(reference_parse(text)),
+                    "position {position}, byte {value}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn incoming_header_equal_length_unicode_is_rejected_without_slicing_panics() {
+        let header = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-a7";
+        for replacement in ["é", "界", "🦀"] {
+            for position in 0..=55 - replacement.len() {
+                let mut text = header.to_string();
+                text.replace_range(position..position + replacement.len(), replacement);
+                assert_eq!(text.len(), 55);
+                assert!(reference_parse(&text).is_none());
+                assert!(SpanContext::from_traceparent(&text).is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn arithmetic_hex_digit_matches_the_legacy_classification_for_all_bytes() {
+        for value in 0..=u8::MAX {
+            let decoded = decode_digit(value);
+            assert_eq!(
+                (decoded < 16).then_some(decoded),
+                legacy_hex_digit(value),
+                "byte {value}"
+            );
+        }
     }
 }

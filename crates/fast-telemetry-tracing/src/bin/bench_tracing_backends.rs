@@ -62,6 +62,21 @@ enum DispatchMode {
     Global,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Execution {
+    Workers,
+    Inline,
+}
+
+impl Execution {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Workers => "workers",
+            Self::Inline => "inline",
+        }
+    }
+}
+
 impl DispatchMode {
     fn name(self) -> &'static str {
         match self {
@@ -90,6 +105,8 @@ struct Options {
     mode: Mode,
     mode_name: String,
     dispatch: DispatchMode,
+    execution: Execution,
+    reuse_drain: bool,
     workload: Workload,
     workload_name: String,
     threads: usize,
@@ -105,6 +122,8 @@ impl Options {
             mode: Mode::Fast,
             mode_name: "fast".into(),
             dispatch: DispatchMode::Scoped,
+            execution: Execution::Workers,
+            reuse_drain: false,
             workload: Workload::Root,
             workload_name: "root".into(),
             threads: 1,
@@ -151,12 +170,29 @@ impl Options {
                     };
                 }
                 "--threads" => options.threads = number(&value)?,
+                "--execution" => {
+                    options.execution = match value.as_str() {
+                        "workers" => Execution::Workers,
+                        "inline" => Execution::Inline,
+                        _ => return Err("execution must be workers or inline".into()),
+                    };
+                }
+                "--drain-storage" => {
+                    options.reuse_drain = match value.as_str() {
+                        "fresh" => false,
+                        "reuse" => true,
+                        _ => return Err("drain storage must be fresh or reuse".into()),
+                    };
+                }
                 "--iters" => options.iterations = number(&value)?,
                 "--warmup" => options.warmup = value.parse().map_err(|_| "invalid warmup")?,
                 "--batch" => options.batch = number(&value)?,
                 "--capacity" => options.capacity = number(&value)?,
                 _ => return Err(format!("unknown option {arg}")),
             }
+        }
+        if options.execution == Execution::Inline && options.threads != 1 {
+            return Err("inline execution requires --threads 1".into());
         }
         // Avoid integer overflow in expected counts or capacity calculations.
         options
@@ -439,6 +475,16 @@ enum Drained {
     Disabled,
 }
 
+impl Drained {
+    fn clear(&mut self) {
+        match self {
+            Self::Fast(spans) => spans.clear(),
+            Self::Otel(spans) => spans.clear(),
+            Self::Disabled => {}
+        }
+    }
+}
+
 #[derive(Default)]
 struct Counters {
     accepted: u64,
@@ -541,15 +587,21 @@ impl Backend {
         }
     }
 
-    fn drain(&self) -> Result<Drained, String> {
+    fn drain(&self, recycled: Option<Drained>) -> Result<Drained, String> {
         match self {
             Self::Native { collector } => {
-                let mut spans = Vec::new();
+                let mut spans = match recycled {
+                    Some(Drained::Fast(spans)) => spans,
+                    _ => Vec::new(),
+                };
                 collector.drain_into(&mut spans);
                 Ok(Drained::Fast(spans))
             }
             Self::Fast { collector, handle } => {
-                let mut spans = Vec::new();
+                let mut spans = match recycled {
+                    Some(Drained::Fast(spans)) => spans,
+                    _ => Vec::new(),
+                };
                 collector.drain_into(&mut spans);
                 let mut standalone = Vec::new();
                 handle.drain_events(&mut standalone);
@@ -560,7 +612,12 @@ impl Backend {
             }
             Self::Otel { provider, exporter } => {
                 provider.force_flush().map_err(|e| e.to_string())?;
-                Ok(Drained::Otel(std::mem::take(&mut *exporter.0.spans.lock())))
+                let mut spans = match recycled {
+                    Some(Drained::Otel(spans)) => spans,
+                    _ => Vec::new(),
+                };
+                std::mem::swap(&mut spans, &mut *exporter.0.spans.lock());
+                Ok(Drained::Otel(spans))
             }
             Self::Disabled => Ok(Drained::Disabled),
         }
@@ -715,30 +772,71 @@ fn verify(
         verify_native_payloads(spans, options, start, iterations, metadata)?;
     }
     let shapes: Vec<Shape> = match drained {
-        Drained::Fast(spans) => spans.iter().map(|s| {
-            let mut valid_user_fields = 0;
-            for a in &s.attributes {
-                if matches!((a.key.as_ref(), &a.value), ("worker" | "iteration", SpanValue::I64(_)) | ("code", SpanValue::I64(200)))
-                    || matches!((a.key.as_ref(), &a.value), ("method", SpanValue::String(v)) if v == "GET") { valid_user_fields += 1; }
-            }
-            for event in &s.events {
-                if event.attributes.iter().any(|a| a.key == "ok" && matches!(a.value, SpanValue::Bool(true))) { valid_user_fields += 1; }
-                if event.attributes.iter().any(|a| a.key == "message" && matches!(&a.value, SpanValue::String(v) if v == "checkpoint")) { valid_user_fields += 1; }
-            }
-            Shape { trace: s.trace_id.as_bytes().to_vec(), id: s.span_id.as_bytes().to_vec(), parent: s.parent_span_id.as_bytes().to_vec(), name: s.name.to_string(), events: s.events.len() as u64, valid_user_fields, payload_attributes: (s.attributes.len() + s.events.iter().map(|e| e.attributes.len()).sum::<usize>()) as u64 }
-        }).collect(),
-        Drained::Otel(spans) => spans.iter().map(|s| {
-            let mut valid_user_fields = 0;
-            for a in &s.attributes {
-                if matches!((a.key.as_str(), &a.value), ("worker" | "iteration", opentelemetry::Value::I64(_)) | ("code", opentelemetry::Value::I64(200)))
-                    || matches!((a.key.as_str(), &a.value), ("method", opentelemetry::Value::String(v)) if v.as_str() == "GET") { valid_user_fields += 1; }
-            }
-            for event in &s.events.events {
-                if event.attributes.iter().any(|a| a.key.as_str() == "ok" && matches!(a.value, opentelemetry::Value::Bool(true))) { valid_user_fields += 1; }
-                if event.name == "checkpoint" { valid_user_fields += 1; }
-            }
-            Shape { trace: s.span_context.trace_id().to_bytes().to_vec(), id: s.span_context.span_id().to_bytes().to_vec(), parent: s.parent_span_id.to_bytes().to_vec(), name: s.name.to_string(), events: s.events.events.len() as u64, valid_user_fields, payload_attributes: (s.attributes.len() + s.events.events.iter().map(|e| e.attributes.len()).sum::<usize>()) as u64 }
-        }).collect(),
+        Drained::Fast(spans) => spans
+            .iter()
+            .map(|s| {
+                let mut valid_user_fields = 0;
+                for a in &s.attributes {
+                    if matches!(
+                        (a.key.as_ref(), &a.value),
+                        ("worker" | "iteration", SpanValue::I64(_)) | ("code", SpanValue::I64(200))
+                    ) || matches!((a.key.as_ref(), &a.value), ("method", SpanValue::String(v)) if v == "GET")
+                    {
+                        valid_user_fields += 1;
+                    }
+                }
+                for event in &s.events {
+                    if event.attributes.iter().any(|a| a.key == "ok" && matches!(a.value, SpanValue::Bool(true))) {
+                        valid_user_fields += 1;
+                    }
+                    if event.attributes.iter().any(|a| a.key == "message" && matches!(&a.value, SpanValue::String(v) if v == "checkpoint"))
+                    {
+                        valid_user_fields += 1;
+                    }
+                }
+                Shape {
+                    trace: s.trace_id.as_bytes().to_vec(),
+                    id: s.span_id.as_bytes().to_vec(),
+                    parent: s.parent_span_id.as_bytes().to_vec(),
+                    name: s.name.to_string(),
+                    events: s.events.len() as u64,
+                    valid_user_fields,
+                    payload_attributes: (s.attributes.len() + s.events.iter().map(|e| e.attributes.len()).sum::<usize>()) as u64,
+                }
+            })
+            .collect(),
+        Drained::Otel(spans) => spans
+            .iter()
+            .map(|s| {
+                let mut valid_user_fields = 0;
+                for a in &s.attributes {
+                    if matches!(
+                        (a.key.as_str(), &a.value),
+                        ("worker" | "iteration", opentelemetry::Value::I64(_)) | ("code", opentelemetry::Value::I64(200))
+                    ) || matches!((a.key.as_str(), &a.value), ("method", opentelemetry::Value::String(v)) if v.as_str() == "GET")
+                    {
+                        valid_user_fields += 1;
+                    }
+                }
+                for event in &s.events.events {
+                    if event.attributes.iter().any(|a| a.key.as_str() == "ok" && matches!(a.value, opentelemetry::Value::Bool(true))) {
+                        valid_user_fields += 1;
+                    }
+                    if event.name == "checkpoint" {
+                        valid_user_fields += 1;
+                    }
+                }
+                Shape {
+                    trace: s.span_context.trace_id().to_bytes().to_vec(),
+                    id: s.span_context.span_id().to_bytes().to_vec(),
+                    parent: s.parent_span_id.to_bytes().to_vec(),
+                    name: s.name.to_string(),
+                    events: s.events.events.len() as u64,
+                    valid_user_fields,
+                    payload_attributes: (s.attributes.len() + s.events.events.iter().map(|e| e.attributes.len()).sum::<usize>()) as u64,
+                }
+            })
+            .collect(),
         Drained::Disabled => Vec::new(),
     };
     let work = if !options.mode.retains() {
@@ -921,128 +1019,184 @@ fn verify_counters(
     Ok(())
 }
 
+// Both drivers time and verify the same batches. Inline execution isolates
+// single-thread recording from worker/coordinator barrier and wakeup costs.
+fn measure_batches(
+    backend: &Backend,
+    options: &Options,
+    metadata: &WorkloadMetadata,
+    mut record: impl FnMut(usize, usize),
+) -> (Timings, Instant, Option<String>) {
+    let mut timings = Timings::default();
+    let mut failure = None;
+    let mut measured_start = None;
+    let mut recycled = None;
+    // Keep the barrier protocol running after a verification failure so
+    // all workers finish and join, then fail the process with the evidence.
+    // Resident workers warm their TLS, registry and queues, then continue
+    // into measurement. No extra native warmup outboxes are registered.
+    for (iterations, measured) in [(options.warmup, false), (options.iterations, true)] {
+        let mut phase = Timings::default();
+        let baseline = backend.counters();
+        if measured {
+            measured_start = Some(Instant::now());
+        }
+        for start in (0..iterations).step_by(options.batch) {
+            let cpu = process_cpu_ns();
+            let wall = Instant::now();
+            record(start, options.batch.min(iterations - start));
+            phase.record_wall += wall.elapsed().as_nanos();
+            phase.record_cpu += process_cpu_ns() - cpu;
+            let cpu = process_cpu_ns();
+            let wall = Instant::now();
+            let drained = backend.drain(recycled.take());
+            phase.drain_wall += wall.elapsed().as_nanos();
+            phase.drain_cpu += process_cpu_ns() - cpu;
+            let cpu = process_cpu_ns();
+            let wall = Instant::now();
+            match drained
+                .as_ref()
+                .map_err(|e| e.to_string())
+                .and_then(|data| {
+                    verify(
+                        data,
+                        options,
+                        start,
+                        options.batch.min(iterations - start),
+                        metadata,
+                    )
+                }) {
+                Ok(counts) => {
+                    phase.spans += counts.spans;
+                    phase.events += counts.events;
+                    phase.payload_attributes += counts.payload_attributes;
+                }
+                Err(error) => {
+                    failure.get_or_insert(error);
+                }
+            }
+            phase.verify_wall += wall.elapsed().as_nanos();
+            phase.verify_cpu += process_cpu_ns() - cpu;
+            let cpu = process_cpu_ns();
+            let wall = Instant::now();
+            if options.reuse_drain {
+                if let Ok(mut data) = drained {
+                    // Destroy all actual payloads inside this interval while
+                    // keeping only empty vector storage for the next drain.
+                    data.clear();
+                    recycled = Some(data);
+                }
+            } else {
+                drop(drained);
+            }
+            phase.destroy_wall += wall.elapsed().as_nanos();
+            phase.destroy_cpu += process_cpu_ns() - cpu;
+        }
+        let roots = if options.mode.retains() {
+            (options.threads * iterations) as u64
+        } else {
+            0
+        };
+        if let Err(error) = verify_counters(backend, &baseline, &mut phase, roots) {
+            failure.get_or_insert(error);
+        }
+        if measured {
+            timings = phase;
+        }
+    }
+    (
+        timings,
+        measured_start.expect("measured phase always runs"),
+        failure,
+    )
+}
+
 fn measure(
     backend: &Backend,
     dispatch: &Dispatch,
     options: &Options,
     metadata: &WorkloadMetadata,
 ) -> Result<Timings, String> {
-    let barrier = Barrier::new(options.threads + 1);
     let native_metadata = metadata.native(options.workload);
-    let mut timings = Timings::default();
-    let mut failure = None;
-    let mut measured_start = None;
-    std::thread::scope(|scope| {
-        for worker in 0..options.threads {
-            let barrier = &barrier;
-            let dispatch = dispatch.clone();
-            let native_metadata = &native_metadata;
-            scope.spawn(move || {
+    let (mut timings, measured_start, failure) = if options.execution == Execution::Inline {
+        let record = || {
+            measure_batches(backend, options, metadata, |start, count| {
+                for iteration in start..start + count {
+                    if let Backend::Native { collector } = backend {
+                        instrument_native(
+                            collector,
+                            &native_metadata,
+                            options.mode,
+                            options.workload,
+                            0,
+                            iteration,
+                        );
+                    } else {
+                        instrument(options.workload, 0, iteration);
+                    }
+                }
                 if let Backend::Native { collector } = backend {
-                    worker_batches(
-                        options,
-                        barrier,
-                        |iteration| {
-                            instrument_native(
-                                collector,
-                                native_metadata,
-                                options.mode,
-                                options.workload,
-                                worker,
-                                iteration,
-                            )
-                        },
-                        || collector.flush_local(),
-                    );
-                } else {
-                    let record = || {
+                    collector.flush_local();
+                }
+            })
+        };
+        match options.dispatch {
+            DispatchMode::Scoped => tracing::dispatcher::with_default(dispatch, record),
+            DispatchMode::Global => record(),
+        }
+    } else {
+        let barrier = Barrier::new(options.threads + 1);
+        std::thread::scope(|scope| {
+            for worker in 0..options.threads {
+                let barrier = &barrier;
+                let dispatch = dispatch.clone();
+                let native_metadata = &native_metadata;
+                scope.spawn(move || {
+                    if let Backend::Native { collector } = backend {
                         worker_batches(
                             options,
                             barrier,
-                            |iteration| instrument(options.workload, worker, iteration),
-                            || {},
-                        )
-                    };
-                    match options.dispatch {
-                        DispatchMode::Scoped => {
-                            tracing::dispatcher::with_default(&dispatch, record)
+                            |iteration| {
+                                instrument_native(
+                                    collector,
+                                    native_metadata,
+                                    options.mode,
+                                    options.workload,
+                                    worker,
+                                    iteration,
+                                )
+                            },
+                            || collector.flush_local(),
+                        );
+                    } else {
+                        let record = || {
+                            worker_batches(
+                                options,
+                                barrier,
+                                |iteration| instrument(options.workload, worker, iteration),
+                                || {},
+                            )
+                        };
+                        match options.dispatch {
+                            DispatchMode::Scoped => {
+                                tracing::dispatcher::with_default(&dispatch, record)
+                            }
+                            DispatchMode::Global => record(),
                         }
-                        DispatchMode::Global => record(),
                     }
-                }
+                });
+            }
+            let result = measure_batches(backend, options, metadata, |_, _| {
+                barrier.wait();
+                barrier.wait();
             });
-        }
-        // Keep the barrier protocol running after a verification failure so
-        // all workers finish and join, then fail the process with the evidence.
-        // Resident workers warm their TLS, registry and queues, then continue
-        // into measurement. No extra native warmup outboxes are registered.
-        for (iterations, measured) in [(options.warmup, false), (options.iterations, true)] {
-            let mut phase = Timings::default();
-            let baseline = backend.counters();
-            if measured {
-                measured_start = Some(Instant::now());
-            }
-            for start in (0..iterations).step_by(options.batch) {
-                let cpu = process_cpu_ns();
-                let wall = Instant::now();
-                barrier.wait();
-                barrier.wait();
-                phase.record_wall += wall.elapsed().as_nanos();
-                phase.record_cpu += process_cpu_ns() - cpu;
-                let cpu = process_cpu_ns();
-                let wall = Instant::now();
-                let drained = backend.drain();
-                phase.drain_wall += wall.elapsed().as_nanos();
-                phase.drain_cpu += process_cpu_ns() - cpu;
-                let cpu = process_cpu_ns();
-                let wall = Instant::now();
-                match drained
-                    .as_ref()
-                    .map_err(|e| e.to_string())
-                    .and_then(|data| {
-                        verify(
-                            data,
-                            options,
-                            start,
-                            options.batch.min(iterations - start),
-                            metadata,
-                        )
-                    }) {
-                    Ok(counts) => {
-                        phase.spans += counts.spans;
-                        phase.events += counts.events;
-                        phase.payload_attributes += counts.payload_attributes;
-                    }
-                    Err(error) => {
-                        failure.get_or_insert(error);
-                    }
-                }
-                phase.verify_wall += wall.elapsed().as_nanos();
-                phase.verify_cpu += process_cpu_ns() - cpu;
-                let cpu = process_cpu_ns();
-                let wall = Instant::now();
-                drop(drained);
-                phase.destroy_wall += wall.elapsed().as_nanos();
-                phase.destroy_cpu += process_cpu_ns() - cpu;
-            }
-            let roots = if options.mode.retains() {
-                (options.threads * iterations) as u64
-            } else {
-                0
-            };
-            if let Err(error) = verify_counters(backend, &baseline, &mut phase, roots) {
-                failure.get_or_insert(error);
-            }
-            if measured {
-                timings = phase;
-            }
-        }
-        barrier.wait();
-    });
-    timings.total_wall = measured_start
-        .expect("measured phase always runs")
-        .elapsed()
-        .as_nanos();
+            // Release workers after the final drain, including on verification
+            // failure, so native TLS destruction cannot race measurement.
+            barrier.wait();
+            result
+        })
+    };
+    timings.total_wall = measured_start.elapsed().as_nanos();
     if let Some(error) = failure {
         return Err(error);
     }
@@ -1084,10 +1238,10 @@ fn run() -> Result<(), String> {
         )
     };
     println!(
-        "mode,workload,threads,iters_per_thread,warmup_per_thread,batch_per_thread,capacity,work_iterations,completed_spans,events,dropped,record_wall_ns,record_cpu_ns,drain_wall_ns,drain_cpu_ns,verify_wall_ns,verify_cpu_ns,total_wall_ns,record_cpu_ns_per_iteration,record_cpu_ns_per_span,pipeline_cpu_ns_per_iteration,pipeline_cpu_ns_per_span,sampled_out,recorded_roots,payload_attributes,destroy_wall_ns,destroy_cpu_ns,pipeline_with_destroy_cpu_ns_per_iteration,pipeline_with_destroy_cpu_ns_per_span,attempted_spans,dispatch"
+        "mode,workload,threads,iters_per_thread,warmup_per_thread,batch_per_thread,capacity,work_iterations,completed_spans,events,dropped,record_wall_ns,record_cpu_ns,drain_wall_ns,drain_cpu_ns,verify_wall_ns,verify_cpu_ns,total_wall_ns,record_cpu_ns_per_iteration,record_cpu_ns_per_span,pipeline_cpu_ns_per_iteration,pipeline_cpu_ns_per_span,sampled_out,recorded_roots,payload_attributes,destroy_wall_ns,destroy_cpu_ns,pipeline_with_destroy_cpu_ns_per_iteration,pipeline_with_destroy_cpu_ns_per_span,attempted_spans,dispatch,execution,drain_storage"
     );
     println!(
-        "{},{},{},{},{},{},{},{},{},{},0,{},{},{},{},{},{},{},{:.3},{},{:.3},{},{},{},{},{},{},{:.3},{},{},{}",
+        "{},{},{},{},{},{},{},{},{},{},0,{},{},{},{},{},{},{},{:.3},{},{:.3},{},{},{},{},{},{},{:.3},{},{},{},{},{}",
         options.mode_name,
         options.workload_name,
         options.threads,
@@ -1117,7 +1271,13 @@ fn run() -> Result<(), String> {
         pipeline_with_destroy_cpu as f64 / work as f64,
         pipeline_with_destroy_per_span,
         work * options.workload.spans(),
-        options.dispatch.name()
+        options.dispatch.name(),
+        options.execution.name(),
+        if options.reuse_drain {
+            "reuse"
+        } else {
+            "fresh"
+        }
     );
     Ok(())
 }

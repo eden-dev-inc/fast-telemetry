@@ -7,11 +7,16 @@
 //! since process start. No state tracking is required between export cycles.
 
 use crate::exp_buckets::ExpBucketsSnapshot;
+mod traces;
 use crate::{
     Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
     DynamicHistogram, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter, LabeledGauge,
     LabeledHistogram, LabeledSampledTimer, MaxGauge, MaxGaugeF64, MinGauge, MinGaugeF64,
     SampledTimer,
+};
+pub use traces::{
+    EncodedTraceRequest, encode_native_trace_export_request,
+    encode_native_trace_export_request_batches,
 };
 
 /// Re-export proto types so downstream crates (and the derive macro) can reference them.
@@ -795,7 +800,7 @@ impl OtlpExport for DynamicDistribution {
 // Trace export
 // ============================================================================
 
-use crate::span::{CompletedSpan, SpanKind, SpanStatus, SpanValue};
+use crate::span::{CompletedSpan, SpanAttribute, SpanKind, SpanStatus, SpanValue};
 
 impl CompletedSpan {
     /// Convert this completed span into an OTLP protobuf `Span`.
@@ -887,6 +892,84 @@ impl CompletedSpan {
             status,
             ..Default::default()
         }
+    }
+}
+
+impl CompletedSpan {
+    /// Consume this span into OTLP, moving already-owned strings into the proto.
+    ///
+    /// Borrowed strings are copied because the returned protobuf owns its data.
+    /// Exporters can use this with `Vec::drain` to retain their native batch
+    /// allocation while transferring payload ownership to the request.
+    #[inline]
+    pub fn into_otlp(self) -> pb::OtlpSpan {
+        let kind = match self.kind {
+            SpanKind::Internal => pb::OtlpSpanKind::Internal,
+            SpanKind::Server => pb::OtlpSpanKind::Server,
+            SpanKind::Client => pb::OtlpSpanKind::Client,
+            SpanKind::Producer => pb::OtlpSpanKind::Producer,
+            SpanKind::Consumer => pb::OtlpSpanKind::Consumer,
+        };
+        let status = match self.status {
+            SpanStatus::Unset => None,
+            SpanStatus::Ok => Some(pb::OtlpStatus {
+                code: pb::OtlpStatusCode::Ok as i32,
+                message: String::new(),
+            }),
+            SpanStatus::Error { message } => Some(pb::OtlpStatus {
+                code: pb::OtlpStatusCode::Error as i32,
+                message: message.into_owned(),
+            }),
+        };
+        pb::OtlpSpan {
+            trace_id: self.trace_id.as_bytes().to_vec(),
+            span_id: self.span_id.as_bytes().to_vec(),
+            parent_span_id: if self.parent_span_id.is_invalid() {
+                Vec::new()
+            } else {
+                self.parent_span_id.as_bytes().to_vec()
+            },
+            name: self.name.into_owned(),
+            kind: kind as i32,
+            start_time_unix_nano: self.start_time_ns,
+            end_time_unix_nano: self.end_time_ns,
+            attributes: self
+                .attributes
+                .into_iter()
+                .map(attribute_into_otlp)
+                .collect(),
+            events: self
+                .events
+                .into_iter()
+                .map(|event| pb::OtlpEvent {
+                    time_unix_nano: event.time_ns,
+                    name: event.name.into_owned(),
+                    attributes: event
+                        .attributes
+                        .into_iter()
+                        .map(attribute_into_otlp)
+                        .collect(),
+                    dropped_attributes_count: 0,
+                })
+                .collect(),
+            status,
+            ..Default::default()
+        }
+    }
+}
+
+#[inline]
+fn attribute_into_otlp(attribute: SpanAttribute) -> pb::KeyValue {
+    let value = match attribute.value {
+        SpanValue::String(value) => pb::any_value::Value::StringValue(value.into_owned()),
+        SpanValue::I64(value) => pb::any_value::Value::IntValue(value),
+        SpanValue::F64(value) => pb::any_value::Value::DoubleValue(value),
+        SpanValue::Bool(value) => pb::any_value::Value::BoolValue(value),
+        SpanValue::Uuid(value) => pb::any_value::Value::StringValue(value.to_string()),
+    };
+    pb::KeyValue {
+        key: attribute.key.into_owned(),
+        value: Some(pb::AnyValue { value: Some(value) }),
     }
 }
 
@@ -1445,6 +1528,163 @@ mod tests {
     }
 
     // -- Trace export tests --
+
+    pub(super) fn ownership_span(
+        owned: bool,
+        kind: SpanKind,
+        parent: crate::SpanId,
+        status: usize,
+    ) -> CompletedSpan {
+        fn text(value: &'static str, owned: bool) -> std::borrow::Cow<'static, str> {
+            if owned {
+                value.to_owned().into()
+            } else {
+                value.into()
+            }
+        }
+        CompletedSpan {
+            trace_id: crate::TraceId::from_hex("4bf92f3577b34da6a3ce929d0e0e4736")
+                .expect("trace fixture"),
+            span_id: crate::SpanId::from_hex("00f067aa0ba902b7").expect("span fixture"),
+            parent_span_id: parent,
+            name: text("native Σ\0span", owned),
+            kind,
+            start_time_ns: 0,
+            end_time_ns: u64::MAX,
+            status: match status {
+                0 => SpanStatus::Unset,
+                1 => SpanStatus::Ok,
+                _ => SpanStatus::Error {
+                    message: text("failure Σ\0message", owned),
+                },
+            },
+            attributes: vec![
+                SpanAttribute {
+                    key: text("text", owned),
+                    value: SpanValue::String(text("value Σ\0", owned)),
+                },
+                SpanAttribute {
+                    key: text("empty", owned),
+                    value: SpanValue::String(text("", owned)),
+                },
+                SpanAttribute {
+                    key: text("min", owned),
+                    value: SpanValue::I64(i64::MIN),
+                },
+                SpanAttribute {
+                    key: text("max", owned),
+                    value: SpanValue::I64(i64::MAX),
+                },
+                SpanAttribute {
+                    key: text("negative_zero", owned),
+                    value: SpanValue::F64(-0.0),
+                },
+                SpanAttribute {
+                    key: text("nan", owned),
+                    value: SpanValue::F64(f64::from_bits(0x7ff8_1234_5678_9abc)),
+                },
+                SpanAttribute {
+                    key: text("infinity", owned),
+                    value: SpanValue::F64(f64::INFINITY),
+                },
+                SpanAttribute {
+                    key: text("bool", owned),
+                    value: SpanValue::Bool(false),
+                },
+                SpanAttribute {
+                    key: text("uuid", owned),
+                    value: SpanValue::Uuid(uuid::Uuid::from_bytes([0xab; 16])),
+                },
+            ],
+            events: vec![crate::SpanEvent {
+                name: text("event Σ\0", owned),
+                time_ns: u64::MAX,
+                attributes: vec![SpanAttribute {
+                    key: text("event_key", owned),
+                    value: SpanValue::String(text("event_value", owned)),
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn consuming_span_export_preserves_borrowed_wire_bytes() {
+        use prost::Message;
+        let parent = crate::SpanId::from_hex("1234567890abcdef").expect("parent fixture");
+        for kind in [
+            SpanKind::Internal,
+            SpanKind::Server,
+            SpanKind::Client,
+            SpanKind::Producer,
+            SpanKind::Consumer,
+        ] {
+            for parent in [crate::SpanId::INVALID, parent] {
+                for owned in [false, true] {
+                    for status in 0..3 {
+                        let span = ownership_span(owned, kind, parent, status);
+                        let expected = span.to_otlp().encode_to_vec();
+                        let converted = span.into_otlp();
+                        assert_eq!(converted.encoded_len(), expected.len());
+                        assert_eq!(converted.encode_to_vec(), expected);
+                        let decoded = pb::OtlpSpan::decode(expected.as_slice())
+                            .expect("decode reference span");
+                        assert_eq!(decoded.encode_to_vec(), expected);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn consuming_span_export_transfers_owned_string_allocations() {
+        let span = ownership_span(true, SpanKind::Server, crate::SpanId::INVALID, 2);
+        let name = span.name.as_ptr();
+        let key = span.attributes[0].key.as_ptr();
+        let SpanValue::String(value) = &span.attributes[0].value else {
+            panic!("string fixture")
+        };
+        let value_pointer = value.as_ptr();
+        let event_name = span.events[0].name.as_ptr();
+        let event_key = span.events[0].attributes[0].key.as_ptr();
+        let SpanValue::String(event_value) = &span.events[0].attributes[0].value else {
+            panic!("event string fixture")
+        };
+        let event_value_pointer = event_value.as_ptr();
+        let SpanStatus::Error { message } = &span.status else {
+            panic!("error fixture")
+        };
+        let message_pointer = message.as_ptr();
+        let converted = span.into_otlp();
+        assert_eq!(converted.name.as_ptr(), name);
+        assert_eq!(converted.attributes[0].key.as_ptr(), key);
+        let Some(pb::any_value::Value::StringValue(value)) = converted.attributes[0]
+            .value
+            .as_ref()
+            .and_then(|v| v.value.as_ref())
+        else {
+            panic!("converted string")
+        };
+        assert_eq!(value.as_ptr(), value_pointer);
+        assert_eq!(converted.events[0].name.as_ptr(), event_name);
+        assert_eq!(converted.events[0].attributes[0].key.as_ptr(), event_key);
+        let Some(pb::any_value::Value::StringValue(value)) = converted.events[0].attributes[0]
+            .value
+            .as_ref()
+            .and_then(|v| v.value.as_ref())
+        else {
+            panic!("converted event string")
+        };
+        assert_eq!(value.as_ptr(), event_value_pointer);
+        assert_eq!(
+            converted
+                .status
+                .as_ref()
+                .expect("error status")
+                .message
+                .as_ptr(),
+            message_pointer
+        );
+    }
 
     #[test]
     fn test_completed_span_to_otlp() {

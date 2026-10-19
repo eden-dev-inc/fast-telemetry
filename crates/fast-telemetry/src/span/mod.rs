@@ -1,14 +1,15 @@
 //! Standalone distributed tracing for fast-telemetry.
 //!
 //! Provides lightweight span creation, parent-child nesting, and collection
-//! without the OpenTelemetry SDK dependency. Spans are buffered in thread-local
-//! Vecs (zero atomics on the push path) and exported as OTLP protobuf.
+//! without the OpenTelemetry SDK dependency. Each OS thread fills a contiguous
+//! Vec locally and hands off buckets atomically. Export preserves these buffers
+//! through OTLP encoding, without flattening or copying completed spans.
 //!
 //! # Usage
 //!
 //! ```ignore
 //! use std::sync::Arc;
-//! use fast_telemetry::{SpanCollector, SpanKind};
+//! use fast_telemetry::{SpanBatch, SpanCollector, SpanKind};
 //!
 //! let collector = Arc::new(SpanCollector::new(8, 1024));
 //!
@@ -32,9 +33,9 @@
 //! let span_id = fast_telemetry::current_span_id();
 //!
 //! // Exporter drains periodically.
-//! let mut buf = Vec::new();
+//! let mut buf = SpanBatch::new();
 //! collector.flush_local();
-//! collector.drain_into(&mut buf);
+//! collector.drain_batches(&mut buf);
 //! ```
 //!
 //! Call [`SpanCollector::flush_local`] before [`SpanCollector::drain_into`] when
@@ -46,11 +47,14 @@
 //! [`SpanCollector::start_span_from_traceparent`] on inbound requests and
 //! [`Span::traceparent`](super::Span::traceparent) for outbound headers.
 
+mod buckets;
+mod clock;
 mod collector;
 pub(crate) mod context;
 mod ids;
 mod types;
 
+pub use buckets::SpanBatch;
 pub use collector::{SpanCollector, SpanSink};
 pub use context::{SpanContext, current_span_id, current_trace_id};
 pub use ids::{SpanId, TraceId};

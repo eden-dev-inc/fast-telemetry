@@ -4,8 +4,8 @@
 
 Planned release: `0.9.0`.
 
-Published crates: `fast-telemetry`, `fast-telemetry-macros`,
-`fast-telemetry-export`.
+Planned crates: `fast-telemetry`, `fast-telemetry-macros`,
+`fast-telemetry-export`, `fast-telemetry-tracing`.
 
 Why this is a 0.9.0 minor release:
 
@@ -17,6 +17,23 @@ Why this is a 0.9.0 minor release:
 
 Highlights:
 
+- Added the optional `fast-telemetry-tracing` companion crate with a composable
+  Registry layer, standalone subscriber, explicit propagation handle, bounded
+  completed-span collection and a standalone-event drain. See its README for
+  field conversion, metadata, filtering and OpenTelemetry integration limits.
+- Native spans now borrow their collector as `Span<'collector>`, closing a
+  collector lifetime safety hole without per-span Arc updates. Code storing
+  native spans must carry that lifetime and keep the collector alive until all
+  spans finish. Create spans inside spawned tasks after moving in a collector
+  handle; children can outlive their parent while the collector remains alive.
+- Added per-producer double buffers and reusable `SpanBatch` drains. Automatic
+  native publication changes from 64 to 256 spans; explicit local flush and
+  thread-exit publication remain available. Native rejection counts now report
+  actual queue loss, and adaptive sampling recovers after buffers are drained.
+- Added direct native OTLP encoding and consuming `CompletedSpan::into_otlp`.
+  The span exporter reads bucket storage directly and transfers encoded bodies
+  through the existing acknowledged HTTP transport. Added lossless sender and
+  sustained-retention benchmark harnesses with payload verification.
 - Added the `otlp-logs` feature and
   `fast_telemetry::otlp::build_log_export_request`.
 - Added `OtlpHttpConfig`, `OtlpTlsConfig`, and `OtlpHttpClient` with custom

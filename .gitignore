@@ -1,5 +1,7 @@
 /target
+/benchmarks/tracing-end-to-end/target/
 Cargo.lock
+!benchmarks/tracing-end-to-end/Cargo.lock
 **/*.rs.bk
 *.swp
 *.swo

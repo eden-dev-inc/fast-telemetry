@@ -5,7 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use fast_telemetry::otlp::{
-    build_export_request, build_log_export_request, build_resource, build_trace_export_request, pb,
+    build_export_request, build_log_export_request, build_resource, build_trace_export_request,
+    encode_native_trace_export_request, pb,
 };
 use fast_telemetry_export::otlp::{OtlpHttpClient, OtlpHttpConfig, OtlpHttpErrorKind};
 use fast_telemetry_export::spans::{SpanExportConfig, run as run_span_exporter};
@@ -122,7 +123,7 @@ fn decoded_body(request: &CapturedRequest) -> Vec<u8> {
 
 #[tokio::test]
 async fn exports_logs_metrics_and_traces_through_the_shared_client() {
-    let (endpoint, captured, server) = collector(3);
+    let (endpoint, captured, server) = collector(4);
     let client = OtlpHttpClient::new(
         OtlpHttpConfig::new(endpoint)
             .with_header("x-tenant", "tenant-a")
@@ -165,6 +166,15 @@ async fn exports_logs_metrics_and_traces_through_the_shared_client() {
     let trace_outcome = client.export_traces(&traces).await.expect("export traces");
     assert_eq!((trace_outcome.accepted, trace_outcome.rejected), (1, 0));
 
+    let spans = native_spans();
+    let native = encode_native_trace_export_request(&resource, "integration", &spans);
+    let expected = native.as_bytes().to_vec();
+    let outcome = client
+        .export_native_traces(native)
+        .await
+        .expect("export native traces");
+    assert_eq!((outcome.accepted, outcome.rejected), (2, 0));
+
     let log_request = captured
         .recv_timeout(Duration::from_secs(1))
         .expect("log request");
@@ -174,7 +184,17 @@ async fn exports_logs_metrics_and_traces_through_the_shared_client() {
     let trace_request = captured
         .recv_timeout(Duration::from_secs(1))
         .expect("trace request");
-    for request in [&log_request, &metric_request, &trace_request] {
+    let native_request = captured
+        .recv_timeout(Duration::from_secs(1))
+        .expect("native trace request");
+    assert!(native_request.head.starts_with("POST /v1/traces "));
+    assert_eq!(decoded_body(&native_request), expected);
+    for request in [
+        &log_request,
+        &metric_request,
+        &trace_request,
+        &native_request,
+    ] {
         let head = request.head.to_ascii_lowercase();
         assert!(head.contains("x-tenant: tenant-a"));
         assert!(head.contains("content-encoding: gzip"));
@@ -296,4 +316,65 @@ async fn bounds_success_and_error_response_bodies() {
         .recv_timeout(Duration::from_secs(1))
         .expect("captured error request");
     server.join().expect("collector thread");
+}
+
+fn native_spans() -> Vec<fast_telemetry::CompletedSpan> {
+    use fast_telemetry::{CompletedSpan, SpanId, SpanKind, SpanStatus, TraceId};
+    (0..2)
+        .map(|index| CompletedSpan {
+            trace_id: TraceId::random(),
+            span_id: SpanId::random(),
+            parent_span_id: SpanId::INVALID,
+            name: format!("native-{index}").into(),
+            kind: SpanKind::Server,
+            start_time_ns: 1,
+            end_time_ns: 2,
+            status: SpanStatus::Unset,
+            attributes: Vec::new(),
+            events: Vec::new(),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn native_trace_acknowledgements_use_the_encoded_count() {
+    let resource = build_resource("native", &[]);
+    for threshold in [0, usize::MAX] {
+        for rejected in [-1_i64, 1, 99] {
+            // Encode the response using the publicly re-exported response's
+            // inferred partial-success type.
+            let mut response = pb::ExportTraceServiceResponse::default();
+            let partial = response.partial_success.get_or_insert_default();
+            partial.rejected_spans = rejected;
+            partial.error_message = "warning".into();
+            let (endpoint, captured, server) =
+                collector_response("200 OK", response.encode_to_vec());
+            let client =
+                OtlpHttpClient::new(OtlpHttpConfig::new(endpoint).with_gzip_threshold(threshold))
+                    .expect("HTTP client");
+            let spans = native_spans();
+            let request = encode_native_trace_export_request(&resource, "scope", &spans);
+            let expected = request.as_bytes().to_vec();
+            let outcome = client
+                .export_native_traces(request)
+                .await
+                .expect("native response");
+            let expected_rejected = u64::try_from(rejected).unwrap_or(0).min(2);
+            assert_eq!(outcome.accepted, 2 - expected_rejected);
+            assert_eq!(outcome.rejected, expected_rejected);
+            assert_eq!(outcome.message.as_deref(), Some("warning"));
+            let captured = captured
+                .recv_timeout(Duration::from_secs(1))
+                .expect("native request");
+            assert_eq!(decoded_body(&captured), expected);
+            assert_eq!(
+                captured
+                    .head
+                    .to_ascii_lowercase()
+                    .contains("content-encoding: gzip"),
+                threshold == 0
+            );
+            server.join().expect("collector thread");
+        }
+    }
 }

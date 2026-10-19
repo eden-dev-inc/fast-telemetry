@@ -15,102 +15,111 @@ fn row(csv: &str) -> std::collections::HashMap<&str, &str> {
 
 #[test]
 fn benchmark_checks_actual_completed_sinks_for_every_mode_and_workload() {
-    for (dispatch, mode) in ["scoped", "global"].into_iter().flat_map(|dispatch| {
-        [
-            "native",
-            "native-matched",
-            "native-user-fields",
-            "fast",
-            "direct",
-            "direct-user-fields",
-            "otel",
-            "disabled",
-            "registry",
-        ]
-        .map(|mode| (dispatch, mode))
-    }) {
-        for workload in ["root", "attributes", "children"] {
-            let output = Command::new(env!("CARGO_BIN_EXE_bench_tracing_backends"))
-                .args([
-                    "--dispatch",
-                    dispatch,
-                    "--mode",
-                    mode,
-                    "--workload",
-                    workload,
-                    "--threads",
-                    "2",
-                    "--iters",
-                    "7",
-                    "--warmup",
-                    "3",
-                    "--batch",
-                    "4",
-                    "--capacity",
-                    "64",
-                ])
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{mode}/{workload}: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let csv = String::from_utf8(output.stdout).unwrap();
-            let columns = row(&csv);
-            assert_eq!(columns["dispatch"], dispatch);
-            let spans: u64 = columns["completed_spans"].parse().unwrap();
-            let events: u64 = columns["events"].parse().unwrap();
-            let retains = !["disabled", "registry"].contains(&mode);
-            let multiplier = match workload {
-                "root" => 1,
-                "attributes" => 2,
-                _ => 4,
-            };
-            assert_eq!(spans, if !retains { 0 } else { 14 * multiplier });
-            assert_eq!(
-                events,
-                if retains && workload == "attributes" {
-                    14
-                } else {
-                    0
-                }
-            );
-            assert_eq!(columns["dropped"], "0");
-            assert_eq!(columns["sampled_out"], "0");
-            assert_eq!(
-                columns["recorded_roots"],
-                if mode.starts_with("native") {
-                    "14"
-                } else {
-                    "0"
-                }
-            );
-            assert_eq!(
-                columns["attempted_spans"].parse::<u64>().unwrap(),
-                14 * multiplier
-            );
-            if mode != "otel" {
-                let attributes = match (mode, workload) {
-                    ("native" | "native-user-fields" | "direct-user-fields", "attributes") => 6,
-                    ("native" | "native-user-fields" | "direct-user-fields", _)
-                    | ("disabled" | "registry", _) => 0,
-                    (_, "root") => 5,
-                    (_, "attributes") => 21,
-                    (_, "children") => 20,
-                    _ => unreachable!(),
-                };
-                assert_eq!(
-                    columns["payload_attributes"].parse::<u64>().unwrap(),
-                    14 * attributes
+    for (execution, threads, work, storage) in [
+        ("workers", "2", 14, "fresh"),
+        ("workers", "2", 14, "reuse"),
+        ("inline", "1", 7, "fresh"),
+        ("inline", "1", 7, "reuse"),
+    ] {
+        for (dispatch, mode) in ["scoped", "global"].into_iter().flat_map(|dispatch| {
+            [
+                "native",
+                "native-matched",
+                "native-user-fields",
+                "fast",
+                "direct",
+                "direct-user-fields",
+                "otel",
+                "disabled",
+                "registry",
+            ]
+            .map(|mode| (dispatch, mode))
+        }) {
+            for workload in ["root", "attributes", "children"] {
+                let output = Command::new(env!("CARGO_BIN_EXE_bench_tracing_backends"))
+                    .args([
+                        "--dispatch",
+                        dispatch,
+                        "--mode",
+                        mode,
+                        "--workload",
+                        workload,
+                        "--execution",
+                        execution,
+                        "--drain-storage",
+                        storage,
+                        "--threads",
+                        threads,
+                        "--iters",
+                        "7",
+                        "--warmup",
+                        "3",
+                        "--batch",
+                        "4",
+                        "--capacity",
+                        "64",
+                    ])
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{mode}/{workload}: {}",
+                    String::from_utf8_lossy(&output.stderr)
                 );
-            }
-            for metric in [
-                "record_cpu_ns_per_span",
-                "pipeline_cpu_ns_per_span",
-                "pipeline_with_destroy_cpu_ns_per_span",
-            ] {
-                assert_eq!(columns[metric] == "NA", !retains, "{mode}: {metric}");
+                let csv = String::from_utf8(output.stdout).unwrap();
+                let columns = row(&csv);
+                assert_eq!(columns["dispatch"], dispatch);
+                assert_eq!(columns["execution"], execution);
+                assert_eq!(columns["drain_storage"], storage);
+                let spans: u64 = columns["completed_spans"].parse().unwrap();
+                let events: u64 = columns["events"].parse().unwrap();
+                let retains = !["disabled", "registry"].contains(&mode);
+                let multiplier = match workload {
+                    "root" => 1,
+                    "attributes" => 2,
+                    _ => 4,
+                };
+                assert_eq!(spans, if !retains { 0 } else { work * multiplier });
+                assert_eq!(
+                    events,
+                    if retains && workload == "attributes" {
+                        work
+                    } else {
+                        0
+                    }
+                );
+                assert_eq!(columns["dropped"], "0");
+                assert_eq!(columns["sampled_out"], "0");
+                assert_eq!(
+                    columns["recorded_roots"].parse::<u64>().unwrap(),
+                    if mode.starts_with("native") { work } else { 0 }
+                );
+                assert_eq!(
+                    columns["attempted_spans"].parse::<u64>().unwrap(),
+                    work * multiplier
+                );
+                if mode != "otel" {
+                    let attributes = match (mode, workload) {
+                        ("native" | "native-user-fields" | "direct-user-fields", "attributes") => 6,
+                        ("native" | "native-user-fields" | "direct-user-fields", _)
+                        | ("disabled" | "registry", _) => 0,
+                        (_, "root") => 5,
+                        (_, "attributes") => 21,
+                        (_, "children") => 20,
+                        _ => unreachable!(),
+                    };
+                    assert_eq!(
+                        columns["payload_attributes"].parse::<u64>().unwrap(),
+                        work * attributes
+                    );
+                }
+                for metric in [
+                    "record_cpu_ns_per_span",
+                    "pipeline_cpu_ns_per_span",
+                    "pipeline_with_destroy_cpu_ns_per_span",
+                ] {
+                    assert_eq!(columns[metric] == "NA", !retains, "{mode}: {metric}");
+                }
             }
         }
     }
@@ -207,4 +216,17 @@ fn benchmark_exits_nonzero_when_real_sinks_lose_spans() {
         assert!(!output.status.success(), "loss must fail for {mode}");
         assert!(String::from_utf8_lossy(&output.stderr).contains("sink count mismatch"));
     }
+}
+
+#[test]
+fn inline_execution_rejects_multiple_workers() {
+    let output = Command::new(env!("CARGO_BIN_EXE_bench_tracing_backends"))
+        .args(["--execution", "inline", "--threads", "2"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("inline execution requires --threads 1")
+    );
+    assert!(output.stdout.is_empty());
 }
