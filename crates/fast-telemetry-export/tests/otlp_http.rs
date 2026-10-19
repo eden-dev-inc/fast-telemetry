@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use fast_telemetry::otlp::{
     build_export_request, build_log_export_request, build_resource, build_trace_export_request,
@@ -119,6 +119,170 @@ fn decoded_body(request: &CapturedRequest) -> Vec<u8> {
         .read_to_end(&mut body)
         .expect("decode gzip request");
     body
+}
+
+fn bounded_trace_collector(
+    responses: Vec<(String, Vec<u8>)>,
+) -> (
+    String,
+    mpsc::Receiver<CapturedRequest>,
+    thread::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind trace collector");
+    let address = listener.local_addr().expect("trace collector address");
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking listener");
+    let (tx, rx) = mpsc::channel();
+    let task = thread::spawn(move || {
+        for (status, body) in responses {
+            let deadline = Instant::now() + Duration::from_secs(6);
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if Instant::now() >= deadline {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                    Err(error) => panic!("accept trace export: {error}"),
+                }
+            };
+            tx.send(read_request(&mut stream))
+                .expect("capture trace chunk");
+            let head = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/x-protobuf\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(head.as_bytes()).expect("response headers");
+            stream.write_all(&body).expect("response body");
+        }
+    });
+    (format!("http://{address}"), rx, task)
+}
+
+async fn check_chunked_native_export(final_export: bool, middle_response: (String, Vec<u8>)) {
+    use fast_telemetry::{SpanAttribute, SpanCollector, SpanKind, SpanStatus};
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    let total = 3 * 384 + 1;
+    let limit = 512;
+    let (endpoint, captured, server) = bounded_trace_collector(vec![
+        ("200 OK".into(), Vec::new()),
+        middle_response,
+        ("200 OK".into(), Vec::new()),
+    ]);
+    let span_collector = Arc::new(SpanCollector::new(1, 4096));
+    thread::scope(|scope| {
+        for worker in 0..3 {
+            let collector = &span_collector;
+            scope.spawn(move || {
+                for index in 0..384 {
+                    let mut span =
+                        collector.start_span(format!("worker-{worker}-{index}"), SpanKind::Server);
+                    span.set_attribute("index", index as i64);
+                    span.set_attribute("worker", worker as i64);
+                    span.set_status(SpanStatus::Error {
+                        message: format!("error-{worker}-{index}").into(),
+                    });
+                    span.add_event(
+                        "checkpoint",
+                        vec![SpanAttribute::new(
+                            "value",
+                            format!("event-{worker}-{index}"),
+                        )],
+                    );
+                }
+                collector.flush_local();
+            });
+        }
+    });
+    drop(span_collector.start_span("partial", SpanKind::Internal));
+    span_collector.flush_local();
+    assert_eq!(span_collector.len(), total);
+    let cancel = CancellationToken::new();
+    if final_export {
+        cancel.cancel();
+    }
+    let task = tokio::spawn(run_span_exporter(
+        Arc::clone(&span_collector),
+        SpanExportConfig::new(endpoint)
+            .with_interval(Duration::from_millis(10))
+            .with_max_batch_size(limit),
+        cancel.clone(),
+    ));
+    let requests = tokio::task::spawn_blocking(move || {
+        let mut received = Vec::new();
+        for _ in 0..3 {
+            match captured.recv_timeout(Duration::from_secs(5)) {
+                Ok(request) => received.push(request),
+                Err(_) => break,
+            }
+        }
+        received
+    })
+    .await
+    .expect("capture task");
+    cancel.cancel();
+    tokio::time::timeout(Duration::from_secs(8), task)
+        .await
+        .expect("exporter stopped")
+        .expect("exporter task");
+    server.join().expect("trace collector thread");
+
+    let mut counts = Vec::new();
+    let mut names = HashSet::new();
+    let mut ids = HashSet::new();
+    for request in &requests {
+        assert!(request.head.starts_with("POST /v1/traces "));
+        let decoded = pb::ExportTraceServiceRequest::decode(decoded_body(request).as_slice())
+            .expect("decode chunk");
+        let spans = &decoded.resource_spans[0].scope_spans[0].spans;
+        counts.push(spans.len());
+        for span in spans {
+            assert!(
+                names.insert(span.name.clone()),
+                "duplicate name across requests"
+            );
+            assert!(
+                ids.insert(span.span_id.clone()),
+                "duplicate span across requests"
+            );
+            assert!(span.end_time_unix_nano >= span.start_time_unix_nano);
+            if span.name != "partial" {
+                assert_eq!(span.attributes.len(), 2);
+                assert_eq!(span.events.len(), 1);
+                assert_eq!(span.events[0].attributes.len(), 1);
+                assert!(
+                    span.status
+                        .as_ref()
+                        .is_some_and(|s| s.message.starts_with("error-"))
+                );
+            }
+        }
+    }
+    assert_eq!(names.len(), total, "every drained span must be attempted");
+    assert!(
+        counts.iter().all(|&n| n <= limit),
+        "request cap violated: {counts:?}"
+    );
+    assert_eq!(counts, vec![512, 512, 129]);
+    assert!(names.contains("partial"));
+    assert_eq!(span_collector.sampled_out_count(), 0);
+    assert_eq!(span_collector.dropped_count(), 0);
+    assert!(span_collector.is_empty());
+}
+
+#[tokio::test]
+async fn periodic_span_export_sends_all_drained_spans_in_bounded_requests() {
+    check_chunked_native_export(false, ("200 OK".into(), Vec::new())).await;
+}
+
+#[tokio::test]
+async fn final_span_export_honors_the_request_cap_without_losing_spans() {
+    check_chunked_native_export(true, ("200 OK".into(), Vec::new())).await;
 }
 
 #[tokio::test]
