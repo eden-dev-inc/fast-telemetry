@@ -1,0 +1,12 @@
+{
+  "README.md": "6ec54a0cd0dd3b65c8134a45b8cfb5e4c43489687e3ae18f2985b75cd9345cf1",
+  "admission.py": "2cade158323e0815cb1c66f8d80dd308add00ca2433c10e097d45cc4d43c84ac",
+  "baseline-runs.csv": "da40be696d9649f006c675fd93c9cb3eba4f8a31c8546f49c7d98dda12595590",
+  "confirmation-runs.csv": "8c69c48b5a2b158c2fdd35858f4836a95276908834f5814f818cffbad56966a2",
+  "implementation.patch": "39ac5dcd65b0448a9293f38335e778790a2503fc253a629c01b3c10320413b16",
+  "metadata.json": "764a22ea97ad3a05a9df889cc45546ce0e85758321294c18c30631078d5d79ba",
+  "run-confirmation.py": "aae20d27f2a00345addbc2d5c52e595c9f330eeefb21e94ae6098ba2586fd5e5",
+  "run-knee.py": "63f4d7f8d1171a905c39ffea95dc74e71be2ed0ffcd1056331c6c4cd60b855e0",
+  "summarize.py": "3b154eb67aaff595c3cf5cef4ec25a5c6c5bb069bbff07b36dfa5e0a8f02e5dc",
+  "summary.json": "f8f9b52694683ea13aaf76abea0c6a89b6b2b79f2104e4684874c763f0c0ea1f"
+}

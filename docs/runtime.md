@@ -5,12 +5,24 @@
 Enable the `runtime` feature when a parent service should own telemetry and pass
 the same concrete runtime type into child crates. The runtime owns metric
 registration and a shared span collector so export setup happens once.
-`RuntimeConfig` is currently reserved for future runtime tuning; use
-`RuntimeConfig::default()` when creating a runtime.
+`RuntimeConfig::default()` uses 384 completed spans per native producer
+publication. Set a different target through `RuntimeConfig::with_span_config`:
+
+```rust
+use fast_telemetry::{Runtime, RuntimeConfig, SpanCollectorConfig};
+
+let runtime = Runtime::new(RuntimeConfig::default().with_span_config(
+    SpanCollectorConfig::default().with_producer_batch_size(512),
+));
+```
+
+The target accepts 1–1,024 spans per OS thread. Explicit local flush and thread
+exit publish smaller batches; the shared exporter request cap remains separate.
+See [native publication and export limits](metrics-and-spans.md#spans).
 
 ```toml
 [dependencies]
-fast-telemetry = { version = "0.9", features = ["runtime"] }
+fast-telemetry = { version = "0.10", features = ["runtime"] }
 ```
 
 ```rust

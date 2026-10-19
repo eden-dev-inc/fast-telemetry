@@ -1,0 +1,98 @@
+{
+  "baseline_commit": "810c8f1def4cd7c92faeb5dc350eee9b98b7bbb0",
+  "candidate_identity": "baseline commit plus implementation.patch",
+  "implementation_patch_sha256": "39ac5dcd65b0448a9293f38335e778790a2503fc253a629c01b3c10320413b16",
+  "candidate_source_sha256": {
+    "crates/fast-telemetry/src/span/buckets.rs": "46bbfdc5aecae83ff7df88f918cc6d30e99e7cae3c9a816b7c53ca9484bd2b4d",
+    "crates/fast-telemetry/src/span/collector.rs": "99d5c3e84c76a1984fcd7dc63c761a79bdb610f83c52ccf42e768b87babcc247",
+    "crates/fast-telemetry/src/span/mod.rs": "df9c118d4201b20c1a08541898edcb6350021550fe5db7d380db5bb9cc883f4a",
+    "crates/fast-telemetry/src/lib.rs": "e087f7dbe5dc15db6597f9252831227372f8758d21160cf1c374207e653f05fb",
+    "crates/fast-telemetry/src/runtime.rs": "398c96879141041a60147229028262f2d65ea7fae3ba3be10534d4cbd21dc550",
+    "crates/fast-telemetry/tests/span_batch_config.rs": "9e0d5d9e940d70335940bca8f6b7153bd9cedaba56f5d2b5a031981af477fe2c",
+    "benchmarks/tracing-end-to-end/src/main.rs": "4a2264a706e9bee23fc6911ac482666c058c33fa382e0728eaa4ee79c4aaa3a8"
+  },
+  "binary_sha256": {
+    "before": "840e104b4e4b42bdf2669fc6574fddf0c5c788ae7f281382387aac4bedb1509b",
+    "candidate": "ec98582c11ab1445ef584189ef50c32c8030dce852dac3f49f6b67fc20402645"
+  },
+  "compiler": "rustc 1.93.1 (01f6ddf75 2026-02-11)\nbinary: rustc\ncommit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\ncommit-date: 2026-02-11\nhost: x86_64-unknown-linux-gnu\nrelease: 1.93.1\nLLVM version: 21.1.8\n",
+  "host": {
+    "os": "Linux x86_64",
+    "cpu": "AMD Ryzen 9 3950X",
+    "affinity": "0-15",
+    "shared": true
+  },
+  "build_flags": "release, strip=true, RUSTFLAGS=-Dwarnings",
+  "baseline_publication_target": 256,
+  "candidate_default_publication_target": 384,
+  "selection_sweep": {
+    "spans_per_process": 196608,
+    "threads": 8,
+    "sizes": [
+      64,
+      128,
+      256,
+      384,
+      512,
+      768,
+      1024
+    ],
+    "repetitions": 6,
+    "warmup_cycles": 16,
+    "timing_source": "unchanged baseline with fixed 256-span automatic publication; explicit flush after each application burst"
+  },
+  "confirmation": {
+    "spans_per_process": 196608,
+    "threads": [
+      1,
+      8
+    ],
+    "export_burst_spans_per_thread": 384,
+    "repetitions": 6,
+    "warmup_cycles": 16,
+    "variants": [
+      "before",
+      "configured-256",
+      "default-384"
+    ]
+  },
+  "builds": {
+    "before": {
+      "manifest_sha256": "e50b78552af243c55fb414476bec9c43fb2f2877ade8aa6cdbbbdfbd4fa33eb0",
+      "lock_sha256": "fa5db26f9e60de90954a2215b6dfb6f24c707b4d117b3b9a2f0021d71e86e617",
+      "registry_sha256": "e0545951fb0ea7a3a1f707b2b58a5aa184430ba187739b4d2131e38ef73c026c"
+    },
+    "candidate": {
+      "manifest_sha256": "13535f6970263db9971c8b3c9723d2070e505ddb72473c817182fad99d6da173",
+      "lock_sha256": "5195d199893168c1b655338cdd0236ee4c803f5b76caba72076b326697d14897",
+      "registry_sha256": "e0545951fb0ea7a3a1f707b2b58a5aa184430ba187739b4d2131e38ef73c026c"
+    }
+  },
+  "local_checks": {
+    "test-final-config": {
+      "exit_code": 0,
+      "stdout_sha256": "4215c0f1654c152c4b256fa936c559d59d64e87ed8c259230474bd6a5cadd41a",
+      "stderr_sha256": "1003ada4898463a77549d60b6a1eaa23131615b325b65e40cbcc847a9f2db119"
+    },
+    "clippy-config": {
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "5f4201b0ef79ee142f3c0263a1fc4f791cb8ac1d10378da1a834677ef2266d9c"
+    },
+    "test-sender": {
+      "exit_code": 0,
+      "stdout_sha256": "d1681aece2a3f6e81e195be643853966a82d052017453086524eaa8bedc1f400",
+      "stderr_sha256": "ad673740a7b2b806b3aab3caa01a23d765c6adbd1266369c65ee466c18eea277"
+    },
+    "build-final-sender": {
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f891380bb7e4e417ac42236a2a3a20fdb6150d30b68222fd1580f25f8d0a183e"
+    },
+    "clippy-sender": {
+      "exit_code": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "9b339dd4d7fe55c6c535a32cfdd24cc78728f03d2423d8133ba0c40c859daa63"
+    }
+  }
+}

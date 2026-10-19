@@ -2,7 +2,74 @@
 
 ## Unreleased
 
-Planned release: `0.9.0`.
+Planned release: `0.10.0`.
+
+Planned crates: `fast-telemetry`, `fast-telemetry-macros`,
+`fast-telemetry-export`, `fast-telemetry-tracing`.
+
+Why this is a 0.10.0 minor release:
+
+- Native spans now carry a collector lifetime and `Span::enter()` returns a
+  scoped, thread-bound guard. These API changes require a minor version bump
+  before 1.0; migrate stored spans and entry scopes as described below.
+- It adds the optional tracing integration crate and configurable native
+  producer batching, alongside the direct OTLP encoding and export fixes.
+- All four crates stay on the same release line. The Rust 1.93 minimum is
+  unchanged from the published 0.9.0 release.
+
+Highlights:
+
+- Added the optional `fast-telemetry-tracing` companion crate with a composable
+  Registry layer, standalone subscriber, explicit propagation handle, bounded
+  completed-span collection and a standalone-event drain. See its README for
+  field conversion, metadata, filtering and OpenTelemetry integration limits.
+- Native spans now borrow their collector as `Span<'collector>`, closing a
+  collector lifetime safety hole without per-span Arc updates. Code storing
+  native spans must carry that lifetime and keep the collector alive until all
+  spans finish. Create spans inside spawned tasks after moving in a collector
+  handle; children can outlive their parent while the collector remains alive.
+- Native `Span::enter` now returns a scoped `EnteredSpan` guard. Replace
+  `span.enter();` with `let mut entered = span.enter();` and use `entered`
+  while correlation is needed. Dropping the guard closes context; dropping the
+  span still submits it. Use `entered.end()` to do both explicitly. The guard
+  is thread-bound and must not cross `.await`; an unentered `Span` remains
+  `Send + Sync`. Out-of-order closure no longer resurrects closed contexts.
+- Fixed native completion during user thread-local destruction, which could
+  abort the process after collector TLS had already been destroyed. Late
+  completions use one bounded, shared shutdown writer per collector and remain
+  drainable; its queue rejection is included in `dropped_count()`.
+- Added per-producer double buffers and reusable `SpanBatch` drains. Automatic
+  native publication changes from 64 to 384 spans by default; explicit local
+  flush and thread-exit publication remain available. Native rejection counts
+  now report actual queue loss, and adaptive sampling recovers after draining.
+- Added `SpanCollectorConfig::with_producer_batch_size` and
+  `RuntimeConfig::with_span_config` to select 1–1,024 completed spans per native
+  producer publication. The 384-span default follows the measured 256–384
+  batch-size knee. This target is separate from the exporter's per-request cap;
+  tracing adapter sinks retain immediate publication. Larger native defaults can
+  delay low-volume publication, so keep an explicit local-flush deadline.
+- Added direct native OTLP encoding and consuming `CompletedSpan::into_otlp`.
+  The span exporter reads bucket storage directly and transfers encoded bodies
+  through the existing acknowledged HTTP transport. Added lossless sender and
+  sustained-retention benchmark harnesses with payload verification.
+- Fixed span export truncation when a periodic drain exceeds `max_batch_size`.
+  Periodic and final shutdown drains now split every span into bounded requests
+  (default 512 spans per request), including chunks after a failed or partially
+  rejected request. Requests are attempted once without replay. Positive request
+  limits and export intervals are validated before draining. Span backoff jitter
+  now varies in both directions and respects its five-minute maximum.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.10"
+fast-telemetry-export = "0.10"
+# Optional integration for existing tracing instrumentation:
+fast-telemetry-tracing = "0.10"
+```
+
+## 0.9.0 - 2026-07-25
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`,
 `fast-telemetry-export`.

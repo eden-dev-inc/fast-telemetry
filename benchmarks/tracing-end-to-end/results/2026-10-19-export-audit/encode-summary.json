@@ -1,0 +1,110 @@
+{
+  "samples": 96,
+  "verified_spans": 100728144,
+  "cells": [
+    {
+      "workload": "static",
+      "batch": 512,
+      "single_ns_per_span": 21.878999999999998,
+      "chunks_ns_per_span": 21.9505,
+      "paired_delta_percent": 0.09715116999897133,
+      "paired_range": [
+        -2.1152708911431506,
+        12.778549970855924
+      ],
+      "wire_bytes_delta_percent": 0.0,
+      "requests": 1
+    },
+    {
+      "workload": "static",
+      "batch": 1153,
+      "single_ns_per_span": 21.601,
+      "chunks_ns_per_span": 20.6815,
+      "paired_delta_percent": -4.418811628798148,
+      "paired_range": [
+        -7.584512489194218,
+        1.051267281105983
+      ],
+      "wire_bytes_delta_percent": 0.18466171394480035,
+      "requests": 3
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "single_ns_per_span": 21.5245,
+      "chunks_ns_per_span": 20.122500000000002,
+      "paired_delta_percent": -5.806800051330995,
+      "paired_range": [
+        -14.903846153846157,
+        5.199476782210599
+      ],
+      "wire_bytes_delta_percent": 0.17603943283295287,
+      "requests": 6
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "single_ns_per_span": 20.665,
+      "chunks_ns_per_span": 36.657,
+      "paired_delta_percent": 73.26479661126845,
+      "paired_range": [
+        50.14322211039715,
+        89.58721443278752
+      ],
+      "wire_bytes_delta_percent": 0.1980879510502742,
+      "requests": 16
+    },
+    {
+      "workload": "attributes",
+      "batch": 512,
+      "single_ns_per_span": 171.1475,
+      "chunks_ns_per_span": 169.506,
+      "paired_delta_percent": -1.2233103986472205,
+      "paired_range": [
+        -3.677435993622813,
+        0.7670058918050504
+      ],
+      "wire_bytes_delta_percent": 0.0,
+      "requests": 1
+    },
+    {
+      "workload": "attributes",
+      "batch": 1153,
+      "single_ns_per_span": 195.3395,
+      "chunks_ns_per_span": 171.8505,
+      "paired_delta_percent": -13.58633916829945,
+      "paired_range": [
+        -15.702487801631214,
+        -10.695501838216149
+      ],
+      "wire_bytes_delta_percent": 0.05152124275482617,
+      "requests": 3
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "single_ns_per_span": 195.243,
+      "chunks_ns_per_span": 166.628,
+      "paired_delta_percent": -13.45347598579848,
+      "paired_range": [
+        -29.26875002663507,
+        -6.953794490820664
+      ],
+      "wire_bytes_delta_percent": 0.04743723909519382,
+      "requests": 6
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "single_ns_per_span": 202.813,
+      "chunks_ns_per_span": 261.44550000000004,
+      "paired_delta_percent": 30.26336059506597,
+      "paired_range": [
+        26.705899845081692,
+        33.82006838084302
+      ],
+      "wire_bytes_delta_percent": 0.052994000436790145,
+      "requests": 16
+    }
+  ]
+}

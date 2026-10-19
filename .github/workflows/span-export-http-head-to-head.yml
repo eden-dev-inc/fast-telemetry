@@ -1,0 +1,57 @@
+name: HTTP exporter comparison
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/span-export-http-head-to-head/**'
+      - '.github/workflows/span-export-http-head-to-head.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Production HTTP exporter comparison
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      RUSTFLAGS: -Dwarnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: benchmarks/span-export-http-head-to-head
+      - name: Prepare disposable runner headroom
+        shell: python
+        run: |
+          import pathlib, shutil, subprocess
+          if shutil.disk_usage('/').free < 25_000_000_000:
+              sdk = pathlib.Path('/usr/local/lib/android')
+              if sdk.is_dir():
+                  subprocess.run(['sudo', 'rm', '-rf', str(sdk)], check=True)
+          print(shutil.disk_usage('/'))
+      - run: python3 benchmarks/span-export-http-head-to-head/run.py admit --output "$RUNNER_TEMP/http-exporters"
+      - run: cargo build --release --locked --manifest-path benchmarks/span-export-http-head-to-head/Cargo.toml
+      - run: python3 benchmarks/span-export-http-head-to-head/run.py admit --output "$RUNNER_TEMP/http-exporters"
+      - run: cargo clippy --release --locked --bins --manifest-path benchmarks/span-export-http-head-to-head/Cargo.toml -- -D warnings
+      - run: cargo fmt --manifest-path benchmarks/span-export-http-head-to-head/Cargo.toml -- --check
+      - name: Paired exporter measurements and exact receiver verification
+        run: python3 benchmarks/span-export-http-head-to-head/run.py matrix --output "$RUNNER_TEMP/http-exporters"
+      - name: Prepare figure tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/http-exporter-plots"
+          "$RUNNER_TEMP/http-exporter-plots/bin/pip" install matplotlib==3.10.0
+      - name: Summarize measurements and export figures
+        env:
+          MPLCONFIGDIR: ${{ runner.temp }}/http-exporter-matplotlib
+        run: '"$RUNNER_TEMP/http-exporter-plots/bin/python" benchmarks/span-export-http-head-to-head/summarize.py "$RUNNER_TEMP/http-exporters" --plot'
+      - name: Retain observations and admission receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-exporter-comparison
+          path: ${{ runner.temp }}/http-exporters
+          if-no-files-found: error

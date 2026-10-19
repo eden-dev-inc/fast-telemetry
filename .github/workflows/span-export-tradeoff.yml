@@ -1,0 +1,62 @@
+name: Span export tradeoff
+
+on:
+  pull_request:
+    paths:
+      - 'benchmarks/span-export-tradeoff/**'
+      - '.github/workflows/span-export-tradeoff.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    name: Controlled span export observation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      RUSTFLAGS: -Dwarnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: benchmarks/span-export-tradeoff
+      - name: Prepare disposable runner headroom
+        shell: python
+        run: |
+          import pathlib, shutil, subprocess
+          if shutil.disk_usage('/').free < 25_000_000_000:
+              sdk = pathlib.Path('/usr/local/lib/android')
+              if sdk.is_dir():
+                  subprocess.run(['sudo', 'rm', '-rf', str(sdk)], check=True)
+          print(shutil.disk_usage('/'))
+      - run: python3 benchmarks/span-export-tradeoff/run.py admit --output "$RUNNER_TEMP/span-export-observation"
+      - run: cargo build --release --locked --manifest-path benchmarks/span-export-tradeoff/Cargo.toml
+      - run: cargo clippy --release --locked --bins --manifest-path benchmarks/span-export-tradeoff/Cargo.toml -- -D warnings
+      - run: cargo fmt --manifest-path benchmarks/span-export-tradeoff/Cargo.toml -- --check
+      - name: Compare original and matched verification preparation
+        run: python3 benchmarks/span-export-tradeoff/run.py controls --output "$RUNNER_TEMP/span-export-observation"
+      - name: Diagnose allocator threshold sensitivity
+        run: python3 benchmarks/span-export-tradeoff/run.py allocator --output "$RUNNER_TEMP/span-export-observation"
+      - name: Sweep request caps and drain sizes
+        run: python3 benchmarks/span-export-tradeoff/run.py caps --output "$RUNNER_TEMP/span-export-observation"
+      - name: Observe acknowledged HTTP, gzip and delayed receivers
+        run: python3 benchmarks/span-export-tradeoff/run.py http --output "$RUNNER_TEMP/span-export-observation"
+      - name: Prepare figure tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/span-export-plots"
+          "$RUNNER_TEMP/span-export-plots/bin/pip" install matplotlib==3.10.0
+      - name: Summarize observations and export figures
+        env:
+          MPLCONFIGDIR: ${{ runner.temp }}/span-export-matplotlib
+        run: '"$RUNNER_TEMP/span-export-plots/bin/python" benchmarks/span-export-tradeoff/summarize.py "$RUNNER_TEMP/span-export-observation" --plot'
+      - name: Retain observations and admission receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: span-export-observation
+          path: ${{ runner.temp }}/span-export-observation
+          if-no-files-found: error

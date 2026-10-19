@@ -1,20 +1,21 @@
 //! Standalone distributed tracing for fast-telemetry.
 //!
 //! Provides lightweight span creation, parent-child nesting, and collection
-//! without the OpenTelemetry SDK dependency. Spans are buffered in thread-local
-//! Vecs (zero atomics on the push path) and exported as OTLP protobuf.
+//! without the OpenTelemetry SDK dependency. Each OS thread fills a contiguous
+//! Vec locally and hands off buckets atomically. Export preserves these buffers
+//! through OTLP encoding, without flattening or copying completed spans.
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```
 //! use std::sync::Arc;
-//! use fast_telemetry::{SpanCollector, SpanKind};
+//! use fast_telemetry::{SpanBatch, SpanCollector, SpanKind};
 //!
 //! let collector = Arc::new(SpanCollector::new(8, 1024));
 //!
 //! // Root span (new trace).
 //! let mut root = collector.start_span("handle_request", SpanKind::Server);
-//! root.enter(); // set thread-local for logging
+//! let mut root = root.enter(); // keep the logging guard in scope
 //! root.set_attribute("http.method", "GET");
 //!
 //! // Child span (inherits trace_id from &root).
@@ -31,27 +32,37 @@
 //! let trace_id = fast_telemetry::current_trace_id();
 //! let span_id = fast_telemetry::current_span_id();
 //!
+//! root.end(); // submit the root and close its logging context
+//!
 //! // Exporter drains periodically.
-//! let mut buf = Vec::new();
+//! let mut buf = SpanBatch::new();
 //! collector.flush_local();
-//! collector.drain_into(&mut buf);
+//! collector.drain_batches(&mut buf);
 //! ```
 //!
 //! Call [`SpanCollector::flush_local`] before [`SpanCollector::drain_into`] when
 //! draining on the same thread that just recorded spans. `SpanCollector::new`
 //! keeps its historical `(shards, capacity)` signature for compatibility, but
 //! those parameters are currently ignored because buffers are managed per thread.
+//! Use [`SpanCollector::with_config`] and [`SpanCollectorConfig`] to change the
+//! default 384-span native producer publication target. Explicit local flush
+//! and thread exit also publish smaller batches.
 //!
 //! For manual cross-service propagation, use
 //! [`SpanCollector::start_span_from_traceparent`] on inbound requests and
 //! [`Span::traceparent`](super::Span::traceparent) for outbound headers.
 
+mod buckets;
+mod clock;
 mod collector;
 pub(crate) mod context;
 mod ids;
 mod types;
 
-pub use collector::SpanCollector;
-pub use context::{current_span_id, current_trace_id};
+pub use buckets::SpanBatch;
+pub use collector::{SpanCollector, SpanCollectorConfig, SpanSink};
+pub use context::{SpanContext, current_span_id, current_trace_id};
 pub use ids::{SpanId, TraceId};
-pub use types::{CompletedSpan, Span, SpanAttribute, SpanEvent, SpanKind, SpanStatus, SpanValue};
+pub use types::{
+    CompletedSpan, EnteredSpan, Span, SpanAttribute, SpanEvent, SpanKind, SpanStatus, SpanValue,
+};

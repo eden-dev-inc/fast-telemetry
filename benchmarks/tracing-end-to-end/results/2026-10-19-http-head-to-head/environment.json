@@ -1,0 +1,22 @@
+{
+  "client_cpu": 0,
+  "receiver_cpu": 3,
+  "affinity": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+  "source_commit": "999fcc40e4dddaa450a437123035cbb0b29d9d15",
+  "libc": "glibc 2.39",
+  "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
+  "source_hashes": {
+    "crates/fast-telemetry/src/export/otlp/traces.rs": "af5f246c594cf80c64976d63fa4633e0cceefab6d8c82c79f985ae819979243f",
+    "crates/fast-telemetry-export/src/otlp/http.rs": "81e09ba7588348d8e2db2af2b19ac95ef9595dc034ca59198fac245c2fd9e665",
+    "benchmarks/span-export-http-head-to-head/src/main.rs": "40a27c393abad9cf55618ec199fc386f587e14f4187d2d0bd80d6519343d347f",
+    "benchmarks/span-export-http-head-to-head/src/receiver.rs": "157e481177332045840f4a64007c45be6b4a30d34ddbc4dff12696cc5aedc45a",
+    "benchmarks/span-export-http-head-to-head/Cargo.lock": "32accdb78d2b2e26b9830560b290b41e78700f775878339fb123b2281b16f72d"
+  },
+  "binary_hash": "c747cda0cc1674749675d07b8006780d5a83acab423c1abc164cfb2b44119cbd"
+}

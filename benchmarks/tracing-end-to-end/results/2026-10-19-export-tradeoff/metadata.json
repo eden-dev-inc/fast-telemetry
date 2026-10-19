@@ -1,0 +1,31 @@
+{
+  "pr_head": "d6e11f6b450d65329b4ea521bedc5f066bbef9bf",
+  "checkout_commit": "f33d793b47eb96bda5821990524745798e656601",
+  "workflow_run": 39260300991,
+  "job": 118085880059,
+  "artifact_id": 12190401669,
+  "artifact_sha256": "5d5891da9f3468f4ae3ff660eb0512387e8105827b830862b37129becded14c5",
+  "runtime_sources_unchanged_since": "5211f9ab0a6a6f7a415360a81c3bf75af07e72a0",
+  "environment": {
+    "client_cpu": 0,
+    "receiver_cpu": 3,
+    "affinity": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "cpu_model": "AMD EPYC 7763 64-Core Processor",
+    "source_commit": "f33d793b47eb96bda5821990524745798e656601",
+    "libc": "glibc 2.39",
+    "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
+    "source_hashes": {
+      "crates/fast-telemetry/src/export/otlp/traces.rs": "af5f246c594cf80c64976d63fa4633e0cceefab6d8c82c79f985ae819979243f",
+      "crates/fast-telemetry-export/src/otlp/http.rs": "81e09ba7588348d8e2db2af2b19ac95ef9595dc034ca59198fac245c2fd9e665"
+    },
+    "binary_hashes": {
+      "span-export-tradeoff-probe": "c13b5b111f1d8fadd8819ff2861c65291859c45d24c5b0f4db2471050b85ca10",
+      "span-export-http-probe": "4b29c0ed2796eda18c4f99beb3d7480dc094f3031b3b1ac6586a637c30404f97"
+    }
+  }
+}

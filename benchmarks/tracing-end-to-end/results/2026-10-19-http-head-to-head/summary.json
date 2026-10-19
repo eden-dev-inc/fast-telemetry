@@ -1,0 +1,759 @@
+{
+  "processes": 272,
+  "measured_spans": 47710208,
+  "cells": [
+    {
+      "workload": "attributes",
+      "batch": 512,
+      "cap": "512",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 233.326,
+        "otel_ns_per_span": 1312.721,
+        "paired_otel_over_native": 5.619953851879675,
+        "paired_range": [
+          5.492088064007417,
+          5.747196869802035
+        ],
+        "native_range": [
+          228.814,
+          241.597
+        ],
+        "otel_range": [
+          1308.345,
+          1333.706
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 257.949,
+        "otel_ns_per_span": 1350.94,
+        "paired_otel_over_native": 5.203696581465896,
+        "paired_range": [
+          5.074820052089197,
+          5.746940742685407
+        ],
+        "native_range": [
+          255.209,
+          266.466
+        ],
+        "otel_range": [
+          1334.921,
+          1466.671
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 112822,
+      "otel_protobuf_bytes_per_cycle": 115894
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": "2048",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 216.6085,
+        "otel_ns_per_span": 1074.0704999999998,
+        "paired_otel_over_native": 4.985930801742203,
+        "paired_range": [
+          4.713933420956617,
+          5.1413172703495285
+        ],
+        "native_range": [
+          211.035,
+          227.489
+        ],
+        "otel_range": [
+          1059.119,
+          1113.185
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 229.2835,
+        "otel_ns_per_span": 1083.701,
+        "paired_otel_over_native": 4.767165536791246,
+        "paired_range": [
+          4.578181633628401,
+          4.947859397561276
+        ],
+        "native_range": [
+          219.541,
+          238.223
+        ],
+        "otel_range": [
+          1068.397,
+          1122.513
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 695702,
+      "otel_protobuf_bytes_per_cycle": 714134
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": "512",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 221.175,
+        "otel_ns_per_span": 1090.0735,
+        "paired_otel_over_native": 4.947254268714472,
+        "paired_range": [
+          4.59077482486661,
+          5.149109805858996
+        ],
+        "native_range": [
+          218.145,
+          235.963
+        ],
+        "otel_range": [
+          1083.253,
+          1125.616
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 251.042,
+        "otel_ns_per_span": 1117.3535,
+        "paired_otel_over_native": 4.4702547783963595,
+        "paired_range": [
+          3.8939565104513854,
+          4.70170263837751
+        ],
+        "native_range": [
+          245.795,
+          285.034
+        ],
+        "otel_range": [
+          1109.91,
+          1159.439
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 695926,
+      "otel_protobuf_bytes_per_cycle": 714358
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": "all",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 208.594,
+        "otel_ns_per_span": 1382.7855,
+        "paired_otel_over_native": 6.615666119949864,
+        "paired_range": [
+          6.537364826408651,
+          7.719844957507764
+        ],
+        "native_range": [
+          207.685,
+          218.985
+        ],
+        "otel_range": [
+          1369.338,
+          1603.296
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 214.516,
+        "otel_ns_per_span": 1388.729,
+        "paired_otel_over_native": 6.462992072282759,
+        "paired_range": [
+          6.390089765944295,
+          7.601304825694452
+        ],
+        "native_range": [
+          212.902,
+          224.283
+        ],
+        "otel_range": [
+          1375.62,
+          1618.333
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 695646,
+      "otel_protobuf_bytes_per_cycle": 714078
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": "2048",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 216.906,
+        "otel_ns_per_span": 1078.2134999999998,
+        "paired_otel_over_native": 4.98756481400652,
+        "paired_range": [
+          4.047775339527418,
+          5.119294817372498
+        ],
+        "native_range": [
+          210.617,
+          262.939
+        ],
+        "otel_range": [
+          1064.318,
+          1138.528
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 224.886,
+        "otel_ns_per_span": 1087.167,
+        "paired_otel_over_native": 4.846885068338997,
+        "paired_range": [
+          3.751213456427472,
+          4.9752507811215265
+        ],
+        "native_range": [
+          218.402,
+          285.96
+        ],
+        "otel_range": [
+          1072.671,
+          1150.725
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 1868294,
+      "otel_protobuf_bytes_per_cycle": 1917446
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": "2048",
+      "ack_delay_us": 1000,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 216.5785,
+        "otel_ns_per_span": 1073.8185,
+        "paired_otel_over_native": 4.985269181186769,
+        "paired_range": [
+          4.226624506938788,
+          5.08219939035491
+        ],
+        "native_range": [
+          212.512,
+          250.476
+        ],
+        "otel_range": [
+          1058.668,
+          1089.836
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 742.4704999999999,
+        "otel_ns_per_span": 1600.909,
+        "paired_otel_over_native": 2.1599747717460125,
+        "paired_range": [
+          1.98929423335632,
+          2.1883004396928905
+        ],
+        "native_range": [
+          738.833,
+          796.113
+        ],
+        "otel_range": [
+          1583.703,
+          1620.347
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 1868294,
+      "otel_protobuf_bytes_per_cycle": 1917446
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": "512",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 218.51600000000002,
+        "otel_ns_per_span": 1094.5285,
+        "paired_otel_over_native": 5.02919889672628,
+        "paired_range": [
+          4.842823788546255,
+          5.556325164692795
+        ],
+        "native_range": [
+          216.457,
+          227
+        ],
+        "otel_range": [
+          1086.834,
+          1213.707
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 247.89249999999998,
+        "otel_ns_per_span": 1123.411,
+        "paired_otel_over_native": 4.5157947724175465,
+        "paired_range": [
+          4.383765428981037,
+          5.116618430826558
+        ],
+        "native_range": [
+          245.737,
+          257.389
+        ],
+        "otel_range": [
+          1115.511,
+          1260.525
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 1868966,
+      "otel_protobuf_bytes_per_cycle": 1918118
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": "512",
+      "ack_delay_us": 1000,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 222.3545,
+        "otel_ns_per_span": 1099.6860000000001,
+        "paired_otel_over_native": 4.939498068828074,
+        "paired_range": [
+          4.592265416766378,
+          5.07564638089046
+        ],
+        "native_range": [
+          219.727,
+          242.366
+        ],
+        "otel_range": [
+          1087.373,
+          1139.777
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 2325.3985000000002,
+        "otel_ns_per_span": 3200.4835000000003,
+        "paired_otel_over_native": 1.3765614981565657,
+        "paired_range": [
+          1.3492580029946935,
+          1.3916716750947162
+        ],
+        "native_range": [
+          2317.026,
+          2381.546
+        ],
+        "otel_range": [
+          3185.333,
+          3239.454
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 1868966,
+      "otel_protobuf_bytes_per_cycle": 1918118
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": "all",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 212.7415,
+        "otel_ns_per_span": 1078.3975,
+        "paired_otel_over_native": 5.073664057315003,
+        "paired_range": [
+          4.925134333889198,
+          5.188998603150137
+        ],
+        "native_range": [
+          207.61,
+          220.067
+        ],
+        "otel_range": [
+          1063.238,
+          1099.544
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 217.72899999999998,
+        "otel_ns_per_span": 1084.5355,
+        "paired_otel_over_native": 4.987336118387786,
+        "paired_range": [
+          4.84103420800058,
+          5.103347416314593
+        ],
+        "native_range": [
+          212.313,
+          225.523
+        ],
+        "otel_range": [
+          1069.307,
+          1106.173
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 1868126,
+      "otel_protobuf_bytes_per_cycle": 1917278
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": "all",
+      "ack_delay_us": 1000,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 211.702,
+        "otel_ns_per_span": 1077.904,
+        "paired_otel_over_native": 5.080619414333075,
+        "paired_range": [
+          4.8841434842936104,
+          5.2716586538461545
+        ],
+        "native_range": [
+          207.692,
+          219.815
+        ],
+        "otel_range": [
+          1064.669,
+          1096.505
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 346.421,
+        "otel_ns_per_span": 1216.4655,
+        "paired_otel_over_native": 3.497230428997141,
+        "paired_range": [
+          3.43332044730508,
+          3.59881491605412
+        ],
+        "native_range": [
+          341.725,
+          354.389
+        ],
+        "otel_range": [
+          1200.613,
+          1232.317
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 1868126,
+      "otel_protobuf_bytes_per_cycle": 1917278
+    },
+    {
+      "workload": "static",
+      "batch": 512,
+      "cap": "512",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 52.9915,
+        "otel_ns_per_span": 359.30150000000003,
+        "paired_otel_over_native": 6.774419987479085,
+        "paired_range": [
+          6.48773049395339,
+          6.859755981135319
+        ],
+        "native_range": [
+          52.373,
+          56.726
+        ],
+        "otel_range": [
+          356.268,
+          378.634
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 79.2465,
+        "otel_ns_per_span": 384.7015,
+        "paired_otel_over_native": 4.867260157075229,
+        "paired_range": [
+          1.6747714520442587,
+          4.907630112353819
+        ],
+        "native_range": [
+          78.397,
+          228.836
+        ],
+        "otel_range": [
+          381.998,
+          407.044
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 31288,
+      "otel_protobuf_bytes_per_cycle": 35384
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": "2048",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 29.6555,
+        "otel_ns_per_span": 236.84300000000002,
+        "paired_otel_over_native": 7.998913353652273,
+        "paired_range": [
+          5.954987054933223,
+          8.298999165971644
+        ],
+        "native_range": [
+          28.677,
+          39.011
+        ],
+        "otel_range": [
+          231.563,
+          241.818
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 38.8255,
+        "otel_ns_per_span": 245.38850000000002,
+        "paired_otel_over_native": 6.320679837035087,
+        "paired_range": [
+          4.208256013444907,
+          6.494931409463124
+        ],
+        "native_range": [
+          37.315,
+          57.122
+        ],
+        "otel_range": [
+          239.516,
+          250.111
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 187504,
+      "otel_protobuf_bytes_per_cycle": 212080
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": "512",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 50.974000000000004,
+        "otel_ns_per_span": 260.709,
+        "paired_otel_over_native": 5.131296707256224,
+        "paired_range": [
+          3.6265493410928626,
+          5.642301071903606
+        ],
+        "native_range": [
+          49.509,
+          71.482
+        ],
+        "otel_range": [
+          255.076,
+          288.457
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 78.2945,
+        "otel_ns_per_span": 289.772,
+        "paired_otel_over_native": 3.7571333791408312,
+        "paired_range": [
+          2.9244144892746133,
+          4.325443087829854
+        ],
+        "native_range": [
+          74.173,
+          97.479
+        ],
+        "otel_range": [
+          280.76,
+          329.469
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 187728,
+      "otel_protobuf_bytes_per_cycle": 212304
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": "all",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 25.433,
+        "otel_ns_per_span": 226.70100000000002,
+        "paired_otel_over_native": 8.960493373483594,
+        "paired_range": [
+          8.639078530836416,
+          9.16683786346397
+        ],
+        "native_range": [
+          24.947,
+          26.219
+        ],
+        "otel_range": [
+          224.862,
+          232.031
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 28.792,
+        "otel_ns_per_span": 230.239,
+        "paired_otel_over_native": 8.076452311444704,
+        "paired_range": [
+          7.661385075027694,
+          8.603117751398553
+        ],
+        "native_range": [
+          27.97,
+          29.789
+        ],
+        "otel_range": [
+          227.658,
+          252.209
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 187448,
+      "otel_protobuf_bytes_per_cycle": 212024
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": "2048",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 26.461,
+        "otel_ns_per_span": 228.70299999999997,
+        "paired_otel_over_native": 8.782779588969117,
+        "paired_range": [
+          3.620216755657259,
+          9.099988310018313
+        ],
+        "native_range": [
+          25.345,
+          62.928
+        ],
+        "otel_range": [
+          226.992,
+          238.499
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 33.864999999999995,
+        "otel_ns_per_span": 234.43200000000002,
+        "paired_otel_over_native": 7.010673694563491,
+        "paired_range": [
+          2.190492264416315,
+          7.422905580992452
+        ],
+        "native_range": [
+          32.012,
+          106.65
+        ],
+        "otel_range": [
+          233.092,
+          245.482
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 499936,
+      "otel_protobuf_bytes_per_cycle": 565472
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": "512",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 49.2125,
+        "otel_ns_per_span": 259.8625,
+        "paired_otel_over_native": 5.238185447875109,
+        "paired_range": [
+          2.1509037616023448,
+          5.397683873352223
+        ],
+        "native_range": [
+          48.702,
+          122.82
+        ],
+        "otel_range": [
+          254.807,
+          264.174
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 77.6695,
+        "otel_ns_per_span": 289.8325,
+        "paired_otel_over_native": 3.6709198017063835,
+        "paired_range": [
+          0.9946120066533554,
+          3.8347673235266906
+        ],
+        "native_range": [
+          75.663,
+          293.987
+        ],
+        "otel_range": [
+          282.405,
+          294.682
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 500608,
+      "otel_protobuf_bytes_per_cycle": 566144
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": "all",
+      "ack_delay_us": 0,
+      "pairs": 8,
+      "cpu": {
+        "native_ns_per_span": 21.7915,
+        "otel_ns_per_span": 215.02249999999998,
+        "paired_otel_over_native": 9.883136441817424,
+        "paired_range": [
+          9.629995549621718,
+          10.280469614588846
+        ],
+        "native_range": [
+          20.783,
+          22.601
+        ],
+        "otel_range": [
+          211.153,
+          223.009
+        ]
+      },
+      "wall": {
+        "native_ns_per_span": 23.4205,
+        "otel_ns_per_span": 217.23899999999998,
+        "paired_otel_over_native": 9.311040097999864,
+        "paired_range": [
+          8.855975402540658,
+          9.64632181850725
+        ],
+        "native_range": [
+          22.348,
+          24.718
+        ],
+        "otel_range": [
+          213.113,
+          225.742
+        ]
+      },
+      "native_protobuf_bytes_per_cycle": 499768,
+      "otel_protobuf_bytes_per_cycle": 565304
+    }
+  ],
+  "environment": {
+    "client_cpu": 0,
+    "receiver_cpu": 3,
+    "affinity": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+    "source_commit": "999fcc40e4dddaa450a437123035cbb0b29d9d15",
+    "libc": "glibc 2.39",
+    "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
+    "source_hashes": {
+      "crates/fast-telemetry/src/export/otlp/traces.rs": "af5f246c594cf80c64976d63fa4633e0cceefab6d8c82c79f985ae819979243f",
+      "crates/fast-telemetry-export/src/otlp/http.rs": "81e09ba7588348d8e2db2af2b19ac95ef9595dc034ca59198fac245c2fd9e665",
+      "benchmarks/span-export-http-head-to-head/src/main.rs": "40a27c393abad9cf55618ec199fc386f587e14f4187d2d0bd80d6519343d347f",
+      "benchmarks/span-export-http-head-to-head/src/receiver.rs": "157e481177332045840f4a64007c45be6b4a30d34ddbc4dff12696cc5aedc45a",
+      "benchmarks/span-export-http-head-to-head/Cargo.lock": "32accdb78d2b2e26b9830560b290b41e78700f775878339fb123b2281b16f72d"
+    },
+    "binary_hash": "c747cda0cc1674749675d07b8006780d5a83acab423c1abc164cfb2b44119cbd"
+  }
+}

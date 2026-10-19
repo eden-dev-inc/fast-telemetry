@@ -1,0 +1,34 @@
+[package]
+name = "span-export-http-head-to-head"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[features]
+otlp-logs = ["fast-telemetry/otlp-logs"]
+
+[dependencies]
+fast-telemetry = { path = "../../crates/fast-telemetry", default-features = false, features = ["otlp"] }
+libc = "0.2"
+prost = "0.13"
+flate2 = "1"
+httpdate = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest12 = { package = "reqwest", version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "1", features = ["net", "rt", "time"] }
+opentelemetry = { version = "=0.30.0", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "=0.30.0", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "=0.30.0", default-features = false, features = ["trace", "http-proto", "reqwest-client"] }
+opentelemetry-proto = { version = "=0.30.0", default-features = false, features = ["trace", "gen-tonic-messages"] }
+
+[[bin]]
+name = "span-export-http-head-to-head"
+path = "src/main.rs"
+test = false
+bench = false
+
+[profile.release]
+debug = 1

@@ -1,0 +1,165 @@
+{
+  "processes": 300,
+  "verified_spans": 78643200,
+  "verified_traces": 45875200,
+  "verified_events": 13107200,
+  "wire_requests": 153600,
+  "cells": [
+    {
+      "threads": 1,
+      "workload": "Attributes",
+      "median_cpu_ns_per_trace": {
+        "original": 2638.9065,
+        "before-review": 821.2915,
+        "candidate-native": 815.296,
+        "candidate-user-fields": 1201.8965,
+        "otel": 4835.246
+      },
+      "original_over_candidate": {
+        "median": 3.1706178095547735,
+        "minimum": 2.6508786263800093,
+        "maximum": 3.5784864367125713
+      },
+      "candidate_over_before_review": {
+        "median": 1.0290676651477066,
+        "minimum": 0.7422248955766456,
+        "maximum": 1.1493682479778418
+      },
+      "otel_over_user_fields": {
+        "median": 3.7987345890568576,
+        "minimum": 3.3242485215471396,
+        "maximum": 4.133481904262506
+      }
+    },
+    {
+      "threads": 1,
+      "workload": "Children",
+      "median_cpu_ns_per_trace": {
+        "original": 1593.114,
+        "before-review": 489.733,
+        "candidate-native": 544.5250000000001,
+        "candidate-user-fields": 947.7855,
+        "otel": 4971.1630000000005
+      },
+      "original_over_candidate": {
+        "median": 2.9463456391261467,
+        "minimum": 2.71699990240077,
+        "maximum": 3.1260478813115022
+      },
+      "candidate_over_before_review": {
+        "median": 1.1080187062362814,
+        "minimum": 1.0194603780832043,
+        "maximum": 1.1988057532396355
+      },
+      "otel_over_user_fields": {
+        "median": 5.306267832812074,
+        "minimum": 4.625149798263385,
+        "maximum": 6.458787155809372
+      }
+    },
+    {
+      "threads": 1,
+      "workload": "Root",
+      "median_cpu_ns_per_trace": {
+        "original": 355.897,
+        "before-review": 125.4865,
+        "candidate-native": 139.27100000000002,
+        "candidate-user-fields": 217.2535,
+        "otel": 1090.3595
+      },
+      "original_over_candidate": {
+        "median": 2.5350122881028847,
+        "minimum": 2.354518620862903,
+        "maximum": 2.614071220249883
+      },
+      "candidate_over_before_review": {
+        "median": 1.1197562486337516,
+        "minimum": 1.0421289530200422,
+        "maximum": 1.2549554306791402
+      },
+      "otel_over_user_fields": {
+        "median": 5.0092954719942355,
+        "minimum": 4.616071883467266,
+        "maximum": 5.873312078019505
+      }
+    },
+    {
+      "threads": 8,
+      "workload": "Attributes",
+      "median_cpu_ns_per_trace": {
+        "original": 3603.899,
+        "before-review": 1801.5745000000002,
+        "candidate-native": 1828.1019999999999,
+        "candidate-user-fields": 2328.678,
+        "otel": 7883.612
+      },
+      "original_over_candidate": {
+        "median": 2.013082989505352,
+        "minimum": 1.86122334162304,
+        "maximum": 2.265162683855041
+      },
+      "candidate_over_before_review": {
+        "median": 0.9921314193624178,
+        "minimum": 0.8149182367391694,
+        "maximum": 1.083923736881377
+      },
+      "otel_over_user_fields": {
+        "median": 3.382736416351774,
+        "minimum": 2.934959008807329,
+        "maximum": 3.517119232353924
+      }
+    },
+    {
+      "threads": 8,
+      "workload": "Children",
+      "median_cpu_ns_per_trace": {
+        "original": 2695.1805,
+        "before-review": 1756.152,
+        "candidate-native": 1692.821,
+        "candidate-user-fields": 2294.888,
+        "otel": 10483.1095
+      },
+      "original_over_candidate": {
+        "median": 1.5862773015385487,
+        "minimum": 1.4310657314194968,
+        "maximum": 1.767207108688015
+      },
+      "candidate_over_before_review": {
+        "median": 1.0019076996625689,
+        "minimum": 0.9288182430311384,
+        "maximum": 1.1740032011258104
+      },
+      "otel_over_user_fields": {
+        "median": 4.464669223230059,
+        "minimum": 3.529620774749079,
+        "maximum": 5.070133062625471
+      }
+    },
+    {
+      "threads": 8,
+      "workload": "Root",
+      "median_cpu_ns_per_trace": {
+        "original": 635.201,
+        "before-review": 424.83050000000003,
+        "candidate-native": 452.8125,
+        "candidate-user-fields": 545.7255,
+        "otel": 2535.706
+      },
+      "original_over_candidate": {
+        "median": 1.4151419856315188,
+        "minimum": 1.1998249264183496,
+        "maximum": 1.548892660764923
+      },
+      "candidate_over_before_review": {
+        "median": 1.0364918601144442,
+        "minimum": 0.9825274824344519,
+        "maximum": 1.2487791328271738
+      },
+      "otel_over_user_fields": {
+        "median": 5.016104978111357,
+        "minimum": 3.849381910051804,
+        "maximum": 5.688696687182606
+      }
+    }
+  ]
+}

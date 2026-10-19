@@ -38,6 +38,13 @@ can be awaited during shutdown. `spans::spawn_standalone(...)` remains
 available when a dedicated telemetry thread and private Tokio runtime are an
 explicit isolation choice.
 
+The span exporter splits both periodic and final drains into requests of at
+most `SpanExportConfig::max_batch_size` spans (default 512, must be positive).
+All drained spans are attempted once, preserving order, including chunks after
+a failed or partially rejected request. Requests are not replayed. The cap is
+per request; total drain memory and shutdown time depend on the available spans.
+Flush producers before cancelling, then await the exporter for the final drain.
+
 The `otlp::OtlpHttpClient` is the shared, non-logging transport used by the
 Tokio metric and span loops. With `otlp-logs`, callers can submit an
 `ExportLogsServiceRequest` and receive a structured acknowledgement, partial
@@ -104,7 +111,7 @@ columns with defaults. Summary metrics are ignored.
 Enable the `monoio` feature to run exporter loops on a monoio runtime:
 
 ```toml
-fast-telemetry-export = { version = "0.9", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+fast-telemetry-export = { version = "0.10", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
 ```
 
 The monoio entry points mirror the Tokio ones:
@@ -127,7 +134,7 @@ Enable the `compio` feature to run the DogStatsD UDP exporter and sweeper on a
 compio runtime without pulling in Tokio:
 
 ```toml
-fast-telemetry-export = { version = "0.9", default-features = false, features = ["compio"] }
+fast-telemetry-export = { version = "0.10", default-features = false, features = ["compio"] }
 ```
 
 The compio entry points are:
@@ -154,7 +161,7 @@ cargo test -p fast-telemetry-export --features clickhouse \
 ```
 
 A `docker compose`-based ClickHouse benchmark/smoke harness lives at
-[`crates/fast-telemetry/bench/run-clickhouse.sh`](../fast-telemetry/bench/run-clickhouse.sh)
+[`crates/fast-telemetry/bench/run-clickhouse.sh`](https://github.com/eden-dev-inc/fast-telemetry/blob/main/crates/fast-telemetry/bench/run-clickhouse.sh)
 for ad-hoc local ingest validation, row-count scraping, and repeatable server
 setup beside the existing benchmark suite.
 

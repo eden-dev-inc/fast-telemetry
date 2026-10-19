@@ -1,0 +1,29 @@
+--- a/benchmarks/tracing-end-to-end/src/main.rs
++++ b/benchmarks/tracing-end-to-end/src/main.rs
+@@ -10,2 +10,2 @@
+-use fast_telemetry::otlp::{build_resource, encode_native_trace_export_request_batches, pb};
+-use fast_telemetry::{SpanAttribute, SpanBatch, SpanCollector, SpanKind};
++use fast_telemetry::otlp::{build_resource, build_trace_export_request, pb};
++use fast_telemetry::{SpanAttribute, SpanCollector, SpanKind};
+@@ -193 +193 @@
+-    let root = root.enter();
++    root.enter();
+@@ -199 +199 @@
+-                let child = child.enter();
++                child.enter();
+@@ -207 +207 @@
+-            let mut child = child.enter();
++            child.enter();
+@@ -575 +575 @@
+-    let mut batches = SpanBatch::new();
++    let mut batches = Vec::new();
+@@ -599,3 +599,3 @@
+-            collector.drain_batches(&mut batches);
+-            let encoded =
+-                encode_native_trace_export_request_batches(&resource, SCOPE, &batches, usize::MAX);
++            collector.drain_into(&mut batches);
++            let encoded = build_trace_export_request(&resource, SCOPE,
++                batches.iter().map(fast_telemetry::CompletedSpan::to_otlp).collect()).encode_to_vec();
+@@ -606 +606 @@
+-                .body(Bytes::from(encoded.into_body()))?;
++                .body(Bytes::from(encoded))?;

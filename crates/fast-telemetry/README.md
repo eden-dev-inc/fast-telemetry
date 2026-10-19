@@ -22,13 +22,13 @@ Use `DynamicCounterSet` when that grouped-counter pattern needs runtime labels.
 Resolve the dynamic series and counter indexes once, then record related
 counters by index on the hot path.
 
-See the [workspace README](../../README.md) for full documentation, examples,
+See the [workspace README](https://github.com/eden-dev-inc/fast-telemetry/blob/main/README.md) for full documentation, examples,
 runtime integration rules, and API reference.
 
 ## Companion Crates
 
-- [`fast-telemetry-macros`](../fast-telemetry-macros) — `#[derive(ExportMetrics)]` and `#[derive(LabelEnum)]`
-- [`fast-telemetry-export`](../fast-telemetry-export) — DogStatsD, OTLP, ClickHouse, and span export adapters
+- [`fast-telemetry-macros`](https://docs.rs/fast-telemetry-macros) — `#[derive(ExportMetrics)]` and `#[derive(LabelEnum)]`
+- [`fast-telemetry-export`](https://docs.rs/fast-telemetry-export) — DogStatsD, OTLP, ClickHouse, and span export adapters
 
 ## Lineage
 

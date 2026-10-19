@@ -17,7 +17,7 @@ dynamic metric types. Without it, these APIs are not available.
 
 ```toml
 [dependencies]
-fast-telemetry = "0.7"
+fast-telemetry = "0.10"
 ```
 
 ### Define Metrics

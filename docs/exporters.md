@@ -7,7 +7,7 @@ batching, compression, backoff, and graceful shutdown.
 
 ```toml
 [dependencies]
-fast-telemetry-export = "0.9"
+fast-telemetry-export = "0.10"
 ```
 
 ### DogStatsD
@@ -89,6 +89,21 @@ exporter.await?;
 Applications without a parent Tokio executor, or those intentionally isolating
 telemetry I/O, can use `spans::spawn_standalone(...)` instead.
 
+`SpanExportConfig::max_batch_size` defaults to 512 spans per request. Periodic
+and shutdown drains split all available spans at that limit, preserving drain
+order. Both the limit and export interval must be positive. Builder setters
+reject zero; `run` logs invalid directly assigned public fields and returns
+before draining. Enable `logging` to receive exporter diagnostics.
+
+Every chunk is attempted once. A failed request or partial rejection does not
+discard later chunks, and requests are not replayed. Any failed or partially
+rejected chunk backs off the next export cycle with jitter, up to five minutes.
+Empty drains do not reset that failure history. Encoding releases native span
+payloads before HTTP I/O; encoded requests remain owned until sent. The cap
+bounds individual request counts, not total drain memory or shutdown time.
+The timeout applies separately to each request, so allow enough shutdown time
+for all chunks and flush producers before cancelling the exporter.
+
 ### Acknowledged OTLP HTTP and Logs
 
 Enable `otlp-logs` when a caller needs to submit OTLP log records directly or
@@ -96,8 +111,8 @@ share one transport policy across logs, metrics, and traces:
 
 ```toml
 [dependencies]
-fast-telemetry = { version = "0.9", features = ["otlp-logs"] }
-fast-telemetry-export = { version = "0.9", default-features = false, features = ["otlp-logs"] }
+fast-telemetry = { version = "0.10", features = ["otlp-logs"] }
+fast-telemetry-export = { version = "0.10", default-features = false, features = ["otlp-logs"] }
 ```
 
 ```rust,no_run
@@ -281,7 +296,7 @@ sweep and then sum each dynamic metric's `evict_stale(...)` result.
 enable the export crate's `monoio` feature for monoio-native loops:
 
 ```toml
-fast-telemetry-export = { version = "0.8", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+fast-telemetry-export = { version = "0.10", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
 ```
 
 Use `dogstatsd::run_monoio(...)`, `otlp::run_monoio(...)`, and

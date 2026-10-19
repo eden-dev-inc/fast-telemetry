@@ -54,10 +54,9 @@ impl TraceId {
 
 impl fmt::Display for TraceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for b in &self.0 {
-            write!(f, "{:02x}", b)?;
-        }
-        Ok(())
+        let mut encoded = [0; 32];
+        encode_hex(&self.0, &mut encoded);
+        f.write_str(std::str::from_utf8(&encoded).map_err(|_| fmt::Error)?)
     }
 }
 
@@ -109,10 +108,9 @@ impl SpanId {
 
 impl fmt::Display for SpanId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for b in &self.0 {
-            write!(f, "{:02x}", b)?;
-        }
-        Ok(())
+        let mut encoded = [0; 16];
+        encode_hex(&self.0, &mut encoded);
+        f.write_str(std::str::from_utf8(&encoded).map_err(|_| fmt::Error)?)
     }
 }
 
@@ -186,6 +184,17 @@ fn rng_next_u64() -> u64 {
 // Hex helpers
 // ---------------------------------------------------------------------------
 
+/// Encode identifiers directly into a caller's fixed-size ASCII buffer.
+#[inline]
+pub(crate) fn encode_hex(bytes: &[u8], encoded: &mut [u8]) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    assert_eq!(encoded.len(), bytes.len() * 2, "hex output length");
+    for (byte, pair) in bytes.iter().zip(encoded.as_chunks_mut::<2>().0) {
+        pair[0] = HEX[usize::from(byte >> 4)];
+        pair[1] = HEX[usize::from(byte & 0x0f)];
+    }
+}
+
 fn hex_digit(c: u8) -> Option<u8> {
     match c {
         b'0'..=b'9' => Some(c - b'0'),
@@ -203,6 +212,32 @@ fn hex_byte(hi: u8, lo: u8) -> Option<u8> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn fixed_hex_formatting_preserves_display_debug_and_writer_errors() {
+        use std::fmt::Write;
+
+        struct FailingWriter;
+        impl fmt::Write for FailingWriter {
+            fn write_str(&mut self, _text: &str) -> fmt::Result {
+                Err(fmt::Error)
+            }
+        }
+        for value in 0..=u8::MAX {
+            let trace = TraceId(std::array::from_fn(|i| value.wrapping_add(i as u8)));
+            let span = SpanId(std::array::from_fn(|i| value.wrapping_sub(i as u8)));
+            let trace_hex: String = trace.0.iter().map(|byte| format!("{byte:02x}")).collect();
+            let span_hex: String = span.0.iter().map(|byte| format!("{byte:02x}")).collect();
+            assert_eq!(trace.to_string(), trace_hex);
+            assert_eq!(span.to_string(), span_hex);
+            assert_eq!(format!("{trace:?}"), format!("TraceId({trace_hex})"));
+            assert_eq!(format!("{span:?}"), format!("SpanId({span_hex})"));
+            assert_eq!(format!("{trace:>40.8}"), trace_hex);
+            assert_eq!(format!("{span:#}"), span_hex);
+            assert!(write!(FailingWriter, "{trace}").is_err());
+            assert!(write!(FailingWriter, "{span}").is_err());
+        }
+    }
 
     #[test]
     fn trace_id_random_is_non_zero() {
