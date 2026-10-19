@@ -74,6 +74,25 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  package:
+    name: Published crate verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Package and build all four release crates
+        run: cargo package --workspace --exclude fast-telemetry-demo --all-features
+      - name: Check packaged licenses
+        shell: python
+        run: |
+          import pathlib
+          import tarfile
+          license_text = pathlib.Path("LICENSE").read_bytes()
+          for name in ("fast-telemetry-macros", "fast-telemetry", "fast-telemetry-export", "fast-telemetry-tracing"):
+              with tarfile.open(f"target/package/{name}-0.9.0.crate") as archive:
+                  assert archive.extractfile(f"{name}-0.9.0/LICENSE").read() == license_text, name
+
   tracing-pipeline:
     name: Tracing pipeline verification
     runs-on: ubuntu-latest

@@ -328,7 +328,6 @@ fn finish_payload(
 pub struct Span<'collector> {
     data: Option<ActiveSpan>,
     collector: CollectorRef<'collector>,
-    _enter_guard: Option<SpanEnterGuard>,
 }
 
 impl<'collector> Span<'collector> {
@@ -340,7 +339,6 @@ impl<'collector> Span<'collector> {
         Self {
             data: None,
             collector,
-            _enter_guard: None,
         }
     }
 
@@ -364,7 +362,6 @@ impl<'collector> Span<'collector> {
         Self {
             data: Some(data),
             collector,
-            _enter_guard: None,
         }
     }
 
@@ -388,7 +385,6 @@ impl<'collector> Span<'collector> {
         Self {
             data: Some(data),
             collector,
-            _enter_guard: None,
         }
     }
 
@@ -414,26 +410,42 @@ impl<'collector> Span<'collector> {
         Span {
             data: Some(data),
             collector: self.collector,
-            _enter_guard: None,
         }
     }
 
-    /// Set this span as the thread-local "current span" for logging integration.
+    /// Set this span as the thread-local current span until the returned guard drops.
     ///
-    /// The thread-local context is cleared when this span drops. Nested calls
-    /// properly restore the previous context.
+    /// Bind the guard for the scope that needs logging correlation. The guard
+    /// borrows this span and provides access to its attributes and children.
+    /// It cannot move to another thread; unentered spans remain `Send + Sync`.
+    /// Do not hold it across `.await`, since entry is local to an OS thread.
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use fast_telemetry::{SpanCollector, SpanKind, current_span_id};
+    /// let collector = Arc::new(SpanCollector::new(1, 64));
+    /// let mut span = collector.start_span("request", SpanKind::Server);
+    /// {
+    ///     let mut entered = span.enter();
+    ///     entered.set_attribute("method", "GET");
+    ///     assert_eq!(current_span_id(), Some(entered.span_id()));
+    /// }
+    /// assert_eq!(current_span_id(), None);
+    /// span.end();
+    /// ```
     #[inline]
-    pub fn enter(&mut self) -> &mut Self {
-        if self._enter_guard.is_none()
-            && let Some(data) = self.data.as_ref()
-        {
-            self._enter_guard = Some(SpanEnterGuard::enter(SpanContext {
+    pub fn enter(&mut self) -> EnteredSpan<'_, 'collector> {
+        let context = self.data.as_ref().map(|data| {
+            SpanEnterGuard::enter(SpanContext {
                 trace_id: data.trace_id,
                 span_id: data.span_id,
-                trace_flags: 0x01, // sampled
-            }));
+                trace_flags: 0x01,
+            })
+        });
+        EnteredSpan {
+            span: self,
+            _context: context,
         }
-        self
     }
 
     /// Add a timestamped event to this span.
@@ -521,12 +533,59 @@ impl<'collector> Span<'collector> {
     }
 }
 
-impl Drop for Span<'_> {
-    fn drop(&mut self) {
+impl Span<'_> {
+    fn finish(&mut self) {
         if let Some(active) = self.data.take() {
             self.collector.as_ref().submit(active.finish(now_nanos()));
         }
-        // _enter_guard drops automatically, restoring thread-local context.
+    }
+}
+
+impl Drop for Span<'_> {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+/// A scoped, thread-bound entry into a native [`Span`].
+///
+/// Dropping this guard removes its logging context without ending the span.
+/// End the borrowed span early with [`EnteredSpan::end`], or let its owner drop.
+/// Guards can close in any order. A child may remain entered after its parent's
+/// guard closes, without restoring that closed parent later.
+///
+/// ```compile_fail,E0277
+/// use std::sync::Arc;
+/// use fast_telemetry::{SpanCollector, SpanKind};
+/// let collector = Arc::new(SpanCollector::new(1, 64));
+/// let mut span = collector.start_span("request", SpanKind::Server);
+/// let entered = span.enter();
+/// std::thread::scope(|scope| { scope.spawn(move || drop(entered)); });
+/// ```
+#[must_use = "keep this guard alive while the span should be current"]
+pub struct EnteredSpan<'span, 'collector> {
+    span: &'span mut Span<'collector>,
+    _context: Option<SpanEnterGuard>,
+}
+
+impl<'collector> std::ops::Deref for EnteredSpan<'_, 'collector> {
+    type Target = Span<'collector>;
+
+    fn deref(&self) -> &Self::Target {
+        self.span
+    }
+}
+
+impl std::ops::DerefMut for EnteredSpan<'_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.span
+    }
+}
+
+impl EnteredSpan<'_, '_> {
+    /// Submit the borrowed span exactly once and close this context entry.
+    pub fn end(self) {
+        self.span.finish();
     }
 }
 
@@ -536,6 +595,101 @@ mod tests {
 
     fn test_collector() -> Arc<SpanCollector> {
         Arc::new(SpanCollector::new(1, 64))
+    }
+
+    #[test]
+    fn entered_contexts_close_out_of_order_without_resurrecting_parents() {
+        use super::super::{current_span_id, current_trace_id};
+        let collector = test_collector();
+        let mut parent = collector.start_span("parent", SpanKind::Server);
+        let parent_entry = parent.enter();
+        let mut child = parent_entry.child("child", SpanKind::Client);
+        let child_entry = child.enter();
+        let child_id = child_entry.span_id();
+        let trace_id = child_entry.trace_id();
+        drop(parent_entry);
+        drop(parent);
+        assert_eq!(current_span_id(), Some(child_id));
+        assert_eq!(current_trace_id(), Some(trace_id));
+        child_entry.end();
+        assert_eq!(current_span_id(), None);
+        assert_eq!(current_trace_id(), None);
+        drop(child);
+        let mut completed = Vec::new();
+        flush_and_drain(&collector, &mut completed);
+        assert_eq!(completed.len(), 2, "explicit end must not submit twice");
+    }
+
+    #[test]
+    fn entered_span_can_reenter_and_move_only_after_guard_closes() {
+        use super::super::current_span_id;
+        let collector = test_collector();
+        let mut span = collector.start_span("root", SpanKind::Server);
+        let id = span.span_id();
+        {
+            let mut outer = span.enter();
+            let inner = outer.enter();
+            assert_eq!(current_span_id(), Some(id));
+            drop(inner);
+            assert_eq!(current_span_id(), Some(id));
+        }
+        assert_eq!(current_span_id(), None);
+        std::thread::scope(|scope| {
+            scope
+                .spawn(move || {
+                    assert_eq!(current_span_id(), None);
+                    let entered = span.enter();
+                    assert_eq!(current_span_id(), Some(id));
+                    entered.end();
+                    assert_eq!(current_span_id(), None);
+                })
+                .join()
+                .expect("worker");
+        });
+        let mut completed = Vec::new();
+        flush_and_drain(&collector, &mut completed);
+        assert_eq!(completed.len(), 1);
+    }
+
+    #[test]
+    fn native_recording_survives_user_tls_destructors() {
+        use std::cell::RefCell;
+        use std::sync::OnceLock;
+        static COLLECTOR: OnceLock<Arc<SpanCollector>> = OnceLock::new();
+        thread_local! {
+            static HELD: RefCell<Vec<Span<'static>>> = const { RefCell::new(Vec::new()) };
+            static LATE: RefCell<Option<LateRecorder>> = const { RefCell::new(None) };
+        }
+        struct LateRecorder(&'static Arc<SpanCollector>);
+        impl Drop for LateRecorder {
+            fn drop(&mut self) {
+                let mut span = self.0.start_span("from-destructor", SpanKind::Internal);
+                let mut entered = span.enter();
+                entered.set_attribute("late", true);
+                entered.end();
+                self.0.flush_local();
+            }
+        }
+        let collector = COLLECTOR.get_or_init(test_collector);
+        std::thread::spawn(move || {
+            // Reverse destruction order: CURRENT, LOCAL, HELD, then LATE.
+            LATE.with(|late| *late.borrow_mut() = Some(LateRecorder(collector)));
+            HELD.with(|held| {
+                let mut held = held.borrow_mut();
+                for _ in 0..8 {
+                    held.push(collector.start_span("held-in-tls", SpanKind::Internal));
+                }
+                drop(held[0].enter());
+            });
+        })
+        .join()
+        .expect("TLS shutdown must not abort");
+        let mut completed = Vec::new();
+        collector.drain_into(&mut completed);
+        assert_eq!(completed.len(), 9);
+        assert_eq!(collector.recorded_count(), 9);
+        assert_eq!(collector.dropped_count(), 0);
+        assert_eq!(completed.last().expect("late span").name, "from-destructor");
     }
 
     /// Flush thread-local buffer + drain for same-thread tests.

@@ -190,13 +190,13 @@ fn native_trace(
         root.set_attribute("worker", worker as i64);
         root.set_attribute("iteration", iteration as i64);
     }
-    root.enter();
+    let root = root.enter();
     match workload {
         Workload::Root => {}
         Workload::Children => {
             for name in ["child_a", "child_b", "child_c"] {
                 let mut child = root.child(name, SpanKind::Internal);
-                child.enter();
+                let child = child.enter();
                 std::hint::black_box(&child);
             }
         }
@@ -204,7 +204,7 @@ fn native_trace(
             let mut child = root.child("child", SpanKind::Internal);
             child.set_attribute("method", "GET");
             child.set_attribute("code", 200i64);
-            child.enter();
+            let mut child = child.enter();
             // tracing-opentelemetry always emits event level/target. Retain the
             // same fields explicitly in both FT frontends for output parity.
             child.add_event(

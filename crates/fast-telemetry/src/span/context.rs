@@ -8,7 +8,9 @@
 //! It is NOT passed between functions for parent-child creation — use
 //! [`Span::child()`](super::Span::child) instead.
 
-use std::cell::Cell;
+use std::cell::RefCell;
+use std::marker::PhantomData;
+use std::rc::Rc;
 
 use super::ids::{SpanId, TraceId, encode_hex};
 
@@ -100,8 +102,23 @@ fn decode_hex<const N: usize>(encoded: &[u8]) -> Option<[u8; N]> {
 // Thread-local current span context (for logging integration)
 // ---------------------------------------------------------------------------
 
+#[derive(Default)]
+struct ContextStack {
+    next_token: u64,
+    entries: Vec<(u64, SpanContext)>,
+}
+
 thread_local! {
-    static CURRENT: Cell<SpanContext> = const { Cell::new(SpanContext::INVALID) };
+    static CURRENT: RefCell<ContextStack> = const {
+        RefCell::new(ContextStack { next_token: 0, entries: Vec::new() })
+    };
+}
+
+fn current_context() -> Option<SpanContext> {
+    CURRENT
+        .try_with(|stack| stack.borrow().entries.last().map(|(_, ctx)| *ctx))
+        .ok()
+        .flatten()
 }
 
 /// Get the trace ID of the currently entered span on this thread, if any.
@@ -109,50 +126,60 @@ thread_local! {
 /// Returns `None` if no span is currently entered or the trace ID is invalid.
 /// Used by logging integration to correlate log entries with traces.
 pub fn current_trace_id() -> Option<TraceId> {
-    CURRENT.with(|cell| {
-        let ctx = cell.get();
-        if ctx.trace_id.is_invalid() {
-            None
-        } else {
-            Some(ctx.trace_id)
-        }
-    })
+    current_context().and_then(|ctx| (!ctx.trace_id.is_invalid()).then_some(ctx.trace_id))
 }
 
 /// Get the span ID of the currently entered span on this thread, if any.
 ///
 /// Returns `None` if no span is currently entered or the span ID is invalid.
 pub fn current_span_id() -> Option<SpanId> {
-    CURRENT.with(|cell| {
-        let ctx = cell.get();
-        if ctx.span_id.is_invalid() {
-            None
-        } else {
-            Some(ctx.span_id)
-        }
-    })
+    current_context().and_then(|ctx| (!ctx.span_id.is_invalid()).then_some(ctx.span_id))
 }
 
-/// RAII guard that sets the thread-local current span context on creation
-/// and restores the previous value on drop.
+/// A thread-bound entry in the active context stack. Removing an older entry
+/// leaves newer entries active and cannot resurrect a context that has closed.
 pub(crate) struct SpanEnterGuard {
-    prev: SpanContext,
+    token: Option<u64>,
+    _thread_bound: PhantomData<Rc<()>>,
 }
 
 impl SpanEnterGuard {
-    /// Enter a span context: set it as current and return a guard that
-    /// restores the previous context on drop.
     #[inline]
     pub fn enter(ctx: SpanContext) -> Self {
-        let prev = CURRENT.with(|cell| cell.replace(ctx));
-        Self { prev }
+        let token = CURRENT
+            .try_with(|stack| {
+                let mut stack = stack.borrow_mut();
+                let token = stack
+                    .next_token
+                    .checked_add(1)
+                    .expect("span context token exhausted");
+                stack.next_token = token;
+                stack.entries.push((token, ctx));
+                token
+            })
+            .ok();
+        Self {
+            token,
+            _thread_bound: PhantomData,
+        }
     }
 }
 
 impl Drop for SpanEnterGuard {
     #[inline]
     fn drop(&mut self) {
-        CURRENT.with(|cell| cell.set(self.prev));
+        let Some(token) = self.token else {
+            return;
+        };
+        // TLS may already be destroyed when a user TLS destructor closes a span.
+        let _ = CURRENT.try_with(|stack| {
+            let mut stack = stack.borrow_mut();
+            if stack.entries.last().is_some_and(|(id, _)| *id == token) {
+                stack.entries.pop();
+            } else if let Some(index) = stack.entries.iter().position(|(id, _)| *id == token) {
+                stack.entries.remove(index);
+            }
+        });
     }
 }
 

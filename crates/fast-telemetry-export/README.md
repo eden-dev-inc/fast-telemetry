@@ -154,7 +154,7 @@ cargo test -p fast-telemetry-export --features clickhouse \
 ```
 
 A `docker compose`-based ClickHouse benchmark/smoke harness lives at
-[`crates/fast-telemetry/bench/run-clickhouse.sh`](../fast-telemetry/bench/run-clickhouse.sh)
+[`crates/fast-telemetry/bench/run-clickhouse.sh`](https://github.com/eden-dev-inc/fast-telemetry/blob/main/crates/fast-telemetry/bench/run-clickhouse.sh)
 for ad-hoc local ingest validation, row-count scraping, and repeatable server
 setup beside the existing benchmark suite.
 

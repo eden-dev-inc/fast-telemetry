@@ -262,6 +262,9 @@ pub struct SpanCollector {
 /// Stable allocation used as native TLS identity, independently of outer moves.
 pub(crate) struct CollectorState {
     native: Registry,
+    /// A single bounded writer for completions after a user's TLS outlives LOCAL.
+    /// Its mutex is never touched during ordinary recording.
+    shutdown_writer: Mutex<Option<Writer>>,
     /// External adapter shards retain their existing publication policy.
     outboxes: Mutex<Vec<Arc<SinkOutbox>>>,
     has_sinks: AtomicBool,
@@ -278,10 +281,12 @@ impl CollectorState {
     /// for recycled buckets every 64 root attempts.
     #[inline]
     fn should_record(&self) -> bool {
-        LOCAL.with(|cell| {
-            let mut state = cell.borrow_mut();
-            state.get_or_register(self).should_record()
-        })
+        LOCAL
+            .try_with(|cell| {
+                let mut state = cell.borrow_mut();
+                state.get_or_register(self).should_record()
+            })
+            .unwrap_or(true)
     }
 
     /// Submit a completed span.  Called by [`Span::drop`].
@@ -290,10 +295,29 @@ impl CollectorState {
     /// Batch boundaries publish bucket ownership with an atomic handoff.
     #[inline]
     pub(crate) fn submit(&self, span: CompletedSpan) {
-        LOCAL.with(|cell| {
+        let mut pending = Some(span);
+        let result = LOCAL.try_with(|cell| {
             let mut state = cell.borrow_mut();
-            state.get_or_register(self).push(span);
+            state
+                .get_or_register(self)
+                .push(pending.take().expect("span not yet submitted"));
         });
+        if result.is_err() {
+            self.submit_after_tls(pending.expect("TLS unavailable before submission"));
+        }
+    }
+
+    #[cold]
+    fn submit_after_tls(&self, span: CompletedSpan) {
+        let mut writer = self.shutdown_writer.lock();
+        let writer = writer.get_or_insert_with(|| {
+            let writer = Writer::new();
+            self.native.register(Arc::clone(&writer.outbox));
+            writer
+        });
+        writer.push(span);
+        // There is no producer TLS left to flush this writer at thread exit.
+        writer.flush();
     }
 }
 
@@ -432,6 +456,7 @@ impl SpanCollector {
         Self {
             state: Arc::new_cyclic(|weak_self| CollectorState {
                 native: Registry::new(),
+                shutdown_writer: Mutex::new(None),
                 outboxes: Mutex::new(Vec::new()),
                 has_sinks: AtomicBool::new(false),
                 root_counts: RootCounters::new(),
@@ -552,7 +577,7 @@ impl SpanCollector {
     /// automatically when they reach the internal flush threshold or on thread
     /// exit.
     pub fn flush_local(&self) {
-        LOCAL.with(|cell| {
+        let _ = LOCAL.try_with(|cell| {
             let mut state = cell.borrow_mut();
             let key = Arc::as_ptr(&self.state) as usize;
             if let Some(pos) = state.entries.iter().position(|(k, _)| *k == key) {

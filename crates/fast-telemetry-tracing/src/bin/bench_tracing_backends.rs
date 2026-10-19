@@ -375,7 +375,7 @@ fn instrument_native(
     if let Some(metadata) = metadata {
         native_metadata(&mut root, metadata.root);
     }
-    root.enter();
+    let root = root.enter();
     match workload {
         Workload::Root => {
             std::hint::black_box(&root);
@@ -387,7 +387,7 @@ fn instrument_native(
             if let Some(metadata) = metadata {
                 native_metadata(&mut child, metadata.children[0].expect("child callsite"));
             }
-            child.enter();
+            let mut child = child.enter();
             let mut attributes = Vec::with_capacity(
                 2 + metadata.map_or(0, |metadata| metadata.event_attribute_count),
             );
@@ -417,7 +417,7 @@ fn instrument_native(
                         metadata.children[index].expect("child callsite"),
                     );
                 }
-                child.enter();
+                let child = child.enter();
                 std::hint::black_box(&child);
             }
         }

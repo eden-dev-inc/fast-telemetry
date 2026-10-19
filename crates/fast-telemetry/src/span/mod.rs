@@ -15,7 +15,7 @@
 //!
 //! // Root span (new trace).
 //! let mut root = collector.start_span("handle_request", SpanKind::Server);
-//! root.enter(); // set thread-local for logging
+//! let mut root = root.enter(); // keep the logging guard in scope
 //! root.set_attribute("http.method", "GET");
 //!
 //! // Child span (inherits trace_id from &root).
@@ -58,4 +58,6 @@ pub use buckets::SpanBatch;
 pub use collector::{SpanCollector, SpanSink};
 pub use context::{SpanContext, current_span_id, current_trace_id};
 pub use ids::{SpanId, TraceId};
-pub use types::{CompletedSpan, Span, SpanAttribute, SpanEvent, SpanKind, SpanStatus, SpanValue};
+pub use types::{
+    CompletedSpan, EnteredSpan, Span, SpanAttribute, SpanEvent, SpanKind, SpanStatus, SpanValue,
+};

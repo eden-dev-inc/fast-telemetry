@@ -154,7 +154,7 @@ fn simulate_requests(metrics: &AppMetrics) {
 
 fn simulate_spans(collector: Arc<SpanCollector>) {
     let mut root = collector.start_span("handle_request", SpanKind::Server);
-    root.enter();
+    let mut root = root.enter();
     root.set_attribute("http.method", "GET");
     root.set_attribute("http.url", "/api/users");
 

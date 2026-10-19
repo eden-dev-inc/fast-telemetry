@@ -49,7 +49,7 @@ mod benchmark {
             } else {
                 collector.start_span("operation", SpanKind::Server)
             };
-            root.enter();
+            let mut root = root.enter();
             if workload == "attributes" {
                 for key in ["a", "b", "c", "d"] {
                     root.set_attribute(key, format!("value-{index}-{key}"));
@@ -67,7 +67,7 @@ mod benchmark {
             } else if workload == "children" {
                 for _ in 0..3 {
                     let mut child = root.child("child", SpanKind::Client);
-                    child.enter();
+                    let _entered = child.enter();
                 }
             }
         }

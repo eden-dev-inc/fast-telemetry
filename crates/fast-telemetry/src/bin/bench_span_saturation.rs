@@ -57,11 +57,11 @@ impl Options {
 
 fn generate(collector: &Arc<SpanCollector>, children: bool) {
     let mut root = collector.start_span("operation", SpanKind::Server);
-    root.enter();
+    let root = root.enter();
     if children {
         for _ in 0..3 {
             let mut child = root.child("child", SpanKind::Client);
-            child.enter();
+            let _entered = child.enter();
         }
     }
 }

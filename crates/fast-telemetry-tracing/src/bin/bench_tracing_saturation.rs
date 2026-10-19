@@ -131,11 +131,11 @@ impl Backend {
     fn generate(&self, children: bool) {
         if self.mode == Mode::Native {
             let mut root = self.collector.start_span("operation", SpanKind::Internal);
-            root.enter();
+            let root = root.enter();
             if children {
                 for _ in 0..3 {
                     let mut child = root.child("child", SpanKind::Internal);
-                    child.enter();
+                    let _entered = child.enter();
                 }
             }
         } else {

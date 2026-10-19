@@ -65,8 +65,9 @@ pub use metric::{advance_cycle, current_cycle};
 #[cfg(feature = "runtime")]
 pub use runtime::{MetricScope, RegisteredMetrics, Runtime, RuntimeConfig};
 pub use span::{
-    CompletedSpan, Span, SpanAttribute, SpanBatch, SpanCollector, SpanContext, SpanEvent, SpanId,
-    SpanKind, SpanSink, SpanStatus, SpanValue, TraceId, current_span_id, current_trace_id,
+    CompletedSpan, EnteredSpan, Span, SpanAttribute, SpanBatch, SpanCollector, SpanContext,
+    SpanEvent, SpanId, SpanKind, SpanSink, SpanStatus, SpanValue, TraceId, current_span_id,
+    current_trace_id,
 };
 pub use temporality::Temporality;
 

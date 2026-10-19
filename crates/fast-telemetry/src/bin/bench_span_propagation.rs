@@ -161,7 +161,7 @@ mod benchmark {
                 } else {
                     collector.start_span("propagation", SpanKind::Server)
                 };
-                span.enter();
+                let span = span.enter();
                 headers.push(span.traceparent());
             }
             collector.flush_local();

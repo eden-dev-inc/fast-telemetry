@@ -26,6 +26,16 @@ Highlights:
   native spans must carry that lifetime and keep the collector alive until all
   spans finish. Create spans inside spawned tasks after moving in a collector
   handle; children can outlive their parent while the collector remains alive.
+- Native `Span::enter` now returns a scoped `EnteredSpan` guard. Replace
+  `span.enter();` with `let mut entered = span.enter();` and use `entered`
+  while correlation is needed. Dropping the guard closes context; dropping the
+  span still submits it. Use `entered.end()` to do both explicitly. The guard
+  is thread-bound and must not cross `.await`; an unentered `Span` remains
+  `Send + Sync`. Out-of-order closure no longer resurrects closed contexts.
+- Fixed native completion during user thread-local destruction, which could
+  abort the process after collector TLS had already been destroyed. Late
+  completions use one bounded, shared shutdown writer per collector and remain
+  drainable; its queue rejection is included in `dropped_count()`.
 - Added per-producer double buffers and reusable `SpanBatch` drains. Automatic
   native publication changes from 64 to 256 spans; explicit local flush and
   thread-exit publication remain available. Native rejection counts now report

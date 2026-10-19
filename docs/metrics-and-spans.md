@@ -218,7 +218,7 @@ let collector = Arc::new(SpanCollector::new(4, 4096));
 
 {
 let mut root = collector.start_span("handle_request", SpanKind::Server);
-root.enter();
+let mut root = root.enter();
 root.set_attribute("http.method", "GET");
 
 {
@@ -257,6 +257,21 @@ Create spans inside spawned tasks after moving a collector handle into the task;
 clone that handle once per task during setup. Scoped threads can also receive an
 existing borrowed span. Native span operations update no Arc reference counts.
 
+`Span::enter()` returns an `EnteredSpan` guard that borrows the span. Keep that
+returned value bound while logging correlation is needed; dropping it removes
+its context but leaves the span alive. The guard forwards attribute, event,
+status and child operations to the borrowed span. `entered.end()` submits the
+span and closes the entry exactly once. An older guard can close while a child
+remains entered; closing that child will not restore the closed parent.
+
+This replaces the earlier `span.enter();` API that kept entry inside the span.
+Use `let mut entered = span.enter();`, or shadow with `let mut span = span.enter();`
+when the owner and guard should share a lexical scope. An ignored return value
+now closes entry immediately. `EnteredSpan` is neither `Send` nor `Sync`, and
+must not be held across `.await`. Drop it before moving the span, then enter
+again on the destination thread. For async tracing instrumentation, use the
+companion crate with `tracing::Instrument` to enter on each poll.
+
 Active spans keep identifiers, name and start time in a compact record.
 Attributes, events and errors create optional metadata storage when first used;
 setting `Ok` or `Unset` alone does not create it. Finishing transfers all owned
@@ -272,7 +287,14 @@ removes dead entries and releases their unused native buffers. These weak
 references do not retain discarded collector values or metric storage.
 
 Call `flush_local()` before `drain_into()` when you are draining on the same
-thread that just recorded spans. `SpanCollector::new(shards, capacity)` keeps
+thread that just recorded spans. Completions from user TLS destructors remain
+supported even after the ordinary native TLS buffer is gone. They publish via
+one mutex-protected shutdown writer per collector, bounded to the native queue
+limit; overflow contributes to `dropped_count()`. This path does not acquire the
+shutdown mutex during normal recording. Context queries return `None` after
+context TLS is destroyed, and late entry is then a no-op for correlation.
+
+`SpanCollector::new(shards, capacity)` keeps
 its historical signature for compatibility, but those tuning arguments are
 currently ignored because buffers are now managed per thread.
 

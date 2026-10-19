@@ -274,7 +274,7 @@ event is automatically converted into a fake span or silently exported as logs.
 
 ## Native and tracing benchmark
 
-The [benchmark guide](../../docs/tracing-benchmark.md) describes the retained-count
+The [benchmark guide](https://github.com/eden-dev-inc/fast-telemetry/blob/main/docs/tracing-benchmark.md) describes the retained-count
 contract, timings, repeated-run script, and limitations. It includes ordinary
 native and exact full/user-fields native baselines, FT layer/direct profiles,
 the OTel backend, and two
