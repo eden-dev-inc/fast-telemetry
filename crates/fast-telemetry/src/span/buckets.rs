@@ -10,7 +10,7 @@ use crossbeam_utils::CachePadded;
 
 use super::types::CompletedSpan;
 
-pub(super) const BATCH_SIZE: usize = 256;
+pub(super) const BATCH_SIZE: usize = 384;
 pub(super) const BUCKET_CAPACITY: usize = 4096;
 const FREE: u64 = 0;
 const WRITING: u64 = 1;
@@ -50,10 +50,10 @@ struct Bucket {
 unsafe impl Sync for Bucket {}
 
 impl Bucket {
-    fn new(state: u64) -> Self {
+    fn new(state: u64, batch_size: usize) -> Self {
         Self {
             control: CachePadded::new(AtomicU64::new(state)),
-            spans: UnsafeCell::new(Vec::with_capacity(BATCH_SIZE)),
+            spans: UnsafeCell::new(Vec::with_capacity(batch_size)),
         }
     }
 }
@@ -65,9 +65,12 @@ pub(super) struct Outbox {
 }
 
 impl Outbox {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(batch_size: usize) -> Self {
         Self {
-            buckets: [Bucket::new(WRITING), Bucket::new(FREE)],
+            buckets: [
+                Bucket::new(WRITING, batch_size),
+                Bucket::new(FREE, batch_size),
+            ],
             recycled: CachePadded::new(AtomicU64::new(0)),
             dropped: AtomicU64::new(0),
         }
@@ -154,21 +157,23 @@ pub(super) struct Writer {
     pub(super) outbox: Arc<Outbox>,
     active: Option<usize>,
     next_flush: usize,
+    batch_size: usize,
     sequence: u64,
     limit: usize,
     buffer: Vec<CompletedSpan>,
 }
 
 impl Writer {
-    pub(super) fn new() -> Self {
-        let outbox = Arc::new(Outbox::new());
+    pub(super) fn new(batch_size: usize) -> Self {
+        let outbox = Arc::new(Outbox::new(batch_size));
         // SAFETY: the fresh outbox starts with bucket zero exclusively WRITING. Keep
         // its vector descriptor in TLS throughout that ownership interval.
         let buffer = unsafe { std::mem::take(&mut *outbox.buckets[0].spans.get()) };
         Self {
             outbox,
             active: Some(0),
-            next_flush: BATCH_SIZE,
+            next_flush: batch_size,
+            batch_size,
             sequence: 0,
             limit: BUCKET_CAPACITY,
             buffer,
@@ -200,7 +205,7 @@ impl Writer {
                             .control
                             .load(Ordering::Acquire),
                     );
-                self.next_flush = BATCH_SIZE.min(self.limit);
+                self.next_flush = self.batch_size.min(self.limit);
                 return true;
             }
         }
@@ -290,9 +295,9 @@ impl Writer {
                 None
             };
             self.limit = BUCKET_CAPACITY - len;
-            self.next_flush = BATCH_SIZE.min(self.limit);
+            self.next_flush = self.batch_size.min(self.limit);
         } else {
-            self.next_flush = (len + BATCH_SIZE).min(self.limit);
+            self.next_flush = (len + self.batch_size).min(self.limit);
         }
         Some(occupancy)
     }
@@ -467,7 +472,8 @@ impl SpanBatch {
             return;
         }
         if self.used == self.buffers.len() {
-            self.buffers.push(Vec::with_capacity(BATCH_SIZE));
+            self.buffers
+                .push(Vec::with_capacity(spans.capacity().min(BUCKET_CAPACITY)));
         }
         std::mem::swap(&mut self.buffers[self.used], spans);
         self.used += 1;
@@ -514,7 +520,7 @@ mod tests {
 
     #[test]
     fn native_handoff_swaps_allocations_and_keeps_contiguous_payloads() {
-        let mut writer = Writer::new();
+        let mut writer = Writer::new(BATCH_SIZE);
         for i in 0..BATCH_SIZE {
             writer.push(span(i));
         }
@@ -543,7 +549,7 @@ mod tests {
 
     #[test]
     fn native_partial_flush_is_visible_and_subsequent_push_keeps_fifo() {
-        let mut writer = Writer::new();
+        let mut writer = Writer::new(BATCH_SIZE);
         for i in 0..100 {
             writer.push(span(i));
             writer.flush();
@@ -562,29 +568,31 @@ mod tests {
 
     #[test]
     fn native_full_buckets_drop_without_waiting_and_recover_after_drain() {
-        let mut writer = Writer::new();
-        let mut batch = SpanBatch::new();
-        for i in 0..(BUCKET_CAPACITY + 10) {
-            writer.push(span(i));
+        for batch_size in [1, 17, BATCH_SIZE, 1024] {
+            let mut writer = Writer::new(batch_size);
+            let mut batch = SpanBatch::new();
+            for i in 0..(BUCKET_CAPACITY + 10) {
+                writer.push(span(i));
+            }
+            writer.flush();
+            // The first automatically published bucket is intentionally not
+            // reclaimed: retaining the newest batch preserves per-producer order.
+            assert_eq!(writer.outbox.len(), BUCKET_CAPACITY);
+            assert_eq!(writer.outbox.dropped(), 10);
+            drain(&writer.outbox, &mut batch);
+            assert_eq!(batch.len(), BUCKET_CAPACITY);
+            batch.clear();
+            writer.push(span(9999));
+            writer.flush();
+            drain(&writer.outbox, &mut batch);
+            assert_eq!(batch.len(), 1);
+            assert_eq!(batch.iter().next().expect("recovered span").name, "9999");
         }
-        writer.flush();
-        // The first automatically published bucket is intentionally not
-        // reclaimed: retaining the newest batch preserves per-producer order.
-        assert_eq!(writer.outbox.len(), BUCKET_CAPACITY);
-        assert_eq!(writer.outbox.dropped(), 10);
-        drain(&writer.outbox, &mut batch);
-        assert_eq!(batch.len(), BUCKET_CAPACITY);
-        batch.clear();
-        writer.push(span(9999));
-        writer.flush();
-        drain(&writer.outbox, &mut batch);
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch.iter().next().expect("recovered span").name, "9999");
     }
 
     #[test]
     fn native_reader_owns_one_bucket_while_writer_fills_the_other() {
-        let mut writer = Writer::new();
+        let mut writer = Writer::new(BATCH_SIZE);
         for i in 0..BATCH_SIZE {
             writer.push(span(i));
         }
@@ -608,7 +616,7 @@ mod tests {
 
     #[test]
     fn native_panicking_drain_releases_ownership() {
-        let mut writer = Writer::new();
+        let mut writer = Writer::new(BATCH_SIZE);
         for i in 0..BATCH_SIZE {
             writer.push(span(i));
         }
@@ -628,7 +636,7 @@ mod tests {
 
     #[test]
     fn native_sequence_wrap_preserves_two_bucket_order() {
-        let mut writer = Writer::new();
+        let mut writer = Writer::new(BATCH_SIZE);
         writer.sequence = SEQUENCE_MASK - 1;
         for i in 0..BATCH_SIZE * 2 {
             writer.push(span(i));
@@ -647,7 +655,7 @@ mod tests {
 
     #[test]
     fn native_thread_exit_publishes_partial_bucket() {
-        let mut writer = Writer::new();
+        let mut writer = Writer::new(BATCH_SIZE);
         writer.push(span(1));
         let outbox = Arc::clone(&writer.outbox);
         assert_eq!(outbox.len(), 0);
@@ -660,7 +668,7 @@ mod tests {
 
     #[test]
     fn native_multiple_consumers_never_duplicate_or_corrupt_spans() {
-        let mut writer = Writer::new();
+        let mut writer = Writer::new(BATCH_SIZE);
         let outbox = Arc::clone(&writer.outbox);
         let done = AtomicBool::new(false);
         let seen = (0..40_000).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
@@ -702,7 +710,7 @@ mod tests {
             for _ in 0..80 {
                 let registry = &registry;
                 scope.spawn(move || {
-                    let mut writer = Writer::new();
+                    let mut writer = Writer::new(BATCH_SIZE);
                     writer.push(span(1));
                     writer.flush();
                     registry.register(Arc::clone(&writer.outbox));

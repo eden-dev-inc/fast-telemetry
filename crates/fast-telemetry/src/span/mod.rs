@@ -44,6 +44,9 @@
 //! draining on the same thread that just recorded spans. `SpanCollector::new`
 //! keeps its historical `(shards, capacity)` signature for compatibility, but
 //! those parameters are currently ignored because buffers are managed per thread.
+//! Use [`SpanCollector::with_config`] and [`SpanCollectorConfig`] to change the
+//! default 384-span native producer publication target. Explicit local flush
+//! and thread exit also publish smaller batches.
 //!
 //! For manual cross-service propagation, use
 //! [`SpanCollector::start_span_from_traceparent`] on inbound requests and
@@ -57,7 +60,7 @@ mod ids;
 mod types;
 
 pub use buckets::SpanBatch;
-pub use collector::{SpanCollector, SpanSink};
+pub use collector::{SpanCollector, SpanCollectorConfig, SpanSink};
 pub use context::{SpanContext, current_span_id, current_trace_id};
 pub use ids::{SpanId, TraceId};
 pub use types::{

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::Bytes;
 use fast_telemetry::otlp::{build_resource, encode_native_trace_export_request_batches, pb};
-use fast_telemetry::{SpanAttribute, SpanBatch, SpanCollector, SpanKind};
+use fast_telemetry::{SpanAttribute, SpanBatch, SpanCollector, SpanCollectorConfig, SpanKind};
 use fast_telemetry_tracing::{FastTelemetrySubscriber, LayerHandle, MetadataPolicy};
 use http::{Request, Response};
 use opentelemetry::KeyValue;
@@ -57,6 +57,7 @@ struct Options {
     workload: Workload,
     threads: usize,
     batch: usize,
+    producer_batch_size: usize,
     cycles: usize,
     warmup: usize,
     endpoint: String,
@@ -70,8 +71,8 @@ impl Options {
     }
 
     fn from_args(args: &[String]) -> Result<Self> {
-        if args.len() != 7 {
-            return Err("usage: tracing-end-to-end native|drop-in|otel root|children|attributes THREADS SPANS_PER_THREAD_BATCH CYCLES WARMUP capture|http://HOST:PORT".into());
+        if !(7..=8).contains(&args.len()) {
+            return Err("usage: tracing-end-to-end native|drop-in|otel root|children|attributes THREADS SPANS_PER_THREAD_BATCH CYCLES WARMUP capture|http://HOST:PORT [NATIVE_PRODUCER_BATCH_SIZE]".into());
         }
         let mode = match args[0].as_str() {
             "native" => Mode::Native,
@@ -89,6 +90,14 @@ impl Options {
         let batch = args[3].parse::<usize>()?;
         let cycles = args[4].parse::<usize>()?;
         let warmup = args[5].parse::<usize>()?;
+        let producer_batch_size = args
+            .get(7)
+            .map(|s| s.parse::<usize>())
+            .transpose()?
+            .unwrap_or_else(|| SpanCollectorConfig::default().producer_batch_size());
+        if !(1..=1024).contains(&producer_batch_size) {
+            return Err("native producer batch size must be in 1..=1024".into());
+        }
         if threads == 0 || threads > 128 || batch == 0 || batch > 1024 || cycles == 0 {
             return Err(
                 "require 1..=128 threads, 1..=1024 spans per batch, and positive cycles".into(),
@@ -124,6 +133,7 @@ impl Options {
             workload,
             threads,
             batch,
+            producer_batch_size,
             cycles,
             warmup,
             endpoint,
@@ -542,7 +552,9 @@ fn run() -> Result<()> {
             None
         },
     };
-    let collector = Arc::new(SpanCollector::new(options.threads, 4096));
+    let collector = Arc::new(SpanCollector::with_config(
+        SpanCollectorConfig::default().with_producer_batch_size(options.producer_batch_size),
+    ));
     let (provider, adapter) = setup(&options, &collector, &wire)?;
     let worker_count = if options.threads == 1 {
         0
@@ -668,10 +680,10 @@ fn run() -> Result<()> {
     }
     let traces = exported / options.workload.spans();
     println!(
-        "mode,workload,transport,threads,batch_spans_per_thread,cycles,warmup,verified_traces,verified_spans,verified_events,wire_requests,wire_bytes,sampled_out,dropped,pipeline_cpu_ns_per_trace,pipeline_cpu_ns_per_span,pipeline_wall_ns_per_trace,pipeline_traces_per_sec,pipeline_spans_per_sec,process_cpu_ns,wall_ns"
+        "mode,workload,transport,threads,batch_spans_per_thread,cycles,warmup,verified_traces,verified_spans,verified_events,wire_requests,wire_bytes,sampled_out,dropped,pipeline_cpu_ns_per_trace,pipeline_cpu_ns_per_span,pipeline_wall_ns_per_trace,pipeline_traces_per_sec,pipeline_spans_per_sec,process_cpu_ns,wall_ns,producer_batch_size"
     );
     println!(
-        "{:?},{:?},{},{},{},{},{},{traces},{exported},{events},{requests},{bytes},0,0,{:.3},{:.3},{:.3},{:.3},{:.3},{total_cpu},{total_wall}",
+        "{:?},{:?},{},{},{},{},{},{traces},{exported},{events},{requests},{bytes},0,0,{:.3},{:.3},{:.3},{:.3},{:.3},{total_cpu},{total_wall},{}",
         options.mode,
         options.workload,
         if options.http { "http" } else { "capture" },
@@ -683,7 +695,8 @@ fn run() -> Result<()> {
         total_cpu as f64 / exported as f64,
         total_wall as f64 / traces as f64,
         traces as f64 * 1e9 / total_wall as f64,
-        exported as f64 * 1e9 / total_wall as f64
+        exported as f64 * 1e9 / total_wall as f64,
+        options.producer_batch_size
     );
     Ok(())
 }
@@ -705,6 +718,7 @@ mod tests {
             workload,
             threads: 1,
             batch: 4,
+            producer_batch_size: SpanCollectorConfig::default().producer_batch_size(),
             cycles: 1,
             warmup: 0,
             endpoint: "http://127.0.0.1:4318".into(),
@@ -836,6 +850,16 @@ mod tests {
     fn validates_cli_limits_and_whole_traces() {
         let valid = ["native", "children", "1", "256", "2", "1", "capture"].map(str::to_owned);
         assert!(Options::from_args(&valid).is_ok());
+        for target in ["1", "17", "384", "1024"] {
+            let mut args = valid.to_vec();
+            args.push(target.into());
+            assert!(Options::from_args(&args).is_ok());
+        }
+        for target in ["0", "1025", "invalid"] {
+            let mut args = valid.to_vec();
+            args.push(target.into());
+            assert!(Options::from_args(&args).is_err());
+        }
         for (index, value) in [
             (0, "registry"),
             (2, "0"),

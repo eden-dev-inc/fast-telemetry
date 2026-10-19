@@ -51,6 +51,15 @@ case records inline on the coordinator; other cases use resident worker threads
 and include their cycle barriers. The SDK's real background processor is active.
 Workers remain alive through the final cleanup.
 
+An optional final `NATIVE_PRODUCER_BATCH_SIZE` argument selects 1–1,024 spans
+per automatic native publication; it defaults to the collector's 384-span policy.
+This differs from `SPANS_PER_THREAD_BATCH`, which controls the synchronized
+application/export burst and always ends with an explicit local flush. The CSV
+reports both values. The native publication option does not change immediate
+adapter publication or the SDK processor. For a fixed export burst, compare
+publication targets separately; changing the burst also changes barrier and
+request frequency. See the [batch-size knee report](results/2026-10-19-batch-knee/README.md).
+
 Every request is decoded outside timing. Verification checks exact resource,
 scope, span/event/attribute counts, values and types; unique nonzero IDs; complete
 root/child graphs; and nested lifecycle timestamps. Root, four-span, and attributed

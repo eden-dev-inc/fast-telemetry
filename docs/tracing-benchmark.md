@@ -8,6 +8,9 @@ The [production review](../benchmarks/tracing-end-to-end/results/2026-10-19-prod
 includes the context/shutdown fixes and 300 fresh sender samples against both
 the original native/export implementation and the reviewed version. It reports
 the fixes' CPU cost as well as retained improvements, with raw data and hashes.
+Those timings precede the configurable producer policy. The
+[batch-size knee report](../benchmarks/tracing-end-to-end/results/2026-10-19-batch-knee/README.md)
+compares seven sizes and explains the current 384-span native publication default.
 
 The earlier [lifecycle/profiling report](../benchmarks/tracing-end-to-end/results/2026-10-19-capture/README.md)
 retains its historical source identities, Full/UserFields lifecycle controls,
@@ -39,7 +42,8 @@ parity. See [the adapter contract](../crates/fast-telemetry-tracing/README.md).
 Native spans borrow their collector owner, use compact active records, and
 materialize `CompletedSpan` at completion. Optional metadata uses a bounded cache
 of empty boxes. Each producer owns two span buckets; publication normally occurs
-at 256 spans, or on explicit local flush and thread exit. `SpanBatch` transfers
+at 384 spans by default, configurable through `SpanCollectorConfig`, or on
+explicit local flush and thread exit. `SpanBatch` transfers
 bucket allocations to export without flattening records. The queued-payload
 limit remains 4,096 spans per producer; exporter-owned batches and retained empty
 allocations are additional memory. Low-volume workers must flush explicitly.

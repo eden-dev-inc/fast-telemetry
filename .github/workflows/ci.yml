@@ -122,3 +122,14 @@ jobs:
               done
             done
           done
+      - name: Verify configured native producer batches
+        shell: bash
+        run: |
+          for target in 1 17 256 384 512 1024; do
+            for workload in root children attributes; do
+              for threads in 1 8 16; do
+                benchmarks/tracing-end-to-end/target/release/tracing-end-to-end \
+                  native "$workload" "$threads" "$((512 / threads))" 2 1 capture "$target"
+              done
+            done
+          done

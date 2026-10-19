@@ -75,6 +75,51 @@ const SINK_RETAINED_BATCH: usize = 256;
 /// Maximum unused quota moved to a producer in one rebalance.
 const SINK_QUOTA_CHUNK: usize = 64;
 
+/// Native producer publication policy, fixed when a collector is created.
+/// The default target is 384 completed spans per OS thread.
+///
+/// This controls when completed spans become available for draining, rather
+/// than the total number of spans in an HTTP export. Explicit local flush and
+/// thread exit publish partial batches. External [`SpanSink`] publication is
+/// immediate and does not use this policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SpanCollectorConfig {
+    producer_batch_size: usize,
+}
+
+impl Default for SpanCollectorConfig {
+    fn default() -> Self {
+        Self {
+            producer_batch_size: super::buckets::BATCH_SIZE,
+        }
+    }
+}
+
+impl SpanCollectorConfig {
+    /// Set the target completed spans per producer publication (default: 384).
+    ///
+    /// Larger batches amortize handoff work but retain more unpublished spans
+    /// on low-volume threads. Flush locally at an application-defined deadline
+    /// when those spans must be exported before the target is reached.
+    ///
+    /// # Panics
+    /// Panics unless `spans` is in `1..=1024`. The upper bound is the native
+    /// queue's unpressured sampling budget; its total capacity remains 4096.
+    pub fn with_producer_batch_size(mut self, spans: usize) -> Self {
+        assert!(
+            (1..=OUTBOX_CAPACITY / 4).contains(&spans),
+            "producer batch size must be in 1..=1024"
+        );
+        self.producer_batch_size = spans;
+        self
+    }
+
+    /// Target spans per native producer publication.
+    pub fn producer_batch_size(&self) -> usize {
+        self.producer_batch_size
+    }
+}
+
 /// Shard quotas sum to this capacity. A full certificate is set only while all
 /// shards are locked and occupied, and invalidated before a drain removes spans.
 struct SinkBudget {
@@ -126,9 +171,9 @@ struct ThreadBuffer {
 }
 
 impl ThreadBuffer {
-    fn new(collector: Weak<CollectorState>) -> Self {
+    fn new(collector: Weak<CollectorState>, batch_size: usize) -> Self {
         Self {
-            writer: Writer::new(),
+            writer: Writer::new(batch_size),
             collector,
             sample_shift: 0,
             span_counter: 0,
@@ -221,7 +266,10 @@ impl ThreadLocalState {
     fn register(&mut self, collector: &CollectorState, key: usize) -> &mut ThreadBuffer {
         self.entries
             .retain(|(_, buffer)| buffer.collector.strong_count() != 0);
-        let buffer = ThreadBuffer::new(collector.weak_self.clone());
+        let buffer = ThreadBuffer::new(
+            collector.weak_self.clone(),
+            collector.config.producer_batch_size,
+        );
         collector.native.register(Arc::clone(&buffer.writer.outbox));
         self.entries.push((key, buffer));
         &mut self.entries.last_mut().expect("just pushed").1
@@ -261,6 +309,7 @@ pub struct SpanCollector {
 
 /// Stable allocation used as native TLS identity, independently of outer moves.
 pub(crate) struct CollectorState {
+    config: SpanCollectorConfig,
     native: Registry,
     /// A single bounded writer for completions after a user's TLS outlives LOCAL.
     /// Its mutex is never touched during ordinary recording.
@@ -311,7 +360,7 @@ impl CollectorState {
     fn submit_after_tls(&self, span: CompletedSpan) {
         let mut writer = self.shutdown_writer.lock();
         let writer = writer.get_or_insert_with(|| {
-            let writer = Writer::new();
+            let writer = Writer::new(self.config.producer_batch_size);
             self.native.register(Arc::clone(&writer.outbox));
             writer
         });
@@ -451,10 +500,25 @@ impl SpanCollector {
     ///
     /// The `_num_shards` and `_capacity_per_shard` parameters are accepted for
     /// API compatibility but are no longer used — each thread gets its own
-    /// buffer automatically. Native queues use fixed flush and outbox limits.
+    /// buffer automatically. This uses the default native publication target
+    /// and fixed queue budget. Use [`Self::with_config`] to change the target.
     pub fn new(_num_shards: usize, _capacity_per_shard: usize) -> Self {
+        Self::with_config(SpanCollectorConfig::default())
+    }
+
+    /// Create a collector with a native producer publication policy.
+    ///
+    /// ```
+    /// use fast_telemetry::{SpanCollector, SpanCollectorConfig};
+    /// let collector = SpanCollector::with_config(
+    ///     SpanCollectorConfig::default().with_producer_batch_size(256),
+    /// );
+    /// assert_eq!(collector.config().producer_batch_size(), 256);
+    /// ```
+    pub fn with_config(config: SpanCollectorConfig) -> Self {
         Self {
             state: Arc::new_cyclic(|weak_self| CollectorState {
+                config,
                 native: Registry::new(),
                 shutdown_writer: Mutex::new(None),
                 outboxes: Mutex::new(Vec::new()),
@@ -463,6 +527,11 @@ impl SpanCollector {
                 weak_self: weak_self.clone(),
             }),
         }
+    }
+
+    /// Configuration shared by this collector's current and future producers.
+    pub fn config(&self) -> &SpanCollectorConfig {
+        &self.state.config
     }
 
     /// Borrow the stable state without incrementing its Arc count.

@@ -29,6 +29,15 @@
 | `DynamicDistribution`              | Runtime labels, dynamic index lookup |
 | `DynamicGauge` / `DynamicGaugeI64` | Runtime labels, dynamic index lookup |
 
+### Native Span Configuration
+
+`SpanCollector::new(shards, capacity)` retains its historical signature and uses
+the default 384-span producer publication target. Select another target with
+`SpanCollector::with_config(SpanCollectorConfig::default().with_producer_batch_size(n))`.
+The valid range is 1–1,024 spans per OS thread; partial local flushes and thread
+exit remain available. `RuntimeConfig::with_span_config` configures the shared
+runtime collector. See [native buffering and export limits](metrics-and-spans.md#spans).
+
 ### Derive Macros
 
 | Macro                                      | Purpose                                                                                                                                     |

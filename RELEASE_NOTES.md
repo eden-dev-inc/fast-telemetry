@@ -37,9 +37,15 @@ Highlights:
   completions use one bounded, shared shutdown writer per collector and remain
   drainable; its queue rejection is included in `dropped_count()`.
 - Added per-producer double buffers and reusable `SpanBatch` drains. Automatic
-  native publication changes from 64 to 256 spans; explicit local flush and
+  native publication changes from 64 to 384 spans by default; explicit local flush and
   thread-exit publication remain available. Native rejection counts now report
   actual queue loss, and adaptive sampling recovers after buffers are drained.
+- Added `SpanCollectorConfig::with_producer_batch_size` and
+  `RuntimeConfig::with_span_config` to select 1–1,024 completed spans per native
+  producer publication. The 384-span default follows the measured 256–384
+  batch-size knee. This target is separate from the exporter's total request cap;
+  tracing adapter sinks retain immediate publication. Larger native defaults can
+  delay low-volume publication, so keep an explicit local-flush deadline.
 - Added direct native OTLP encoding and consuming `CompletedSpan::into_otlp`.
   The span exporter reads bucket storage directly and transfers encoded bodies
   through the existing acknowledged HTTP transport. Added lossless sender and

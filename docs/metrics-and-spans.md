@@ -300,12 +300,40 @@ currently ignored because buffers are now managed per thread.
 
 Each OS thread owns two contiguous native span buckets. The active vector's
 metadata stays thread-local, so ordinary completion is a local `Vec::push`.
-At a 256-span boundary, ownership is published atomically and the producer
+At a 384-span boundary by default, ownership is published atomically and the producer
 switches to an empty bucket. If the other bucket is busy, the active bucket can
 grow up to the remaining per-producer queue budget of 4,096 spans. Explicit
 `flush_local()` and thread exit also publish partial buckets. Low-volume workers
 must flush explicitly or run a periodic local flusher; the exporter cannot take
 a vector that a worker is still filling.
+
+Configure this target when creating the collector:
+
+```rust
+use std::sync::Arc;
+use fast_telemetry::{SpanCollector, SpanCollectorConfig};
+
+let collector = Arc::new(SpanCollector::with_config(
+    SpanCollectorConfig::default().with_producer_batch_size(512),
+));
+```
+
+`producer_batch_size` accepts 1–1,024 completed **spans per OS thread**, counting
+children as well as roots. The measured batch-size curve bends at 256–384 spans
+in the [knee investigation](../benchmarks/tracing-end-to-end/results/2026-10-19-batch-knee/README.md);
+384 is the shared default. Larger sizes still help plain bulk traces and retain
+more unpublished data. The target is fixed for the collector's lifetime and
+applies to all its producers. Busy buckets may grow beyond the target within
+the existing 4,096-span queue budget. Explicit flush and thread exit publish
+partial batches. Keep a local-flush deadline for low-volume workers.
+
+This is a publication target, not a hard per-producer HTTP request size or an
+export delay timer. The exporter drains all available producer buffers together.
+Its separate `SpanExportConfig::max_batch_size` defaults to 512 total spans and
+currently discards excess drained spans. Set that limit for the aggregate drain
+volume; for example, eight full default producer batches contain 3,072 spans.
+External tracing adapters use immediate `SpanSink` publication and do not use
+the native producer target.
 
 Use `SpanBatch` and `drain_batches()` for export. Handoffs swap vector descriptors
 (pointer, length, capacity); each bucket remains contiguous and its completed
@@ -329,7 +357,8 @@ now reports those rejections; `sampled_out_count()` separately counts sampled-ou
 roots. Once a drain returns storage, adaptive sampling notices within 64 root
 attempts. External `SpanSink` adapters retain their shard locks and policy.
 
-Both producer allocations initially hold 256 spans and can each retain up to
+Both producer allocations initially hold the configured producer target (384 by
+default) and can each retain up to
 4,096 slots. Export batches own additional reusable allocations; these are
 separate from the 4,096-span queued-payload budget. Variable-size attributes,
 events and owned strings use their existing separate storage. Allocation growth

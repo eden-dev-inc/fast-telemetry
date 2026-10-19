@@ -5,7 +5,9 @@
 //! the registered metric type, and span recording forwards to the embedded
 //! collector without a registry lookup.
 
-use crate::{CompletedSpan, ExportMetrics, MetricVisitor, Span, SpanCollector, SpanKind};
+use crate::{
+    CompletedSpan, ExportMetrics, MetricVisitor, Span, SpanCollector, SpanCollectorConfig, SpanKind,
+};
 use parking_lot::RwLock;
 use std::borrow::Cow;
 use std::ops::Deref;
@@ -13,11 +15,25 @@ use std::sync::Arc;
 
 /// Configuration for [`Runtime`].
 ///
-/// This is currently reserved for future runtime tuning. Use
-/// [`RuntimeConfig::default`] when creating a runtime.
+/// Defaults to the native collector's producer publication policy.
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
-pub struct RuntimeConfig {}
+pub struct RuntimeConfig {
+    spans: SpanCollectorConfig,
+}
+
+impl RuntimeConfig {
+    /// Set the shared native collector's publication policy.
+    pub fn with_span_config(mut self, config: SpanCollectorConfig) -> Self {
+        self.spans = config;
+        self
+    }
+
+    /// Native collector configuration used by this runtime.
+    pub fn span_config(&self) -> &SpanCollectorConfig {
+        &self.spans
+    }
+}
 
 /// Logical scope for a registered metric group.
 ///
@@ -70,10 +86,11 @@ pub struct Runtime {
 impl Runtime {
     /// Create a runtime wrapped in [`Arc`] for parent/child sharing.
     pub fn new(config: RuntimeConfig) -> Arc<Self> {
+        let span_collector = Arc::new(SpanCollector::with_config(config.spans));
         Arc::new(Self {
             config,
             registry: RwLock::new(Vec::new()),
-            span_collector: Arc::new(SpanCollector::new(8, 4096)),
+            span_collector,
         })
     }
 

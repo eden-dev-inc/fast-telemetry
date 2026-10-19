@@ -1,0 +1,654 @@
+--- a/crates/fast-telemetry/src/span/buckets.rs
++++ b/crates/fast-telemetry/src/span/buckets.rs
+@@ -10,7 +10,7 @@
+ 
+ use super::types::CompletedSpan;
+ 
+-pub(super) const BATCH_SIZE: usize = 256;
++pub(super) const BATCH_SIZE: usize = 384;
+ pub(super) const BUCKET_CAPACITY: usize = 4096;
+ const FREE: u64 = 0;
+ const WRITING: u64 = 1;
+@@ -50,10 +50,10 @@
+ unsafe impl Sync for Bucket {}
+ 
+ impl Bucket {
+-    fn new(state: u64) -> Self {
++    fn new(state: u64, batch_size: usize) -> Self {
+         Self {
+             control: CachePadded::new(AtomicU64::new(state)),
+-            spans: UnsafeCell::new(Vec::with_capacity(BATCH_SIZE)),
++            spans: UnsafeCell::new(Vec::with_capacity(batch_size)),
+         }
+     }
+ }
+@@ -65,9 +65,12 @@
+ }
+ 
+ impl Outbox {
+-    pub(super) fn new() -> Self {
++    pub(super) fn new(batch_size: usize) -> Self {
+         Self {
+-            buckets: [Bucket::new(WRITING), Bucket::new(FREE)],
++            buckets: [
++                Bucket::new(WRITING, batch_size),
++                Bucket::new(FREE, batch_size),
++            ],
+             recycled: CachePadded::new(AtomicU64::new(0)),
+             dropped: AtomicU64::new(0),
+         }
+@@ -154,21 +157,23 @@
+     pub(super) outbox: Arc<Outbox>,
+     active: Option<usize>,
+     next_flush: usize,
++    batch_size: usize,
+     sequence: u64,
+     limit: usize,
+     buffer: Vec<CompletedSpan>,
+ }
+ 
+ impl Writer {
+-    pub(super) fn new() -> Self {
+-        let outbox = Arc::new(Outbox::new());
++    pub(super) fn new(batch_size: usize) -> Self {
++        let outbox = Arc::new(Outbox::new(batch_size));
+         // SAFETY: the fresh outbox starts with bucket zero exclusively WRITING. Keep
+         // its vector descriptor in TLS throughout that ownership interval.
+         let buffer = unsafe { std::mem::take(&mut *outbox.buckets[0].spans.get()) };
+         Self {
+             outbox,
+             active: Some(0),
+-            next_flush: BATCH_SIZE,
++            next_flush: batch_size,
++            batch_size,
+             sequence: 0,
+             limit: BUCKET_CAPACITY,
+             buffer,
+@@ -200,7 +205,7 @@
+                             .control
+                             .load(Ordering::Acquire),
+                     );
+-                self.next_flush = BATCH_SIZE.min(self.limit);
++                self.next_flush = self.batch_size.min(self.limit);
+                 return true;
+             }
+         }
+@@ -290,9 +295,9 @@
+                 None
+             };
+             self.limit = BUCKET_CAPACITY - len;
+-            self.next_flush = BATCH_SIZE.min(self.limit);
++            self.next_flush = self.batch_size.min(self.limit);
+         } else {
+-            self.next_flush = (len + BATCH_SIZE).min(self.limit);
++            self.next_flush = (len + self.batch_size).min(self.limit);
+         }
+         Some(occupancy)
+     }
+@@ -467,7 +472,8 @@
+             return;
+         }
+         if self.used == self.buffers.len() {
+-            self.buffers.push(Vec::with_capacity(BATCH_SIZE));
++            self.buffers
++                .push(Vec::with_capacity(spans.capacity().min(BUCKET_CAPACITY)));
+         }
+         std::mem::swap(&mut self.buffers[self.used], spans);
+         self.used += 1;
+@@ -514,7 +520,7 @@
+ 
+     #[test]
+     fn native_handoff_swaps_allocations_and_keeps_contiguous_payloads() {
+-        let mut writer = Writer::new();
++        let mut writer = Writer::new(BATCH_SIZE);
+         for i in 0..BATCH_SIZE {
+             writer.push(span(i));
+         }
+@@ -543,7 +549,7 @@
+ 
+     #[test]
+     fn native_partial_flush_is_visible_and_subsequent_push_keeps_fifo() {
+-        let mut writer = Writer::new();
++        let mut writer = Writer::new(BATCH_SIZE);
+         for i in 0..100 {
+             writer.push(span(i));
+             writer.flush();
+@@ -562,29 +568,31 @@
+ 
+     #[test]
+     fn native_full_buckets_drop_without_waiting_and_recover_after_drain() {
+-        let mut writer = Writer::new();
+-        let mut batch = SpanBatch::new();
+-        for i in 0..(BUCKET_CAPACITY + 10) {
+-            writer.push(span(i));
+-        }
+-        writer.flush();
+-        // The first automatically published bucket is intentionally not
+-        // reclaimed: retaining the newest batch preserves per-producer order.
+-        assert_eq!(writer.outbox.len(), BUCKET_CAPACITY);
+-        assert_eq!(writer.outbox.dropped(), 10);
+-        drain(&writer.outbox, &mut batch);
+-        assert_eq!(batch.len(), BUCKET_CAPACITY);
+-        batch.clear();
+-        writer.push(span(9999));
+-        writer.flush();
+-        drain(&writer.outbox, &mut batch);
+-        assert_eq!(batch.len(), 1);
+-        assert_eq!(batch.iter().next().expect("recovered span").name, "9999");
++        for batch_size in [1, 17, BATCH_SIZE, 1024] {
++            let mut writer = Writer::new(batch_size);
++            let mut batch = SpanBatch::new();
++            for i in 0..(BUCKET_CAPACITY + 10) {
++                writer.push(span(i));
++            }
++            writer.flush();
++            // The first automatically published bucket is intentionally not
++            // reclaimed: retaining the newest batch preserves per-producer order.
++            assert_eq!(writer.outbox.len(), BUCKET_CAPACITY);
++            assert_eq!(writer.outbox.dropped(), 10);
++            drain(&writer.outbox, &mut batch);
++            assert_eq!(batch.len(), BUCKET_CAPACITY);
++            batch.clear();
++            writer.push(span(9999));
++            writer.flush();
++            drain(&writer.outbox, &mut batch);
++            assert_eq!(batch.len(), 1);
++            assert_eq!(batch.iter().next().expect("recovered span").name, "9999");
++        }
+     }
+ 
+     #[test]
+     fn native_reader_owns_one_bucket_while_writer_fills_the_other() {
+-        let mut writer = Writer::new();
++        let mut writer = Writer::new(BATCH_SIZE);
+         for i in 0..BATCH_SIZE {
+             writer.push(span(i));
+         }
+@@ -608,7 +616,7 @@
+ 
+     #[test]
+     fn native_panicking_drain_releases_ownership() {
+-        let mut writer = Writer::new();
++        let mut writer = Writer::new(BATCH_SIZE);
+         for i in 0..BATCH_SIZE {
+             writer.push(span(i));
+         }
+@@ -628,7 +636,7 @@
+ 
+     #[test]
+     fn native_sequence_wrap_preserves_two_bucket_order() {
+-        let mut writer = Writer::new();
++        let mut writer = Writer::new(BATCH_SIZE);
+         writer.sequence = SEQUENCE_MASK - 1;
+         for i in 0..BATCH_SIZE * 2 {
+             writer.push(span(i));
+@@ -647,7 +655,7 @@
+ 
+     #[test]
+     fn native_thread_exit_publishes_partial_bucket() {
+-        let mut writer = Writer::new();
++        let mut writer = Writer::new(BATCH_SIZE);
+         writer.push(span(1));
+         let outbox = Arc::clone(&writer.outbox);
+         assert_eq!(outbox.len(), 0);
+@@ -660,7 +668,7 @@
+ 
+     #[test]
+     fn native_multiple_consumers_never_duplicate_or_corrupt_spans() {
+-        let mut writer = Writer::new();
++        let mut writer = Writer::new(BATCH_SIZE);
+         let outbox = Arc::clone(&writer.outbox);
+         let done = AtomicBool::new(false);
+         let seen = (0..40_000).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
+@@ -702,7 +710,7 @@
+             for _ in 0..80 {
+                 let registry = &registry;
+                 scope.spawn(move || {
+-                    let mut writer = Writer::new();
++                    let mut writer = Writer::new(BATCH_SIZE);
+                     writer.push(span(1));
+                     writer.flush();
+                     registry.register(Arc::clone(&writer.outbox));
+--- a/crates/fast-telemetry/src/span/collector.rs
++++ b/crates/fast-telemetry/src/span/collector.rs
+@@ -74,6 +74,51 @@
+ 
+ /// Maximum unused quota moved to a producer in one rebalance.
+ const SINK_QUOTA_CHUNK: usize = 64;
++
++/// Native producer publication policy, fixed when a collector is created.
++/// The default target is 384 completed spans per OS thread.
++///
++/// This controls when completed spans become available for draining, rather
++/// than the total number of spans in an HTTP export. Explicit local flush and
++/// thread exit publish partial batches. External [`SpanSink`] publication is
++/// immediate and does not use this policy.
++#[derive(Clone, Copy, Debug, Eq, PartialEq)]
++pub struct SpanCollectorConfig {
++    producer_batch_size: usize,
++}
++
++impl Default for SpanCollectorConfig {
++    fn default() -> Self {
++        Self {
++            producer_batch_size: super::buckets::BATCH_SIZE,
++        }
++    }
++}
++
++impl SpanCollectorConfig {
++    /// Set the target completed spans per producer publication (default: 384).
++    ///
++    /// Larger batches amortize handoff work but retain more unpublished spans
++    /// on low-volume threads. Flush locally at an application-defined deadline
++    /// when those spans must be exported before the target is reached.
++    ///
++    /// # Panics
++    /// Panics unless `spans` is in `1..=1024`. The upper bound is the native
++    /// queue's unpressured sampling budget; its total capacity remains 4096.
++    pub fn with_producer_batch_size(mut self, spans: usize) -> Self {
++        assert!(
++            (1..=OUTBOX_CAPACITY / 4).contains(&spans),
++            "producer batch size must be in 1..=1024"
++        );
++        self.producer_batch_size = spans;
++        self
++    }
++
++    /// Target spans per native producer publication.
++    pub fn producer_batch_size(&self) -> usize {
++        self.producer_batch_size
++    }
++}
+ 
+ /// Shard quotas sum to this capacity. A full certificate is set only while all
+ /// shards are locked and occupied, and invalidated before a drain removes spans.
+@@ -126,9 +171,9 @@
+ }
+ 
+ impl ThreadBuffer {
+-    fn new(collector: Weak<CollectorState>) -> Self {
++    fn new(collector: Weak<CollectorState>, batch_size: usize) -> Self {
+         Self {
+-            writer: Writer::new(),
++            writer: Writer::new(batch_size),
+             collector,
+             sample_shift: 0,
+             span_counter: 0,
+@@ -221,7 +266,10 @@
+     fn register(&mut self, collector: &CollectorState, key: usize) -> &mut ThreadBuffer {
+         self.entries
+             .retain(|(_, buffer)| buffer.collector.strong_count() != 0);
+-        let buffer = ThreadBuffer::new(collector.weak_self.clone());
++        let buffer = ThreadBuffer::new(
++            collector.weak_self.clone(),
++            collector.config.producer_batch_size,
++        );
+         collector.native.register(Arc::clone(&buffer.writer.outbox));
+         self.entries.push((key, buffer));
+         &mut self.entries.last_mut().expect("just pushed").1
+@@ -261,6 +309,7 @@
+ 
+ /// Stable allocation used as native TLS identity, independently of outer moves.
+ pub(crate) struct CollectorState {
++    config: SpanCollectorConfig,
+     native: Registry,
+     /// A single bounded writer for completions after a user's TLS outlives LOCAL.
+     /// Its mutex is never touched during ordinary recording.
+@@ -311,7 +360,7 @@
+     fn submit_after_tls(&self, span: CompletedSpan) {
+         let mut writer = self.shutdown_writer.lock();
+         let writer = writer.get_or_insert_with(|| {
+-            let writer = Writer::new();
++            let writer = Writer::new(self.config.producer_batch_size);
+             self.native.register(Arc::clone(&writer.outbox));
+             writer
+         });
+@@ -451,10 +500,25 @@
+     ///
+     /// The `_num_shards` and `_capacity_per_shard` parameters are accepted for
+     /// API compatibility but are no longer used — each thread gets its own
+-    /// buffer automatically. Native queues use fixed flush and outbox limits.
++    /// buffer automatically. This uses the default native publication target
++    /// and fixed queue budget. Use [`Self::with_config`] to change the target.
+     pub fn new(_num_shards: usize, _capacity_per_shard: usize) -> Self {
++        Self::with_config(SpanCollectorConfig::default())
++    }
++
++    /// Create a collector with a native producer publication policy.
++    ///
++    /// ```
++    /// use fast_telemetry::{SpanCollector, SpanCollectorConfig};
++    /// let collector = SpanCollector::with_config(
++    ///     SpanCollectorConfig::default().with_producer_batch_size(256),
++    /// );
++    /// assert_eq!(collector.config().producer_batch_size(), 256);
++    /// ```
++    pub fn with_config(config: SpanCollectorConfig) -> Self {
+         Self {
+             state: Arc::new_cyclic(|weak_self| CollectorState {
++                config,
+                 native: Registry::new(),
+                 shutdown_writer: Mutex::new(None),
+                 outboxes: Mutex::new(Vec::new()),
+@@ -463,6 +527,11 @@
+                 weak_self: weak_self.clone(),
+             }),
+         }
++    }
++
++    /// Configuration shared by this collector's current and future producers.
++    pub fn config(&self) -> &SpanCollectorConfig {
++        &self.state.config
+     }
+ 
+     /// Borrow the stable state without incrementing its Arc count.
+--- a/crates/fast-telemetry/src/span/mod.rs
++++ b/crates/fast-telemetry/src/span/mod.rs
+@@ -44,6 +44,9 @@
+ //! draining on the same thread that just recorded spans. `SpanCollector::new`
+ //! keeps its historical `(shards, capacity)` signature for compatibility, but
+ //! those parameters are currently ignored because buffers are managed per thread.
++//! Use [`SpanCollector::with_config`] and [`SpanCollectorConfig`] to change the
++//! default 384-span native producer publication target. Explicit local flush
++//! and thread exit also publish smaller batches.
+ //!
+ //! For manual cross-service propagation, use
+ //! [`SpanCollector::start_span_from_traceparent`] on inbound requests and
+@@ -57,7 +60,7 @@
+ mod types;
+ 
+ pub use buckets::SpanBatch;
+-pub use collector::{SpanCollector, SpanSink};
++pub use collector::{SpanCollector, SpanCollectorConfig, SpanSink};
+ pub use context::{SpanContext, current_span_id, current_trace_id};
+ pub use ids::{SpanId, TraceId};
+ pub use types::{
+--- a/crates/fast-telemetry/src/lib.rs
++++ b/crates/fast-telemetry/src/lib.rs
+@@ -65,9 +65,9 @@
+ #[cfg(feature = "runtime")]
+ pub use runtime::{MetricScope, RegisteredMetrics, Runtime, RuntimeConfig};
+ pub use span::{
+-    CompletedSpan, EnteredSpan, Span, SpanAttribute, SpanBatch, SpanCollector, SpanContext,
+-    SpanEvent, SpanId, SpanKind, SpanSink, SpanStatus, SpanValue, TraceId, current_span_id,
+-    current_trace_id,
++    CompletedSpan, EnteredSpan, Span, SpanAttribute, SpanBatch, SpanCollector, SpanCollectorConfig,
++    SpanContext, SpanEvent, SpanId, SpanKind, SpanSink, SpanStatus, SpanValue, TraceId,
++    current_span_id, current_trace_id,
+ };
+ pub use temporality::Temporality;
+ 
+--- a/crates/fast-telemetry/src/runtime.rs
++++ b/crates/fast-telemetry/src/runtime.rs
+@@ -5,7 +5,9 @@
+ //! the registered metric type, and span recording forwards to the embedded
+ //! collector without a registry lookup.
+ 
+-use crate::{CompletedSpan, ExportMetrics, MetricVisitor, Span, SpanCollector, SpanKind};
++use crate::{
++    CompletedSpan, ExportMetrics, MetricVisitor, Span, SpanCollector, SpanCollectorConfig, SpanKind,
++};
+ use parking_lot::RwLock;
+ use std::borrow::Cow;
+ use std::ops::Deref;
+@@ -13,11 +15,25 @@
+ 
+ /// Configuration for [`Runtime`].
+ ///
+-/// This is currently reserved for future runtime tuning. Use
+-/// [`RuntimeConfig::default`] when creating a runtime.
++/// Defaults to the native collector's producer publication policy.
+ #[derive(Clone, Debug, Default)]
+ #[non_exhaustive]
+-pub struct RuntimeConfig {}
++pub struct RuntimeConfig {
++    spans: SpanCollectorConfig,
++}
++
++impl RuntimeConfig {
++    /// Set the shared native collector's publication policy.
++    pub fn with_span_config(mut self, config: SpanCollectorConfig) -> Self {
++        self.spans = config;
++        self
++    }
++
++    /// Native collector configuration used by this runtime.
++    pub fn span_config(&self) -> &SpanCollectorConfig {
++        &self.spans
++    }
++}
+ 
+ /// Logical scope for a registered metric group.
+ ///
+@@ -70,10 +86,11 @@
+ impl Runtime {
+     /// Create a runtime wrapped in [`Arc`] for parent/child sharing.
+     pub fn new(config: RuntimeConfig) -> Arc<Self> {
++        let span_collector = Arc::new(SpanCollector::with_config(config.spans));
+         Arc::new(Self {
+             config,
+             registry: RwLock::new(Vec::new()),
+-            span_collector: Arc::new(SpanCollector::new(8, 4096)),
++            span_collector,
+         })
+     }
+ 
+--- /dev/null
++++ b/crates/fast-telemetry/tests/span_batch_config.rs
+@@ -0,0 +1,103 @@
++//! Configured native publication stays observable while workers remain alive.
++
++use std::sync::{Arc, Barrier};
++
++use fast_telemetry::{SpanBatch, SpanCollector, SpanCollectorConfig, SpanKind};
++
++#[test]
++fn configured_batches_publish_and_refill_at_their_target() {
++    assert_eq!(SpanCollectorConfig::default().producer_batch_size(), 384);
++    for target in [1, 17, 256, 384, 512, 1024] {
++        let collector = Arc::new(SpanCollector::with_config(
++            SpanCollectorConfig::default().with_producer_batch_size(target),
++        ));
++        let mut spans = SpanBatch::new();
++        for _ in 0..3 {
++            for _ in 0..target - 1 {
++                drop(collector.start_span("before boundary", SpanKind::Internal));
++            }
++            assert_eq!(collector.len(), 0);
++            drop(collector.start_span("boundary", SpanKind::Internal));
++            collector.drain_batches(&mut spans);
++            assert_eq!(spans.len(), target);
++            spans.clear();
++        }
++        assert_eq!(collector.recorded_count(), (target * 3) as u64);
++        assert_eq!(collector.sampled_out_count(), 0);
++        assert_eq!(collector.dropped_count(), 0);
++    }
++}
++
++#[test]
++fn workers_share_policy_and_publish_partial_batches_on_exit() {
++    let collector = Arc::new(SpanCollector::with_config(
++        SpanCollectorConfig::default().with_producer_batch_size(17),
++    ));
++    let ready = Arc::new(Barrier::new(5));
++    let finish = Arc::new(Barrier::new(5));
++    let workers = (0..4)
++        .map(|_| {
++            let collector = Arc::clone(&collector);
++            let ready = Arc::clone(&ready);
++            let finish = Arc::clone(&finish);
++            std::thread::spawn(move || {
++                for _ in 0..17 {
++                    drop(collector.start_span("full", SpanKind::Internal));
++                }
++                ready.wait();
++                finish.wait();
++                drop(collector.start_span("partial", SpanKind::Internal));
++            })
++        })
++        .collect::<Vec<_>>();
++    ready.wait();
++    assert_eq!(collector.len(), 4 * 17);
++    finish.wait();
++    // Join the OS threads before asserting TLS-destructor publication.
++    for worker in workers {
++        worker.join().expect("producer joined");
++    }
++    let mut spans = SpanBatch::new();
++    collector.drain_batches(&mut spans);
++    assert_eq!(spans.len(), 4 * 18);
++    assert_eq!(collector.recorded_count(), 4 * 18);
++    assert_eq!(collector.sampled_out_count(), 0);
++    assert_eq!(collector.dropped_count(), 0);
++}
++
++#[test]
++fn local_flush_publishes_a_partial_configured_batch() {
++    let collector = Arc::new(SpanCollector::with_config(
++        SpanCollectorConfig::default().with_producer_batch_size(1024),
++    ));
++    drop(collector.start_span("partial", SpanKind::Internal));
++    assert_eq!(collector.len(), 0);
++    collector.flush_local();
++    assert_eq!(collector.len(), 1);
++}
++
++#[test]
++fn invalid_batch_sizes_are_rejected_before_recording() {
++    for target in [0, 1025, usize::MAX] {
++        assert!(
++            std::panic::catch_unwind(|| {
++                SpanCollectorConfig::default().with_producer_batch_size(target)
++            })
++            .is_err()
++        );
++    }
++}
++
++#[cfg(feature = "runtime")]
++#[test]
++fn runtime_uses_the_configured_native_collector() {
++    use fast_telemetry::{Runtime, RuntimeConfig};
++    let runtime = Runtime::new(
++        RuntimeConfig::default()
++            .with_span_config(SpanCollectorConfig::default().with_producer_batch_size(1)),
++    );
++    drop(runtime.start_span("immediate", SpanKind::Internal));
++    assert_eq!(runtime.span_collector().len(), 1);
++    assert_eq!(runtime.config().span_config().producer_batch_size(), 1);
++    assert_eq!(runtime.span_collector().config().producer_batch_size(), 1);
++}
+--- a/benchmarks/tracing-end-to-end/src/main.rs
++++ b/benchmarks/tracing-end-to-end/src/main.rs
+@@ -8,7 +8,7 @@
+ use async_trait::async_trait;
+ use bytes::Bytes;
+ use fast_telemetry::otlp::{build_resource, encode_native_trace_export_request_batches, pb};
+-use fast_telemetry::{SpanAttribute, SpanBatch, SpanCollector, SpanKind};
++use fast_telemetry::{SpanAttribute, SpanBatch, SpanCollector, SpanCollectorConfig, SpanKind};
+ use fast_telemetry_tracing::{FastTelemetrySubscriber, LayerHandle, MetadataPolicy};
+ use http::{Request, Response};
+ use opentelemetry::KeyValue;
+@@ -57,6 +57,7 @@
+     workload: Workload,
+     threads: usize,
+     batch: usize,
++    producer_batch_size: usize,
+     cycles: usize,
+     warmup: usize,
+     endpoint: String,
+@@ -70,8 +71,8 @@
+     }
+ 
+     fn from_args(args: &[String]) -> Result<Self> {
+-        if args.len() != 7 {
+-            return Err("usage: tracing-end-to-end native|drop-in|otel root|children|attributes THREADS SPANS_PER_THREAD_BATCH CYCLES WARMUP capture|http://HOST:PORT".into());
++        if !(7..=8).contains(&args.len()) {
++            return Err("usage: tracing-end-to-end native|drop-in|otel root|children|attributes THREADS SPANS_PER_THREAD_BATCH CYCLES WARMUP capture|http://HOST:PORT [NATIVE_PRODUCER_BATCH_SIZE]".into());
+         }
+         let mode = match args[0].as_str() {
+             "native" => Mode::Native,
+@@ -89,6 +90,14 @@
+         let batch = args[3].parse::<usize>()?;
+         let cycles = args[4].parse::<usize>()?;
+         let warmup = args[5].parse::<usize>()?;
++        let producer_batch_size = args
++            .get(7)
++            .map(|s| s.parse::<usize>())
++            .transpose()?
++            .unwrap_or_else(|| SpanCollectorConfig::default().producer_batch_size());
++        if !(1..=1024).contains(&producer_batch_size) {
++            return Err("native producer batch size must be in 1..=1024".into());
++        }
+         if threads == 0 || threads > 128 || batch == 0 || batch > 1024 || cycles == 0 {
+             return Err(
+                 "require 1..=128 threads, 1..=1024 spans per batch, and positive cycles".into(),
+@@ -124,6 +133,7 @@
+             workload,
+             threads,
+             batch,
++            producer_batch_size,
+             cycles,
+             warmup,
+             endpoint,
+@@ -542,7 +552,9 @@
+             None
+         },
+     };
+-    let collector = Arc::new(SpanCollector::new(options.threads, 4096));
++    let collector = Arc::new(SpanCollector::with_config(
++        SpanCollectorConfig::default().with_producer_batch_size(options.producer_batch_size),
++    ));
+     let (provider, adapter) = setup(&options, &collector, &wire)?;
+     let worker_count = if options.threads == 1 {
+         0
+@@ -668,10 +680,10 @@
+     }
+     let traces = exported / options.workload.spans();
+     println!(
+-        "mode,workload,transport,threads,batch_spans_per_thread,cycles,warmup,verified_traces,verified_spans,verified_events,wire_requests,wire_bytes,sampled_out,dropped,pipeline_cpu_ns_per_trace,pipeline_cpu_ns_per_span,pipeline_wall_ns_per_trace,pipeline_traces_per_sec,pipeline_spans_per_sec,process_cpu_ns,wall_ns"
++        "mode,workload,transport,threads,batch_spans_per_thread,cycles,warmup,verified_traces,verified_spans,verified_events,wire_requests,wire_bytes,sampled_out,dropped,pipeline_cpu_ns_per_trace,pipeline_cpu_ns_per_span,pipeline_wall_ns_per_trace,pipeline_traces_per_sec,pipeline_spans_per_sec,process_cpu_ns,wall_ns,producer_batch_size"
+     );
+     println!(
+-        "{:?},{:?},{},{},{},{},{},{traces},{exported},{events},{requests},{bytes},0,0,{:.3},{:.3},{:.3},{:.3},{:.3},{total_cpu},{total_wall}",
++        "{:?},{:?},{},{},{},{},{},{traces},{exported},{events},{requests},{bytes},0,0,{:.3},{:.3},{:.3},{:.3},{:.3},{total_cpu},{total_wall},{}",
+         options.mode,
+         options.workload,
+         if options.http { "http" } else { "capture" },
+@@ -683,7 +695,8 @@
+         total_cpu as f64 / exported as f64,
+         total_wall as f64 / traces as f64,
+         traces as f64 * 1e9 / total_wall as f64,
+-        exported as f64 * 1e9 / total_wall as f64
++        exported as f64 * 1e9 / total_wall as f64,
++        options.producer_batch_size
+     );
+     Ok(())
+ }
+@@ -705,6 +718,7 @@
+             workload,
+             threads: 1,
+             batch: 4,
++            producer_batch_size: SpanCollectorConfig::default().producer_batch_size(),
+             cycles: 1,
+             warmup: 0,
+             endpoint: "http://127.0.0.1:4318".into(),
+@@ -836,6 +850,16 @@
+     fn validates_cli_limits_and_whole_traces() {
+         let valid = ["native", "children", "1", "256", "2", "1", "capture"].map(str::to_owned);
+         assert!(Options::from_args(&valid).is_ok());
++        for target in ["1", "17", "384", "1024"] {
++            let mut args = valid.to_vec();
++            args.push(target.into());
++            assert!(Options::from_args(&args).is_ok());
++        }
++        for target in ["0", "1025", "invalid"] {
++            let mut args = valid.to_vec();
++            args.push(target.into());
++            assert!(Options::from_args(&args).is_err());
++        }
+         for (index, value) in [
+             (0, "registry"),
+             (2, "0"),
