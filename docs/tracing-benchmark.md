@@ -4,9 +4,15 @@ Use two complementary benchmarks: the backend lifecycle comparison below, and
 [the complete sender pipeline](../benchmarks/tracing-end-to-end/README.md).
 Both verify actual retained payloads; their timing boundaries differ.
 
-The [2026-10-19 review report](../benchmarks/tracing-end-to-end/results/2026-10-19-capture/README.md)
-includes raw lossless sender and Full/UserFields lifecycle samples, profiles,
-source identities, and the measured cost of checked native TLS borrowing.
+The [production review](../benchmarks/tracing-end-to-end/results/2026-10-19-production/README.md)
+includes the context/shutdown fixes and 300 fresh sender samples against both
+the original native/export implementation and the reviewed version. It reports
+the fixes' CPU cost as well as retained improvements, with raw data and hashes.
+
+The earlier [lifecycle/profiling report](../benchmarks/tracing-end-to-end/results/2026-10-19-capture/README.md)
+retains its historical source identities, Full/UserFields lifecycle controls,
+phase/allocation profiles and checked-borrow cost experiment. Its native timings
+predate the scoped-entry fix; use the production report for current sender costs.
 
 | Benchmark | Included | Excluded |
 | --- | --- | --- |

@@ -88,10 +88,13 @@ jobs:
         run: |
           import pathlib
           import tarfile
+          import tomllib
           license_text = pathlib.Path("LICENSE").read_bytes()
           for name in ("fast-telemetry-macros", "fast-telemetry", "fast-telemetry-export", "fast-telemetry-tracing"):
-              with tarfile.open(f"target/package/{name}-0.9.0.crate") as archive:
-                  assert archive.extractfile(f"{name}-0.9.0/LICENSE").read() == license_text, name
+              manifest = tomllib.loads(pathlib.Path(f"crates/{name}/Cargo.toml").read_text())
+              package = f"{name}-{manifest['package']['version']}"
+              with tarfile.open(f"target/package/{package}.crate") as archive:
+                  assert archive.extractfile(f"{package}/LICENSE").read() == license_text, name
 
   tracing-pipeline:
     name: Tracing pipeline verification

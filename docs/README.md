@@ -11,4 +11,5 @@ Long-form documentation for the `fast-telemetry` workspace.
 - [Export adapters](exporters.md)
 - [API reference](reference.md)
 - [Benchmark harness](../crates/fast-telemetry/bench/README.md)
+- [Publishing](publishing.md)
 - [Release notes](../RELEASE_NOTES.md)

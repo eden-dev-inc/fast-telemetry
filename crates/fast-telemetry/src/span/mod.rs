@@ -7,7 +7,7 @@
 //!
 //! # Usage
 //!
-//! ```ignore
+//! ```
 //! use std::sync::Arc;
 //! use fast_telemetry::{SpanBatch, SpanCollector, SpanKind};
 //!
@@ -31,6 +31,8 @@
 //! // Logging correlation on the same thread.
 //! let trace_id = fast_telemetry::current_trace_id();
 //! let span_id = fast_telemetry::current_span_id();
+//!
+//! root.end(); // submit the root and close its logging context
 //!
 //! // Exporter drains periodically.
 //! let mut buf = SpanBatch::new();
