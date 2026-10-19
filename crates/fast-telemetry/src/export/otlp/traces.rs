@@ -524,7 +524,7 @@ mod tests {
                 crate::SpanId::INVALID,
                 index % 3,
             );
-            sink.publish(span).expect("fixture fits sink");
+            assert!(sink.publish(span).is_ok(), "fixture fits sink");
         }
         let mut batch = crate::SpanBatch::new();
         collector.drain_batches(&mut batch);
