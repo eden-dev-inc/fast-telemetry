@@ -1,0 +1,1605 @@
+{
+  "environment": {
+    "client_cpu": 0,
+    "receiver_cpu": 3,
+    "affinity": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "cpu_model": "AMD EPYC 7763 64-Core Processor",
+    "source_commit": "f33d793b47eb96bda5821990524745798e656601",
+    "libc": "glibc 2.39",
+    "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
+    "source_hashes": {
+      "crates/fast-telemetry/src/export/otlp/traces.rs": "af5f246c594cf80c64976d63fa4633e0cceefab6d8c82c79f985ae819979243f",
+      "crates/fast-telemetry-export/src/otlp/http.rs": "81e09ba7588348d8e2db2af2b19ac95ef9595dc034ca59198fac245c2fd9e665"
+    },
+    "binary_hashes": {
+      "span-export-tradeoff-probe": "c13b5b111f1d8fadd8819ff2861c65291859c45d24c5b0f4db2471050b85ca10",
+      "span-export-http-probe": "4b29c0ed2796eda18c4f99beb3d7480dc094f3031b3b1ac6586a637c30404f97"
+    }
+  },
+  "counts": {
+    "controls": {
+      "processes": 64,
+      "verified_encodings": 67108864
+    },
+    "allocator": {
+      "processes": 64,
+      "verified_encodings": 67108864
+    },
+    "caps": {
+      "processes": 240,
+      "verified_encodings": 251904000
+    },
+    "http": {
+      "processes": 108,
+      "verified_encodings": 20447232
+    }
+  },
+  "controls": [
+    {
+      "workload": "static",
+      "setup": "original",
+      "single": {
+        "median": 21.3335,
+        "minimum": 21.111,
+        "maximum": 21.741
+      },
+      "chunks": {
+        "median": 34.1545,
+        "minimum": 33.868,
+        "maximum": 34.284
+      },
+      "paired_cpu_change_percent": {
+        "median": 60.00867252007177,
+        "minimum": 56.28535945908653,
+        "maximum": 61.6636016409676
+      }
+    },
+    {
+      "workload": "static",
+      "setup": "matched",
+      "single": {
+        "median": 21.421,
+        "minimum": 21.266,
+        "maximum": 21.452
+      },
+      "chunks": {
+        "median": 20.610500000000002,
+        "minimum": 20.455,
+        "maximum": 21.029
+      },
+      "paired_cpu_change_percent": {
+        "median": -3.800632966173395,
+        "minimum": -4.3680947275185344,
+        "maximum": -1.5956948993916753
+      }
+    },
+    {
+      "workload": "attributes",
+      "setup": "original",
+      "single": {
+        "median": 227.30900000000003,
+        "minimum": 226.115,
+        "maximum": 229.158
+      },
+      "chunks": {
+        "median": 278.337,
+        "minimum": 275.324,
+        "maximum": 286.183
+      },
+      "paired_cpu_change_percent": {
+        "median": 22.710407851760483,
+        "minimum": 20.14592551863781,
+        "maximum": 26.565243349622982
+      }
+    },
+    {
+      "workload": "attributes",
+      "setup": "matched",
+      "single": {
+        "median": 226.964,
+        "minimum": 224.363,
+        "maximum": 228.361
+      },
+      "chunks": {
+        "median": 212.3105,
+        "minimum": 211.613,
+        "maximum": 214.206
+      },
+      "paired_cpu_change_percent": {
+        "median": -6.173477842827013,
+        "minimum": -6.950985177270342,
+        "maximum": -5.125546190184971
+      }
+    }
+  ],
+  "allocator": [
+    {
+      "workload": "static",
+      "setup": "original",
+      "single": {
+        "median": 21.2115,
+        "minimum": 21.111,
+        "maximum": 21.306
+      },
+      "chunks": {
+        "median": 20.747999999999998,
+        "minimum": 20.521,
+        "maximum": 20.784
+      },
+      "paired_cpu_change_percent": {
+        "median": -2.456072228004685,
+        "minimum": -3.2530290886803925,
+        "maximum": -1.9994341224181866
+      }
+    },
+    {
+      "workload": "static",
+      "setup": "matched",
+      "single": {
+        "median": 21.378999999999998,
+        "minimum": 21.102,
+        "maximum": 21.548
+      },
+      "chunks": {
+        "median": 20.679000000000002,
+        "minimum": 20.457,
+        "maximum": 22.116
+      },
+      "paired_cpu_change_percent": {
+        "median": -3.0750488254230604,
+        "minimum": -4.236494710233119,
+        "maximum": 3.254120173677566
+      }
+    },
+    {
+      "workload": "attributes",
+      "setup": "original",
+      "single": {
+        "median": 225.603,
+        "minimum": 224.119,
+        "maximum": 228.427
+      },
+      "chunks": {
+        "median": 213.1565,
+        "minimum": 211.373,
+        "maximum": 214.644
+      },
+      "paired_cpu_change_percent": {
+        "median": -5.918225042534031,
+        "minimum": -6.739578435809667,
+        "maximum": -4.250734923474275
+      }
+    },
+    {
+      "workload": "attributes",
+      "setup": "matched",
+      "single": {
+        "median": 224.9795,
+        "minimum": 224.271,
+        "maximum": 227.379
+      },
+      "chunks": {
+        "median": 213.337,
+        "minimum": 211.907,
+        "maximum": 229.413
+      },
+      "paired_cpu_change_percent": {
+        "median": -5.0689513809519084,
+        "minimum": -6.431552606001434,
+        "maximum": 2.0806542758869284
+      }
+    }
+  ],
+  "caps": [
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 256,
+      "cpu_ns_per_span": {
+        "median": 21.542,
+        "minimum": 21.39,
+        "maximum": 21.725
+      },
+      "requests_per_cycle": 12,
+      "paired_cpu_change_percent": {
+        "median": -0.353322242717935,
+        "minimum": -1.1698857640959681,
+        "maximum": -0.03248410599099305
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 512,
+      "cpu_ns_per_span": {
+        "median": 20.923000000000002,
+        "minimum": 20.824,
+        "maximum": 21.095
+      },
+      "requests_per_cycle": 6,
+      "paired_cpu_change_percent": {
+        "median": -3.4513328942956836,
+        "minimum": -4.270675309152749,
+        "maximum": -2.1068263028446776
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 1024,
+      "cpu_ns_per_span": {
+        "median": 21.549,
+        "minimum": 21.241,
+        "maximum": 21.777
+      },
+      "requests_per_cycle": 3,
+      "paired_cpu_change_percent": {
+        "median": -0.6349628969903043,
+        "minimum": -1.6984450203628376,
+        "maximum": 1.0580537379924815
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 2048,
+      "cpu_ns_per_span": {
+        "median": 21.612000000000002,
+        "minimum": 21.411,
+        "maximum": 21.967
+      },
+      "requests_per_cycle": 2,
+      "paired_cpu_change_percent": {
+        "median": -0.1818017468074029,
+        "minimum": -0.6637168141592986,
+        "maximum": 0.7799238427306454
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 4096,
+      "cap": 256,
+      "cpu_ns_per_span": {
+        "median": 21.506999999999998,
+        "minimum": 21.315,
+        "maximum": 21.843
+      },
+      "requests_per_cycle": 16,
+      "paired_cpu_change_percent": {
+        "median": 1.0078511292437864,
+        "minimum": 0.004681428772057572,
+        "maximum": 2.4867451789987394
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 4096,
+      "cap": 512,
+      "cpu_ns_per_span": {
+        "median": 20.811999999999998,
+        "minimum": 20.72,
+        "maximum": 20.943
+      },
+      "requests_per_cycle": 8,
+      "paired_cpu_change_percent": {
+        "median": -2.3441311627317276,
+        "minimum": -2.780768690604374,
+        "maximum": -1.5049616705074542
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 4096,
+      "cap": 1024,
+      "cpu_ns_per_span": {
+        "median": 21.356,
+        "minimum": 21.163,
+        "maximum": 21.544
+      },
+      "requests_per_cycle": 4,
+      "paired_cpu_change_percent": {
+        "median": 0.10787222290271625,
+        "minimum": -0.45409859088995086,
+        "maximum": 1.0838455402805813
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 4096,
+      "cap": 2048,
+      "cpu_ns_per_span": {
+        "median": 21.2275,
+        "minimum": 20.922,
+        "maximum": 21.367
+      },
+      "requests_per_cycle": 2,
+      "paired_cpu_change_percent": {
+        "median": -0.395796495721934,
+        "minimum": -1.97713643178411,
+        "maximum": 0.4662333992653034
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 6144,
+      "cap": 256,
+      "cpu_ns_per_span": {
+        "median": 21.2825,
+        "minimum": 21.114,
+        "maximum": 22.001
+      },
+      "requests_per_cycle": 24,
+      "paired_cpu_change_percent": {
+        "median": 0.5533222818077888,
+        "minimum": -0.8499647804649069,
+        "maximum": 5.051807286444165
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 6144,
+      "cap": 512,
+      "cpu_ns_per_span": {
+        "median": 20.7575,
+        "minimum": 20.466,
+        "maximum": 21.121
+      },
+      "requests_per_cycle": 12,
+      "paired_cpu_change_percent": {
+        "median": -1.9577681324450813,
+        "minimum": -3.8929326132895126,
+        "maximum": 0.8499259895907718
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 6144,
+      "cap": 1024,
+      "cpu_ns_per_span": {
+        "median": 21.1845,
+        "minimum": 20.992,
+        "maximum": 21.261
+      },
+      "requests_per_cycle": 6,
+      "paired_cpu_change_percent": {
+        "median": 0.016993847833990383,
+        "minimum": -0.6953971332607889,
+        "maximum": 1.1650670868547985
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 6144,
+      "cap": 2048,
+      "cpu_ns_per_span": {
+        "median": 21.186,
+        "minimum": 20.996,
+        "maximum": 21.524
+      },
+      "requests_per_cycle": 3,
+      "paired_cpu_change_percent": {
+        "median": -0.21250807437017127,
+        "minimum": -0.6764747622877154,
+        "maximum": 2.7741966289452247
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 256,
+      "cpu_ns_per_span": {
+        "median": 21.115499999999997,
+        "minimum": 20.976,
+        "maximum": 21.353
+      },
+      "requests_per_cycle": 32,
+      "paired_cpu_change_percent": {
+        "median": -0.6826970541486899,
+        "minimum": -2.762840719451143,
+        "maximum": 0.9573006018672281
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 512,
+      "cpu_ns_per_span": {
+        "median": 20.7155,
+        "minimum": 20.58,
+        "maximum": 20.996
+      },
+      "requests_per_cycle": 16,
+      "paired_cpu_change_percent": {
+        "median": -3.0993949089896224,
+        "minimum": -4.000556276654921,
+        "maximum": -0.9155261915998247
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 1024,
+      "cpu_ns_per_span": {
+        "median": 21.204,
+        "minimum": 20.991,
+        "maximum": 21.304
+      },
+      "requests_per_cycle": 8,
+      "paired_cpu_change_percent": {
+        "median": -0.7046338747678904,
+        "minimum": -2.0767661783793856,
+        "maximum": 0.8672574759490015
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 2048,
+      "cpu_ns_per_span": {
+        "median": 21.028,
+        "minimum": 20.932,
+        "maximum": 21.295
+      },
+      "requests_per_cycle": 4,
+      "paired_cpu_change_percent": {
+        "median": -1.2965065770931539,
+        "minimum": -2.7303912479139547,
+        "maximum": 0.6919103360030432
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 256,
+      "cpu_ns_per_span": {
+        "median": 210.547,
+        "minimum": 210.161,
+        "maximum": 211.592
+      },
+      "requests_per_cycle": 12,
+      "paired_cpu_change_percent": {
+        "median": -6.978667214757384,
+        "minimum": -17.43801458110741,
+        "maximum": -5.811367839397519
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 512,
+      "cpu_ns_per_span": {
+        "median": 211.44799999999998,
+        "minimum": 210.815,
+        "maximum": 212.206
+      },
+      "requests_per_cycle": 6,
+      "paired_cpu_change_percent": {
+        "median": -6.590605029259922,
+        "minimum": -17.129265916661428,
+        "maximum": -5.436153383391639
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 1024,
+      "cpu_ns_per_span": {
+        "median": 225.90949999999998,
+        "minimum": 225.414,
+        "maximum": 227.153
+      },
+      "requests_per_cycle": 3,
+      "paired_cpu_change_percent": {
+        "median": -0.19154005174790156,
+        "minimum": -11.109845389981764,
+        "maximum": 1.2245716450168143
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 2048,
+      "cpu_ns_per_span": {
+        "median": 225.71300000000002,
+        "minimum": 223.837,
+        "maximum": 227.13
+      },
+      "requests_per_cycle": 2,
+      "paired_cpu_change_percent": {
+        "median": -0.5977740495949346,
+        "minimum": -10.781063415247317,
+        "maximum": 0.554812656636039
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 4096,
+      "cap": 256,
+      "cpu_ns_per_span": {
+        "median": 211.247,
+        "minimum": 210.401,
+        "maximum": 212.6
+      },
+      "requests_per_cycle": 16,
+      "paired_cpu_change_percent": {
+        "median": -5.693038661660038,
+        "minimum": -7.061571819069023,
+        "maximum": -4.757638204461967
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 4096,
+      "cap": 512,
+      "cpu_ns_per_span": {
+        "median": 210.8635,
+        "minimum": 209.989,
+        "maximum": 211.729
+      },
+      "requests_per_cycle": 8,
+      "paired_cpu_change_percent": {
+        "median": -5.871760426916289,
+        "minimum": -7.1247201381314245,
+        "maximum": -5.337822129227243
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 4096,
+      "cap": 1024,
+      "cpu_ns_per_span": {
+        "median": 225.93099999999998,
+        "minimum": 224.321,
+        "maximum": 227.023
+      },
+      "requests_per_cycle": 4,
+      "paired_cpu_change_percent": {
+        "median": 0.34708120176651924,
+        "minimum": -0.28438823409920877,
+        "maximum": 1.4999910581755094
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 4096,
+      "cap": 2048,
+      "cpu_ns_per_span": {
+        "median": 224.81099999999998,
+        "minimum": 224.3,
+        "maximum": 226.919
+      },
+      "requests_per_cycle": 2,
+      "paired_cpu_change_percent": {
+        "median": 0.49771798099879083,
+        "minimum": -0.9498743657568198,
+        "maximum": 1.4920633500758118
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 6144,
+      "cap": 256,
+      "cpu_ns_per_span": {
+        "median": 212.099,
+        "minimum": 211.149,
+        "maximum": 212.736
+      },
+      "requests_per_cycle": 24,
+      "paired_cpu_change_percent": {
+        "median": -6.5357896159805025,
+        "minimum": -7.324633593685204,
+        "maximum": -5.123024845800838
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 6144,
+      "cap": 512,
+      "cpu_ns_per_span": {
+        "median": 212.1685,
+        "minimum": 210.882,
+        "maximum": 213.253
+      },
+      "requests_per_cycle": 12,
+      "paired_cpu_change_percent": {
+        "median": -6.480528491989706,
+        "minimum": -7.158730228029819,
+        "maximum": -5.852721734139776
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 6144,
+      "cap": 1024,
+      "cpu_ns_per_span": {
+        "median": 225.03449999999998,
+        "minimum": 223.706,
+        "maximum": 227.717
+      },
+      "requests_per_cycle": 6,
+      "paired_cpu_change_percent": {
+        "median": -0.5701032401689454,
+        "minimum": -1.2379144408635412,
+        "maximum": -0.14182309575735408
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 6144,
+      "cap": 2048,
+      "cpu_ns_per_span": {
+        "median": 226.1255,
+        "minimum": 223.5,
+        "maximum": 227.455
+      },
+      "requests_per_cycle": 3,
+      "paired_cpu_change_percent": {
+        "median": -0.2703646614756472,
+        "minimum": -1.4250225934188787,
+        "maximum": 1.0917702465848667
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 256,
+      "cpu_ns_per_span": {
+        "median": 212.337,
+        "minimum": 210.14,
+        "maximum": 216.063
+      },
+      "requests_per_cycle": 32,
+      "paired_cpu_change_percent": {
+        "median": -5.825535659871616,
+        "minimum": -7.554964809448073,
+        "maximum": -4.433691455059341
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 512,
+      "cpu_ns_per_span": {
+        "median": 213.24200000000002,
+        "minimum": 211.302,
+        "maximum": 217.296
+      },
+      "requests_per_cycle": 16,
+      "paired_cpu_change_percent": {
+        "median": -5.527608041861425,
+        "minimum": -6.3011413288139195,
+        "maximum": -4.4193432942649995
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 1024,
+      "cpu_ns_per_span": {
+        "median": 227.459,
+        "minimum": 224.957,
+        "maximum": 227.936
+      },
+      "requests_per_cycle": 8,
+      "paired_cpu_change_percent": {
+        "median": 0.2913937206958095,
+        "minimum": -0.9944871766936147,
+        "maximum": 1.9665384271271513
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 2048,
+      "cpu_ns_per_span": {
+        "median": 226.154,
+        "minimum": 223.254,
+        "maximum": 229.674
+      },
+      "requests_per_cycle": 4,
+      "paired_cpu_change_percent": {
+        "median": -0.05052193296711249,
+        "minimum": -0.47415375497043,
+        "maximum": 0.4965177554749456
+      }
+    }
+  ],
+  "http": [
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 512,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 6,
+      "client_cpu_ns_per_span": {
+        "median": 1066.9344999999998,
+        "minimum": 1064.637,
+        "maximum": 1079.136
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 222.35399999999998,
+        "minimum": 220.544,
+        "maximum": 224.787
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 844.5005,
+        "minimum": 840.012,
+        "maximum": 858.592
+      },
+      "wall_ns_per_span": {
+        "median": 1565.3184999999999,
+        "minimum": 1560.612,
+        "maximum": 1574.33
+      },
+      "wire_bytes_per_cycle": {
+        "median": 164350.5,
+        "minimum": 164191.0,
+        "maximum": 164549.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 512,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 6,
+      "client_cpu_ns_per_span": {
+        "median": 357.1585,
+        "minimum": 353.704,
+        "maximum": 361.442
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 216.5765,
+        "minimum": 215.406,
+        "maximum": 217.452
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 140.582,
+        "minimum": 138.298,
+        "maximum": 143.99
+      },
+      "wall_ns_per_span": {
+        "median": 421.466,
+        "minimum": 415.158,
+        "maximum": 425.5
+      },
+      "wire_bytes_per_cycle": {
+        "median": 695986.0,
+        "minimum": 695986.0,
+        "maximum": 695986.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 2048,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 2,
+      "client_cpu_ns_per_span": {
+        "median": 999.1645,
+        "minimum": 997.439,
+        "maximum": 1005.849
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 235.6925,
+        "minimum": 233.706,
+        "maximum": 237.894
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 764.1155,
+        "minimum": 762.446,
+        "maximum": 767.955
+      },
+      "wall_ns_per_span": {
+        "median": 1388.8315,
+        "minimum": 1381.959,
+        "maximum": 1394.8
+      },
+      "wire_bytes_per_cycle": {
+        "median": 164166.0,
+        "minimum": 164050.0,
+        "maximum": 164315.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 2048,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 2,
+      "client_cpu_ns_per_span": {
+        "median": 307.8465,
+        "minimum": 302.383,
+        "maximum": 309.62
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 229.933,
+        "minimum": 227.344,
+        "maximum": 232.633
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 76.01650000000001,
+        "minimum": 75.039,
+        "maximum": 80.782
+      },
+      "wall_ns_per_span": {
+        "median": 327.885,
+        "minimum": 324.927,
+        "maximum": 330.688
+      },
+      "wire_bytes_per_cycle": {
+        "median": 695722.0,
+        "minimum": 695722.0,
+        "maximum": 695722.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 18446744073709551615,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 1,
+      "client_cpu_ns_per_span": {
+        "median": 982.9480000000001,
+        "minimum": 977.472,
+        "maximum": 993.047
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 239.8895,
+        "minimum": 237.078,
+        "maximum": 245.093
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 743.0585000000001,
+        "minimum": 740.394,
+        "maximum": 747.954
+      },
+      "wall_ns_per_span": {
+        "median": 1384.733,
+        "minimum": 1364.8,
+        "maximum": 1410.266
+      },
+      "wire_bytes_per_cycle": {
+        "median": 163924.0,
+        "minimum": 163824.0,
+        "maximum": 164012.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 3072,
+      "cap": 18446744073709551615,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 1,
+      "client_cpu_ns_per_span": {
+        "median": 294.161,
+        "minimum": 292.056,
+        "maximum": 295.1
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 231.925,
+        "minimum": 231.14,
+        "maximum": 232.715
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 61.688,
+        "minimum": 60.437,
+        "maximum": 63.96
+      },
+      "wall_ns_per_span": {
+        "median": 310.782,
+        "minimum": 304.818,
+        "maximum": 316.557
+      },
+      "wire_bytes_per_cycle": {
+        "median": 695656.0,
+        "minimum": 695656.0,
+        "maximum": 695656.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 512,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 16,
+      "client_cpu_ns_per_span": {
+        "median": 1070.4470000000001,
+        "minimum": 1064.846,
+        "maximum": 1080.367
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 224.2025,
+        "minimum": 222.936,
+        "maximum": 225.726
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 846.7965,
+        "minimum": 840.806,
+        "maximum": 854.64
+      },
+      "wall_ns_per_span": {
+        "median": 1569.63,
+        "minimum": 1567.798,
+        "maximum": 1587.65
+      },
+      "wire_bytes_per_cycle": {
+        "median": 437931.0,
+        "minimum": 437847.0,
+        "maximum": 438091.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 512,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 16,
+      "client_cpu_ns_per_span": {
+        "median": 362.3585,
+        "minimum": 359.271,
+        "maximum": 362.833
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 219.05450000000002,
+        "minimum": 217.822,
+        "maximum": 220.092
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 142.7595,
+        "minimum": 141.449,
+        "maximum": 143.831
+      },
+      "wall_ns_per_span": {
+        "median": 430.46450000000004,
+        "minimum": 428.31,
+        "maximum": 435.634
+      },
+      "wire_bytes_per_cycle": {
+        "median": 1869126.0,
+        "minimum": 1869126.0,
+        "maximum": 1869126.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 512,
+      "compression": "plain",
+      "ack_delay_us": 1000,
+      "requests_per_cycle": 16,
+      "client_cpu_ns_per_span": {
+        "median": 385.366,
+        "minimum": 384.561,
+        "maximum": 388.754
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 225.2305,
+        "minimum": 224.142,
+        "maximum": 226.766
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 160.807,
+        "minimum": 158.257,
+        "maximum": 162.808
+      },
+      "wall_ns_per_span": {
+        "median": 2552.411,
+        "minimum": 2548.645,
+        "maximum": 2563.072
+      },
+      "wire_bytes_per_cycle": {
+        "median": 1869126.0,
+        "minimum": 1869126.0,
+        "maximum": 1869126.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 2048,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 4,
+      "client_cpu_ns_per_span": {
+        "median": 1001.2885,
+        "minimum": 996.959,
+        "maximum": 1017.659
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 239.5795,
+        "minimum": 238.297,
+        "maximum": 243.976
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 762.1325,
+        "minimum": 757.814,
+        "maximum": 773.683
+      },
+      "wall_ns_per_span": {
+        "median": 1398.499,
+        "minimum": 1389.757,
+        "maximum": 1415.561
+      },
+      "wire_bytes_per_cycle": {
+        "median": 437216.5,
+        "minimum": 437134.0,
+        "maximum": 437338.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 2048,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 4,
+      "client_cpu_ns_per_span": {
+        "median": 308.1875,
+        "minimum": 305.35,
+        "maximum": 309.678
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 233.096,
+        "minimum": 231.528,
+        "maximum": 233.593
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 74.785,
+        "minimum": 73.822,
+        "maximum": 76.699
+      },
+      "wall_ns_per_span": {
+        "median": 327.271,
+        "minimum": 324.52,
+        "maximum": 328.665
+      },
+      "wire_bytes_per_cycle": {
+        "median": 1868334.0,
+        "minimum": 1868334.0,
+        "maximum": 1868334.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 2048,
+      "compression": "plain",
+      "ack_delay_us": 1000,
+      "requests_per_cycle": 4,
+      "client_cpu_ns_per_span": {
+        "median": 322.451,
+        "minimum": 315.22,
+        "maximum": 326.02
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 240.3015,
+        "minimum": 237.462,
+        "maximum": 242.486
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 82.149,
+        "minimum": 77.758,
+        "maximum": 83.534
+      },
+      "wall_ns_per_span": {
+        "median": 864.832,
+        "minimum": 856.217,
+        "maximum": 869.898
+      },
+      "wire_bytes_per_cycle": {
+        "median": 1868334.0,
+        "minimum": 1868334.0,
+        "maximum": 1868334.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 18446744073709551615,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 1,
+      "client_cpu_ns_per_span": {
+        "median": 988.759,
+        "minimum": 986.044,
+        "maximum": 996.359
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 256.9705,
+        "minimum": 253.811,
+        "maximum": 259.418
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 731.1745,
+        "minimum": 729.565,
+        "maximum": 740.837
+      },
+      "wall_ns_per_span": {
+        "median": 1345.525,
+        "minimum": 1341.933,
+        "maximum": 1348.456
+      },
+      "wire_bytes_per_cycle": {
+        "median": 436722.0,
+        "minimum": 436496.0,
+        "maximum": 436846.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 18446744073709551615,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 1,
+      "client_cpu_ns_per_span": {
+        "median": 286.441,
+        "minimum": 284.363,
+        "maximum": 292.707
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 233.56,
+        "minimum": 232.633,
+        "maximum": 234.518
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 53.2685,
+        "minimum": 50.956,
+        "maximum": 58.189
+      },
+      "wall_ns_per_span": {
+        "median": 298.55999999999995,
+        "minimum": 296.439,
+        "maximum": 304.305
+      },
+      "wire_bytes_per_cycle": {
+        "median": 1868136.0,
+        "minimum": 1868136.0,
+        "maximum": 1868136.0
+      }
+    },
+    {
+      "workload": "attributes",
+      "batch": 8192,
+      "cap": 18446744073709551615,
+      "compression": "plain",
+      "ack_delay_us": 1000,
+      "requests_per_cycle": 1,
+      "client_cpu_ns_per_span": {
+        "median": 293.78700000000003,
+        "minimum": 288.478,
+        "maximum": 299.539
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 236.4475,
+        "minimum": 235.628,
+        "maximum": 241.706
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 57.2505,
+        "minimum": 52.85,
+        "maximum": 58.01
+      },
+      "wall_ns_per_span": {
+        "median": 437.10699999999997,
+        "minimum": 431.495,
+        "maximum": 443.272
+      },
+      "wire_bytes_per_cycle": {
+        "median": 1868136.0,
+        "minimum": 1868136.0,
+        "maximum": 1868136.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 512,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 6,
+      "client_cpu_ns_per_span": {
+        "median": 372.2185,
+        "minimum": 370.416,
+        "maximum": 374.729
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 21.032,
+        "minimum": 20.893,
+        "maximum": 21.806
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 350.802,
+        "minimum": 349.524,
+        "maximum": 353.692
+      },
+      "wall_ns_per_span": {
+        "median": 559.567,
+        "minimum": 558.18,
+        "maximum": 564.23
+      },
+      "wire_bytes_per_cycle": {
+        "median": 86156.0,
+        "minimum": 86142.0,
+        "maximum": 86195.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 512,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 6,
+      "client_cpu_ns_per_span": {
+        "median": 124.5195,
+        "minimum": 123.372,
+        "maximum": 130.454
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 21.0105,
+        "minimum": 20.937,
+        "maximum": 21.627
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 103.21799999999999,
+        "minimum": 102.327,
+        "maximum": 109.517
+      },
+      "wall_ns_per_span": {
+        "median": 175.473,
+        "minimum": 174.126,
+        "maximum": 179.14
+      },
+      "wire_bytes_per_cycle": {
+        "median": 187788.0,
+        "minimum": 187788.0,
+        "maximum": 187788.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 2048,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 2,
+      "client_cpu_ns_per_span": {
+        "median": 302.0955,
+        "minimum": 298.714,
+        "maximum": 306.231
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 21.8935,
+        "minimum": 21.654,
+        "maximum": 22.231
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 280.152,
+        "minimum": 276.83,
+        "maximum": 284.328
+      },
+      "wall_ns_per_span": {
+        "median": 454.65099999999995,
+        "minimum": 450.607,
+        "maximum": 456.934
+      },
+      "wire_bytes_per_cycle": {
+        "median": 85681.0,
+        "minimum": 85659.0,
+        "maximum": 85752.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 2048,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 2,
+      "client_cpu_ns_per_span": {
+        "median": 65.577,
+        "minimum": 64.136,
+        "maximum": 65.985
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 21.490000000000002,
+        "minimum": 21.006,
+        "maximum": 22.069
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 43.977000000000004,
+        "minimum": 42.288,
+        "maximum": 44.979
+      },
+      "wall_ns_per_span": {
+        "median": 82.5855,
+        "minimum": 82.003,
+        "maximum": 83.183
+      },
+      "wire_bytes_per_cycle": {
+        "median": 187524.0,
+        "minimum": 187524.0,
+        "maximum": 187524.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 18446744073709551615,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 1,
+      "client_cpu_ns_per_span": {
+        "median": 288.062,
+        "minimum": 286.092,
+        "maximum": 297.93
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 21.762999999999998,
+        "minimum": 21.473,
+        "maximum": 23.49
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 266.3405,
+        "minimum": 264.537,
+        "maximum": 274.44
+      },
+      "wall_ns_per_span": {
+        "median": 442.9645,
+        "minimum": 440.733,
+        "maximum": 449.454
+      },
+      "wire_bytes_per_cycle": {
+        "median": 85627.5,
+        "minimum": 85614.0,
+        "maximum": 85654.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 3072,
+      "cap": 18446744073709551615,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 1,
+      "client_cpu_ns_per_span": {
+        "median": 49.894000000000005,
+        "minimum": 49.699,
+        "maximum": 50.263
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 21.984,
+        "minimum": 21.504,
+        "maximum": 22.191
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 28.0225,
+        "minimum": 27.508,
+        "maximum": 28.535
+      },
+      "wall_ns_per_span": {
+        "median": 57.182500000000005,
+        "minimum": 56.758,
+        "maximum": 72.407
+      },
+      "wire_bytes_per_cycle": {
+        "median": 187458.0,
+        "minimum": 187458.0,
+        "maximum": 187458.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 512,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 16,
+      "client_cpu_ns_per_span": {
+        "median": 381.217,
+        "minimum": 374.899,
+        "maximum": 384.096
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 23.015,
+        "minimum": 21.662,
+        "maximum": 23.737
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 358.202,
+        "minimum": 353.237,
+        "maximum": 360.359
+      },
+      "wall_ns_per_span": {
+        "median": 570.986,
+        "minimum": 562.433,
+        "maximum": 574.893
+      },
+      "wire_bytes_per_cycle": {
+        "median": 229755.5,
+        "minimum": 229677.0,
+        "maximum": 229806.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 512,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 16,
+      "client_cpu_ns_per_span": {
+        "median": 132.538,
+        "minimum": 129.155,
+        "maximum": 195.522
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 21.2135,
+        "minimum": 20.939,
+        "maximum": 32.005
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 111.443,
+        "minimum": 107.978,
+        "maximum": 163.517
+      },
+      "wall_ns_per_span": {
+        "median": 186.19650000000001,
+        "minimum": 181.612,
+        "maximum": 247.555
+      },
+      "wire_bytes_per_cycle": {
+        "median": 500768.0,
+        "minimum": 500768.0,
+        "maximum": 500768.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 2048,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 4,
+      "client_cpu_ns_per_span": {
+        "median": 297.507,
+        "minimum": 295.958,
+        "maximum": 298.917
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 22.272,
+        "minimum": 21.612,
+        "maximum": 23.573
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 275.12350000000004,
+        "minimum": 273.658,
+        "maximum": 276.255
+      },
+      "wall_ns_per_span": {
+        "median": 449.105,
+        "minimum": 446.022,
+        "maximum": 452.103
+      },
+      "wire_bytes_per_cycle": {
+        "median": 228358.5,
+        "minimum": 228316.0,
+        "maximum": 228413.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 2048,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 4,
+      "client_cpu_ns_per_span": {
+        "median": 54.716,
+        "minimum": 54.523,
+        "maximum": 56.718
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 21.1385,
+        "minimum": 21.051,
+        "maximum": 21.273
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 33.577,
+        "minimum": 33.25,
+        "maximum": 35.667
+      },
+      "wall_ns_per_span": {
+        "median": 70.0845,
+        "minimum": 66.782,
+        "maximum": 72.685
+      },
+      "wire_bytes_per_cycle": {
+        "median": 499976.0,
+        "minimum": 499976.0,
+        "maximum": 499976.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 18446744073709551615,
+      "compression": "gzip",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 1,
+      "client_cpu_ns_per_span": {
+        "median": 273.5065,
+        "minimum": 271.818,
+        "maximum": 299.597
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 22.631999999999998,
+        "minimum": 22.139,
+        "maximum": 26.745
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 250.8745,
+        "minimum": 249.679,
+        "maximum": 272.853
+      },
+      "wall_ns_per_span": {
+        "median": 416.145,
+        "minimum": 414.403,
+        "maximum": 442.574
+      },
+      "wire_bytes_per_cycle": {
+        "median": 228171.0,
+        "minimum": 228142.0,
+        "maximum": 228215.0
+      }
+    },
+    {
+      "workload": "static",
+      "batch": 8192,
+      "cap": 18446744073709551615,
+      "compression": "plain",
+      "ack_delay_us": 0,
+      "requests_per_cycle": 1,
+      "client_cpu_ns_per_span": {
+        "median": 38.491,
+        "minimum": 38.379,
+        "maximum": 39.969
+      },
+      "encode_cpu_ns_per_span": {
+        "median": 21.102,
+        "minimum": 21.017,
+        "maximum": 21.488
+      },
+      "transport_cpu_ns_per_span": {
+        "median": 17.371499999999997,
+        "minimum": 16.927,
+        "maximum": 18.951
+      },
+      "wall_ns_per_span": {
+        "median": 42.8095,
+        "minimum": 41.967,
+        "maximum": 44.2
+      },
+      "wire_bytes_per_cycle": {
+        "median": 499778.0,
+        "minimum": 499778.0,
+        "maximum": 499778.0
+      }
+    }
+  ]
+}
