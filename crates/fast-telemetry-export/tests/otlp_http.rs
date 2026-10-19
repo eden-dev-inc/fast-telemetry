@@ -249,15 +249,43 @@ async fn check_chunked_native_export(final_export: bool, middle_response: (Strin
                 "duplicate span across requests"
             );
             assert!(span.end_time_unix_nano >= span.start_time_unix_nano);
+            assert_eq!(span.trace_id.len(), 16);
+            assert_eq!(span.span_id.len(), 8);
             if span.name != "partial" {
+                let suffix = span.name.strip_prefix("worker-").expect("worker name");
+                let (worker, index) = suffix.split_once('-').expect("worker/index");
+                let worker = worker.parse::<i64>().expect("worker number");
+                let index = index.parse::<i64>().expect("span index");
+                assert!((0..3).contains(&worker));
+                assert!((0..384).contains(&index));
                 assert_eq!(span.attributes.len(), 2);
+                for (attribute, key, value) in [
+                    (&span.attributes[0], "index", index),
+                    (&span.attributes[1], "worker", worker),
+                ] {
+                    assert_eq!(attribute.key, key);
+                    assert_eq!(
+                        attribute.value.as_ref().and_then(|v| v.value.as_ref()),
+                        Some(&pb::any_value::Value::IntValue(value)),
+                    );
+                }
                 assert_eq!(span.events.len(), 1);
+                assert_eq!(span.events[0].name, "checkpoint");
                 assert_eq!(span.events[0].attributes.len(), 1);
-                assert!(
-                    span.status
+                let event_attribute = &span.events[0].attributes[0];
+                assert_eq!(event_attribute.key, "value");
+                assert_eq!(
+                    event_attribute
+                        .value
                         .as_ref()
-                        .is_some_and(|s| s.message.starts_with("error-"))
+                        .and_then(|v| v.value.as_ref()),
+                    Some(&pb::any_value::Value::StringValue(format!(
+                        "event-{suffix}"
+                    ))),
                 );
+                let status = span.status.as_ref().expect("span status");
+                assert_eq!(status.code, 2);
+                assert_eq!(status.message, format!("error-{suffix}"));
             }
         }
     }

@@ -1,0 +1,5 @@
+fixture,verified_spans,requests_per_cycle,cpu_ns_per_span,encode_cpu_ns_per_span,cleanup_cpu_ns_per_span
+profile-static-8192-single,16777216,1,20.984,20.886,0.098
+profile-static-8192-chunks,16777216,16,38.176,34.459,3.717
+profile-attributes-8192-single,16777216,1,212.558,212.416,0.142
+profile-attributes-8192-chunks,16777216,16,287.477,271.665,15.811

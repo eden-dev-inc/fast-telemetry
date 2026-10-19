@@ -1,0 +1,17 @@
+[package]
+name = "span-export-chunk-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[dependencies]
+fast-telemetry = { package = "fast-telemetry-core-diagnostic", path = "../../batch-knee-20261019/core-tests", default-features = false, features = ["otlp"] }
+libc = "0.2"
+prost = "0.13"
+
+[profile.release]
+debug = 1
+

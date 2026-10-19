@@ -1,0 +1,58 @@
+{
+  "source_commit": "f850b2b548633e3d773f0f4c17faec90e4261906",
+  "measured_binary_sha256": "e9b5cddf0e2149342e90f44fcbad69fb4d4ad5b8946d59c8629539fdfd270035",
+  "profiled_binary_sha256": "f49e944da3b2a3c0f108d6e81a9dbabecf86cb31f9fe6f3092245f459c404c23",
+  "actual_manifest": "[package]\nname = \"span-export-chunk-probe\"\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\nlicense = \"Apache-2.0\"\n\n[workspace]\n\n[dependencies]\nfast-telemetry = { package = \"fast-telemetry-core-diagnostic\", path = \"../../batch-knee-20261019/core-tests\", default-features = false, features = [\"otlp\"] }\nlibc = \"0.2\"\nprost = \"0.13\"\n\n[profile.release]\ndebug = 1\n\n",
+  "actual_lock_sha256": "f9e75da621ed40e28f48d842071218ddb02e78fc91923f2b5dc1222b5c14a123",
+  "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)\nbinary: rustc\ncommit-hash: 01f6ddf7588f42ae2d7eb0a2f21d44e8e96674cf\ncommit-date: 2026-02-11\nhost: x86_64-unknown-linux-gnu\nrelease: 1.93.1\nLLVM version: 21.1.8\n",
+  "rustflags": "-Dwarnings",
+  "environment": {
+    "affinity_cpu": 0,
+    "original_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31
+    ],
+    "os": {
+      "system": "Linux",
+      "release": "6.8.0-147-generic",
+      "version": "#147-Ubuntu SMP PREEMPT_DYNAMIC Thu Sep 24 11:33:16 UTC 2026",
+      "machine": "x86_64"
+    }
+  },
+  "source_hashes": {
+    "crates/fast-telemetry/src/export/otlp/traces.rs": "af5f246c594cf80c64976d63fa4633e0cceefab6d8c82c79f985ae819979243f",
+    "crates/fast-telemetry/src/export/otlp.rs": "2ecc7b8aec3c763cc334d2fd8cde2c401ed3d855a58d73c33e77704a63cbd84e",
+    "crates/fast-telemetry/src/span/buckets.rs": "46bbfdc5aecae83ff7df88f918cc6d30e99e7cae3c9a816b7c53ca9484bd2b4d",
+    "crates/fast-telemetry/src/span/collector.rs": "99d5c3e84c76a1984fcd7dc63c761a79bdb610f83c52ccf42e768b87babcc247"
+  }
+}

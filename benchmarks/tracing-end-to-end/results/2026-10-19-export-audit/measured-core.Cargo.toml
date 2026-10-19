@@ -1,0 +1,127 @@
+[package]
+autobins = false
+autotests = false
+autobenches = false
+name = "fast-telemetry-core-diagnostic"
+version = "0.9.0"
+edition = "2024"
+authors.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "High-performance, cache-friendly telemetry primitives and export formats for Rust"
+documentation = "https://docs.rs/fast-telemetry"
+keywords = ["telemetry", "metrics", "tracing", "otlp", "performance"]
+readme = "README.md"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["macros"]
+macros = ["dep:fast-telemetry-macros"]
+runtime = []
+otlp = ["dep:opentelemetry-proto", "dep:prost", "opentelemetry-proto/gen-tonic", "opentelemetry-proto/gen-tonic-messages", "opentelemetry-proto/metrics", "opentelemetry-proto/trace"]
+otlp-logs = ["otlp", "opentelemetry-proto/logs"]
+clickhouse = ["dep:indexmap", "dep:klickhouse"]
+shuttle-tests = ["dep:shuttle"]
+bench-tools = ["dep:metrics", "dep:metrics-util", "dep:opentelemetry", "dep:opentelemetry_sdk"]
+eviction = []
+
+[dependencies]
+crossbeam-utils = { workspace = true }
+fast-telemetry-macros = { workspace = true, optional = true }
+indexmap = { workspace = true, optional = true }
+itoa = { workspace = true }
+klickhouse = { workspace = true, optional = true }
+libc = "0.2"
+metrics = { workspace = true, optional = true }
+metrics-util = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-proto = { version = "0.30", default-features = false, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true, features = ["testing"] }
+parking_lot = { workspace = true }
+prost = { version = "0.13", optional = true }
+ryu = { workspace = true }
+shuttle = { workspace = true, optional = true }
+uuid = { workspace = true }
+
+[lib]
+name = "fast_telemetry"
+path = "/home/dtietjen/fast-telemetry-eden-2515/crates/fast-telemetry/src/lib.rs"
+
+[workspace]
+resolver = "3"
+
+[workspace.package]
+authors = [
+    "Ryan Daum <ryan.daum@gmail.com>",
+    "Devon Tietjen <devon@eden.dev>",
+    "Mitul Dhawan <mitul@eden.dev>",
+]
+homepage = "https://github.com/eden-dev-inc/fast-telemetry"
+license = "Apache-2.0"
+repository = "https://github.com/eden-dev-inc/fast-telemetry"
+rust-version = "1.93.0"
+
+[workspace.dependencies]
+# Local crates
+fast-telemetry = { path = "crates/fast-telemetry", version = "0.9.0" }
+fast-telemetry-macros = { path = "/home/dtietjen/fast-telemetry-eden-2515/crates/fast-telemetry-macros", version = "0.9.0" }
+fast-telemetry-export = { path = "crates/fast-telemetry-export", version = "0.9.0" }
+
+# --- Core: fast-telemetry runtime dependencies ---
+crossbeam-utils = "0.8"
+itoa = "1"
+parking_lot = "0.12"
+ryu = "1"
+uuid = { version = "1", features = ["v4"] }
+
+# --- Macros: fast-telemetry-macros proc-macro dependencies ---
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["extra-traits", "full", "parsing"] }
+
+# --- Export: fast-telemetry-export runtime dependencies ---
+eden_logger = { version = "0.1.1", default-features = false }
+compio = { version = "0.18", default-features = false }
+futures-util = "0.3"
+memchr = "2"                                                              # dogstatsd feature
+monoio = "0.2.4"
+tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time", "macros"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# --- OTLP: fast-telemetry + fast-telemetry-export otlp feature ---
+flate2 = "1"
+httpdate = "1"
+prost = "0.13"                                                            # pinned by opentelemetry-proto 0.30
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+
+# --- ClickHouse: fast-telemetry-export clickhouse feature ---
+indexmap = "2"
+klickhouse = { version = "0.14", default-features = false, features = ["derive", "compression"] }
+
+# --- Dev/test/bench only ---
+criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }
+hegeltest = "=0.28.2"
+metrics = "0.24.3"
+metrics-util = { version = "0.20.1", features = ["registry", "storage"] }
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+shuttle = "0.8"
+statsd-parser = "0.3"
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["clickhouse"] }
+
+
+[profile.release]
+debug = 1
+
+[[test]]
+name = "span_buckets"
+path = "/home/dtietjen/fast-telemetry-eden-2515/crates/fast-telemetry/tests/span_buckets.rs"
+
+[[test]]
+name="span_batch_config"
+path="/home/dtietjen/fast-telemetry-eden-2515/crates/fast-telemetry/tests/span_batch_config.rs"
