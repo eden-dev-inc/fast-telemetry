@@ -1,8 +1,13 @@
-# Publishing 0.9
+# Publishing 0.10
 
 The release consists of `fast-telemetry-macros`, `fast-telemetry`,
 `fast-telemetry-export`, and the new `fast-telemetry-tracing` companion. They
-share version 0.9.0 and require Rust 1.93 or newer. The demo is not publishable.
+share version 0.10.0 and require Rust 1.93 or newer. The demo is not publishable.
+
+Version [0.9.0 was published on 2026-07-25](https://docs.rs/crate/fast-telemetry/0.9.0).
+Version 0.10.0 advances the minor version for the native span lifetime and
+entry-guard API changes, and adds the tracing companion. Keep all four crate
+versions and workspace dependency constraints aligned.
 
 ## Verification
 

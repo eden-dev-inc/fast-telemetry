@@ -7,7 +7,7 @@ batching, compression, backoff, and graceful shutdown.
 
 ```toml
 [dependencies]
-fast-telemetry-export = "0.9"
+fast-telemetry-export = "0.10"
 ```
 
 ### DogStatsD
@@ -111,8 +111,8 @@ share one transport policy across logs, metrics, and traces:
 
 ```toml
 [dependencies]
-fast-telemetry = { version = "0.9", features = ["otlp-logs"] }
-fast-telemetry-export = { version = "0.9", default-features = false, features = ["otlp-logs"] }
+fast-telemetry = { version = "0.10", features = ["otlp-logs"] }
+fast-telemetry-export = { version = "0.10", default-features = false, features = ["otlp-logs"] }
 ```
 
 ```rust,no_run
@@ -296,7 +296,7 @@ sweep and then sum each dynamic metric's `evict_stale(...)` result.
 enable the export crate's `monoio` feature for monoio-native loops:
 
 ```toml
-fast-telemetry-export = { version = "0.8", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
+fast-telemetry-export = { version = "0.10", default-features = false, features = ["dogstatsd", "otlp", "monoio"] }
 ```
 
 Use `dogstatsd::run_monoio(...)`, `otlp::run_monoio(...)`, and

@@ -9,8 +9,8 @@ The crate uses edition 2024 and Rust 1.93, like the workspace.
 
 ```toml
 [dependencies]
-fast-telemetry = "0.9"
-fast-telemetry-tracing = "0.9"
+fast-telemetry = "0.10"
+fast-telemetry-tracing = "0.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["registry"] }
 ```
@@ -219,8 +219,8 @@ collector.
 For the existing hosted trace exporter, enable these dependencies:
 
 ```toml
-fast-telemetry-tracing = { version = "0.9", features = ["otlp"] }
-fast-telemetry-export = { version = "0.9", default-features = false, features = ["otlp-logs"] }
+fast-telemetry-tracing = { version = "0.10", features = ["otlp"] }
+fast-telemetry-export = { version = "0.10", default-features = false, features = ["otlp-logs"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 ```
 

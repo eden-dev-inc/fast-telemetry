@@ -20,15 +20,15 @@ and custom in-process visitors.
 
 ```toml
 [dependencies]
-fast-telemetry = "0.9"
-fast-telemetry-export = "0.9"
+fast-telemetry = "0.10"
+fast-telemetry-export = "0.10"
 ```
 
 Enable the shared runtime when a parent service should own telemetry and pass it
 to child crates:
 
 ```toml
-fast-telemetry = { version = "0.9", features = ["runtime"] }
+fast-telemetry = { version = "0.10", features = ["runtime"] }
 ```
 
 ## Why

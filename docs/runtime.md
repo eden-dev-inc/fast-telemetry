@@ -22,7 +22,7 @@ See [native publication and export limits](metrics-and-spans.md#spans).
 
 ```toml
 [dependencies]
-fast-telemetry = { version = "0.9", features = ["runtime"] }
+fast-telemetry = { version = "0.10", features = ["runtime"] }
 ```
 
 ```rust

@@ -2,18 +2,20 @@
 
 ## Unreleased
 
-Planned release: `0.9.0`.
+Planned release: `0.10.0`.
 
 Planned crates: `fast-telemetry`, `fast-telemetry-macros`,
 `fast-telemetry-export`, `fast-telemetry-tracing`.
 
-Why this is a 0.9.0 minor release:
+Why this is a 0.10.0 minor release:
 
-- it adds a public OTLP Logs model and acknowledged OTLP/HTTP transport API.
-- it moves Tokio metrics and span export onto the same reusable, non-logging
-  HTTP client.
-- it raises the workspace MSRV to Rust 1.93, which is required by the current
-  `compio-buf` dependency used by the optional Compio exporter.
+- Native spans now carry a collector lifetime and `Span::enter()` returns a
+  scoped, thread-bound guard. These API changes require a minor version bump
+  before 1.0; migrate stored spans and entry scopes as described below.
+- It adds the optional tracing integration crate and configurable native
+  producer batching, alongside the direct OTLP encoding and export fixes.
+- All four crates stay on the same release line. The Rust 1.93 minimum is
+  unchanged from the published 0.9.0 release.
 
 Highlights:
 
@@ -37,9 +39,9 @@ Highlights:
   completions use one bounded, shared shutdown writer per collector and remain
   drainable; its queue rejection is included in `dropped_count()`.
 - Added per-producer double buffers and reusable `SpanBatch` drains. Automatic
-  native publication changes from 64 to 384 spans by default; explicit local flush and
-  thread-exit publication remain available. Native rejection counts now report
-  actual queue loss, and adaptive sampling recovers after buffers are drained.
+  native publication changes from 64 to 384 spans by default; explicit local
+  flush and thread-exit publication remain available. Native rejection counts
+  now report actual queue loss, and adaptive sampling recovers after draining.
 - Added `SpanCollectorConfig::with_producer_batch_size` and
   `RuntimeConfig::with_span_config` to select 1–1,024 completed spans per native
   producer publication. The 384-span default follows the measured 256–384
@@ -56,6 +58,32 @@ Highlights:
   rejected request. Requests are attempted once without replay. Positive request
   limits and export intervals are validated before draining. Span backoff jitter
   now varies in both directions and respects its five-minute maximum.
+
+Install:
+
+```toml
+[dependencies]
+fast-telemetry = "0.10"
+fast-telemetry-export = "0.10"
+# Optional integration for existing tracing instrumentation:
+fast-telemetry-tracing = "0.10"
+```
+
+## 0.9.0 - 2026-07-25
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`,
+`fast-telemetry-export`.
+
+Why this is a 0.9.0 minor release:
+
+- it adds a public OTLP Logs model and acknowledged OTLP/HTTP transport API.
+- it moves Tokio metrics and span export onto the same reusable, non-logging
+  HTTP client.
+- it raises the workspace MSRV to Rust 1.93, which is required by the current
+  `compio-buf` dependency used by the optional Compio exporter.
+
+Highlights:
+
 - Added the `otlp-logs` feature and
   `fast_telemetry::otlp::build_log_export_request`.
 - Added `OtlpHttpConfig`, `OtlpTlsConfig`, and `OtlpHttpClient` with custom
