@@ -87,7 +87,7 @@ fn decode_hex<const N: usize>(encoded: &[u8]) -> Option<[u8; N]> {
     }
     let mut decoded = [0; N];
     let mut invalid = 0;
-    for (slot, pair) in decoded.iter_mut().zip(encoded.chunks_exact(2)) {
+    for (slot, pair) in decoded.iter_mut().zip(encoded.as_chunks::<2>().0) {
         let hi = decode_digit(pair[0]);
         let lo = decode_digit(pair[1]);
         invalid |= hi | lo;
