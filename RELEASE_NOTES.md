@@ -1,10 +1,8 @@
 # Release Notes
 
-## Unreleased
+## 0.10.0 - 2026-10-20
 
-Planned release: `0.10.0`.
-
-Planned crates: `fast-telemetry`, `fast-telemetry-macros`,
+Published crates: `fast-telemetry`, `fast-telemetry-macros`,
 `fast-telemetry-export`, `fast-telemetry-tracing`.
 
 Why this is a 0.10.0 minor release:
