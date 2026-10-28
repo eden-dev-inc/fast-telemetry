@@ -1,3 +1,4 @@
+// Modified for EDEN-3278 (2026-10-28): upper-inclusive distribution buckets.
 //! Runtime-labeled distribution for dynamic dimensions.
 //!
 //! Uses base-2 exponential histogram buckets per label set, matching the
@@ -8,7 +9,7 @@ use super::cache::{CacheValue, LabelCache, SERIES_CACHE_SIZE};
 #[cfg(feature = "eviction")]
 use super::current_cycle;
 use super::{DISTRIBUTION_IDS, DynamicIndexMap, DynamicLabelSet, dynamic_index_map};
-use crate::exp_buckets::{ExpBuckets, ExpBucketsSnapshot};
+use crate::exp_buckets::{ExpBuckets, ExpBucketsSnapshot, POSITIVE_BUCKETS};
 use crossbeam_utils::CachePadded;
 use parking_lot::{Mutex, RwLock};
 use std::cell::RefCell;
@@ -87,7 +88,7 @@ impl DistributionSeries {
     }
 
     fn buckets_snapshot(&self) -> ExpBucketsSnapshot {
-        let mut positive = [0u64; 64];
+        let mut positive = [0u64; POSITIVE_BUCKETS];
         let mut zero_count = 0u64;
         let mut sum = 0u64;
         let mut count = 0u64;
@@ -527,7 +528,8 @@ mod tests {
         let (_, count, sum, bucket_snap) = &snap[0];
         assert_eq!(*count, 2);
         assert_eq!(*sum, 300);
-        // Both 100 and 200 land in bucket 6 and 7 respectively
-        assert!(bucket_snap.positive[6] > 0 || bucket_snap.positive[7] > 0);
+        // Values 100 and 200 occupy positive slots 7 and 8 respectively.
+        assert_eq!(bucket_snap.positive[7], 1);
+        assert_eq!(bucket_snap.positive[8], 1);
     }
 }

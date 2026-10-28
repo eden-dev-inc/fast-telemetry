@@ -1,3 +1,4 @@
+// Modified for EDEN-3278 (2026-10-28): upper-inclusive distribution buckets.
 use std::time::Duration;
 
 use fast_telemetry::{
@@ -243,7 +244,7 @@ fn visit_metrics_emits_structured_observations() {
         count: 2,
         sum: 7,
         min: Some(0),
-        max: Some(7),
+        max: Some(8),
         zero_count: 1,
         positive_buckets: vec![(2, 1)],
     }));
@@ -294,7 +295,7 @@ fn visit_metrics_emits_structured_observations() {
         count: 2,
         sum: 9,
         min: Some(0),
-        max: Some(15),
+        max: Some(16),
         zero_count: 1,
         positive_buckets: vec![(3, 1)],
     }));
@@ -766,8 +767,8 @@ fn visit_metrics_covers_all_generated_visitor_branches() {
             labels: vec![("__ft_overflow".to_string(), "true".to_string())],
             count: 1,
             sum: 9,
-            min: Some(8),
-            max: Some(15),
+            min: Some(9),
+            max: Some(16),
             zero_count: 0,
             positive_buckets: vec![(3, 1)],
         },
@@ -807,5 +808,29 @@ fn visit_metrics_covers_all_generated_visitor_branches() {
                 overflow_count: 1,
             },
         );
+    }
+}
+
+#[test]
+fn distribution_visitor_uses_upper_inclusive_scale_zero_indices() {
+    use fast_telemetry::DistributionSnapshot;
+
+    let dist = Distribution::new(4);
+    for value in [0, 1, 2, 3, 4, 200] {
+        dist.record(value);
+    }
+    let snapshot = dist.buckets_snapshot();
+    for view in [
+        &dist as &dyn DistributionSnapshot,
+        &snapshot as &dyn DistributionSnapshot,
+    ] {
+        let mut buckets = Vec::new();
+        view.visit_positive_buckets(&mut |index, count| buckets.push((index, count)));
+        assert_eq!(buckets, vec![(-1, 1), (0, 1), (1, 2), (7, 1)]);
+        assert_eq!(view.count(), 6);
+        assert_eq!(view.sum(), 210);
+        assert_eq!(view.zero_count(), 1);
+        assert_eq!(view.min(), Some(0));
+        assert_eq!(view.max(), Some(256));
     }
 }
