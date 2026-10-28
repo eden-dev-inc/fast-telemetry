@@ -1,3 +1,4 @@
+// Modified for EDEN-3278 (2026-10-28): upper-inclusive distribution buckets.
 //! Structured visitor API for custom metric exporters.
 
 use crate::{Distribution, DynamicHistogramSeriesView, Histogram, exp_buckets::ExpBucketsSnapshot};
@@ -135,9 +136,14 @@ pub trait HistogramSnapshot {
 pub trait DistributionSnapshot {
     fn count(&self) -> u64;
     fn sum(&self) -> u64;
+    /// Lower integer bucket bound, not necessarily a recorded minimum.
     fn min(&self) -> Option<u64>;
+    /// Upper integer bucket bound, not necessarily a recorded maximum.
     fn max(&self) -> Option<u64>;
     fn zero_count(&self) -> u64;
+    /// Visit occupied positive buckets as `(OTLP scale-zero index, count)`.
+    ///
+    /// Indices span -1..=63; index `i` covers `(2^i, 2^(i+1)]`.
     fn visit_positive_buckets(&self, visitor: &mut dyn FnMut(i32, u64));
 }
 
@@ -268,10 +274,11 @@ impl DistributionSnapshot for ExpBucketsSnapshot {
     }
 }
 
+/// Visit occupied storage slots using upper-inclusive scale-zero wire indices.
 fn visit_positive_buckets(snapshot: &ExpBucketsSnapshot, visitor: &mut dyn FnMut(i32, u64)) {
     for (index, count) in snapshot.positive.iter().copied().enumerate() {
         if count > 0 {
-            visitor(index as i32, count);
+            visitor(index as i32 - 1, count);
         }
     }
 }
@@ -327,11 +334,11 @@ mod tests {
             vec![
                 MetricLabel {
                     name: "endpoint_uuid",
-                    value: "ep-1",
+                    value: "ep-1"
                 },
                 MetricLabel {
                     name: "org_id",
-                    value: "org-a",
+                    value: "org-a"
                 },
             ]
         );

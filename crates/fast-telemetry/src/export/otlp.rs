@@ -1,3 +1,4 @@
+// Modified for EDEN-3278 (2026-10-28): upper-inclusive distribution buckets.
 //! OTLP (OpenTelemetry Protocol) export for fast-telemetry metrics.
 //!
 //! Converts fast-telemetry metric types into OTLP protobuf messages for export
@@ -396,7 +397,11 @@ impl OtlpExport for SampledTimer {
     }
 }
 
-/// Build an OTLP ExponentialHistogramDataPoint from an ExpBucketsSnapshot.
+/// Build a cumulative scale-zero point from upper-inclusive storage slots.
+///
+/// Positive slot `s` is OTLP index `s - 1`. Bucket bounds are not observed
+/// extrema, so optional `min`/`max` remain absent. Start time remains unknown
+/// (zero); zero/count/sum, attributes, and the caller's timestamp are preserved.
 fn exp_histogram_data_point(
     snap: &ExpBucketsSnapshot,
     attributes: Vec<pb::KeyValue>,
@@ -418,7 +423,7 @@ fn exp_histogram_data_point(
         (Some(first), Some(last)) => {
             let bucket_counts: Vec<u64> = snap.positive[first..=last].to_vec();
             Some(pb::exponential_histogram_data_point::Buckets {
-                offset: first as i32,
+                offset: first as i32 - 1,
                 bucket_counts,
             })
         }
@@ -434,8 +439,8 @@ fn exp_histogram_data_point(
         zero_count: snap.zero_count,
         positive,
         negative: None, // u64 values are always non-negative
-        min: snap.min().map(|v| v as f64),
-        max: snap.max().map(|v| v as f64),
+        min: None,      // observed extrema are not retained by ExpBuckets
+        max: None,
         ..Default::default()
     }
 }
@@ -1120,6 +1125,229 @@ mod tests {
         }
     }
 
+    /// Exercise the actual SDK export and protobuf codec without a transport.
+    fn round_trip_distribution_metrics(metrics: Vec<pb::Metric>) -> Vec<pb::Metric> {
+        use prost::Message;
+
+        let resource = build_resource("boundary-service", &[("deployment", "linux")]);
+        let request = build_export_request(&resource, "boundary-scope", metrics);
+        let encoded = request.encode_to_vec();
+        let decoded = pb::ExportMetricsServiceRequest::decode(encoded.as_slice())
+            .expect("decode SDK metrics protobuf");
+        assert_eq!(decoded, request);
+        assert_eq!(decoded.resource_metrics.len(), 1);
+        let rm = &decoded.resource_metrics[0];
+        assert_eq!(rm.resource.as_ref(), Some(&resource));
+        assert!(rm.schema_url.is_empty());
+        assert_eq!(rm.scope_metrics.len(), 1);
+        let sm = &rm.scope_metrics[0];
+        assert_eq!(
+            sm.scope,
+            Some(pb::InstrumentationScope {
+                name: "boundary-scope".to_string(),
+                ..Default::default()
+            })
+        );
+        assert!(sm.schema_url.is_empty());
+        sm.metrics.clone()
+    }
+
+    /// Compute expected wire indices from integer interval membership, without CLZ.
+    fn expected_positive_buckets(
+        values: &[u64],
+    ) -> Option<pb::exponential_histogram_data_point::Buckets> {
+        let mut counts = std::collections::BTreeMap::<i32, u64>::new();
+        for &value in values {
+            if value == 0 {
+                continue;
+            }
+            let mut index = -1;
+            let mut upper = 1u128;
+            while u128::from(value) > upper {
+                index += 1;
+                upper *= 2;
+            }
+            *counts.entry(index).or_default() += 1;
+        }
+        let first = *counts.keys().next()?;
+        let last = *counts.keys().next_back().expect("nonempty counts");
+        Some(pb::exponential_histogram_data_point::Buckets {
+            offset: first,
+            bucket_counts: (first..=last)
+                .map(|i| counts.get(&i).copied().unwrap_or(0))
+                .collect(),
+        })
+    }
+
+    /// Compare every protobuf data-point field, including optional-field presence.
+    fn assert_distribution_point(
+        point: &pb::ExponentialHistogramDataPoint,
+        values: &[u64],
+        attributes: Vec<pb::KeyValue>,
+    ) {
+        // Test populations deliberately keep the integer sum within u64.
+        let sum: u64 = values.iter().sum();
+        let expected = pb::ExponentialHistogramDataPoint {
+            attributes,
+            time_unix_nano: test_timestamp(),
+            count: values.len() as u64,
+            sum: Some(sum as f64),
+            scale: 0,
+            zero_count: values.iter().filter(|&&v| v == 0).count() as u64,
+            positive: expected_positive_buckets(values),
+            negative: None,
+            min: None,
+            max: None,
+            ..Default::default()
+        };
+        assert_eq!(point, &expected);
+        let positive_count: u64 = point
+            .positive
+            .as_ref()
+            .map(|b| b.bucket_counts.iter().sum())
+            .unwrap_or(0);
+        assert_eq!(point.count, point.zero_count + positive_count);
+    }
+
+    /// Inspect metric identity and temporality before returning its one data point.
+    fn distribution_point<'a>(
+        metric: &'a pb::Metric,
+        name: &str,
+    ) -> &'a pb::ExponentialHistogramDataPoint {
+        assert_eq!(metric.name, name);
+        assert_eq!(metric.description, "Boundary population");
+        assert!(metric.unit.is_empty());
+        let Some(pb::metric::Data::ExponentialHistogram(hist)) = &metric.data else {
+            panic!("expected exponential histogram");
+        };
+        assert_eq!(
+            hist.aggregation_temporality,
+            pb::AggregationTemporality::Cumulative as i32
+        );
+        assert_eq!(hist.data_points.len(), 1);
+        &hist.data_points[0]
+    }
+
+    #[test]
+    fn distribution_otlp_protobuf_preserves_integer_boundary_membership() {
+        let mut cases = std::collections::BTreeSet::from([0, 1, 2, 3, 200, u64::MAX]);
+        for exponent in 0..64 {
+            let power = 1u64 << exponent;
+            cases.insert(power - 1);
+            cases.insert(power);
+            cases.insert(power + 1);
+        }
+        for value in cases {
+            // Separate populations avoid sum overflow for large single values.
+            let dist = Distribution::new(4);
+            dist.record(value);
+            let mut metrics = Vec::new();
+            dist.export_otlp(
+                &mut metrics,
+                "boundary",
+                "Boundary population",
+                test_timestamp(),
+            );
+            let metrics = round_trip_distribution_metrics(metrics);
+            assert_eq!(metrics.len(), 1);
+            assert_distribution_point(
+                distribution_point(&metrics[0], "boundary"),
+                &[value],
+                Vec::new(),
+            );
+        }
+    }
+
+    #[test]
+    fn distribution_otlp_protobuf_remains_cumulative_without_extrema() {
+        for initial in [
+            Vec::new(),
+            vec![0, 0],
+            vec![0, 1, 2, 3, 4, 7, 8, 9, 127, 128, 129, 200, 255, 256, 257],
+        ] {
+            let dist = Distribution::new(4);
+            for &value in &initial {
+                dist.record(value);
+            }
+            let mut expected = initial;
+            for addition in [None, Some(200)] {
+                if let Some(value) = addition {
+                    dist.record(value);
+                    expected.push(value);
+                }
+                let mut metrics = Vec::new();
+                dist.export_otlp(
+                    &mut metrics,
+                    "cumulative",
+                    "Boundary population",
+                    test_timestamp(),
+                );
+                let metrics = round_trip_distribution_metrics(metrics);
+                assert_eq!(metrics.len(), 1);
+                assert_distribution_point(
+                    distribution_point(&metrics[0], "cumulative"),
+                    &expected,
+                    Vec::new(),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dynamic_distribution_otlp_protobuf_preserves_labels_and_cumulative_series() {
+        let dist = DynamicDistribution::new(4);
+        let get = dist.series(&[("method", "GET")]);
+        let mut get_values = vec![0, 1, 2, 3, 200];
+        for &value in &get_values {
+            get.record(value);
+        }
+        for value in [0, 0] {
+            dist.record(&[("method", "POST")], value);
+        }
+        dist.record(&[("method", "MAX")], u64::MAX);
+        for addition in [None, Some(200)] {
+            if let Some(value) = addition {
+                // Exercise the label-lookup path as well as the cached handle.
+                dist.record(&[("method", "GET")], value);
+                get_values.push(value);
+            }
+            let mut metrics = Vec::new();
+            dist.export_otlp(
+                &mut metrics,
+                "labeled",
+                "Boundary population",
+                test_timestamp(),
+            );
+            let metrics = round_trip_distribution_metrics(metrics);
+            assert_eq!(metrics.len(), 1);
+            let metric = &metrics[0];
+            assert_eq!(metric.name, "labeled");
+            assert_eq!(metric.description, "Boundary population");
+            assert!(metric.unit.is_empty());
+            let Some(pb::metric::Data::ExponentialHistogram(hist)) = &metric.data else {
+                panic!("expected exponential histogram");
+            };
+            assert_eq!(
+                hist.aggregation_temporality,
+                pb::AggregationTemporality::Cumulative as i32
+            );
+            assert_eq!(hist.data_points.len(), 3);
+            for (method, values) in [
+                ("GET", get_values.as_slice()),
+                ("POST", &[0, 0][..]),
+                ("MAX", &[u64::MAX][..]),
+            ] {
+                let attributes = vec![make_kv("method", method)];
+                let point = hist
+                    .data_points
+                    .iter()
+                    .find(|dp| dp.attributes == attributes)
+                    .expect("labeled data point");
+                assert_distribution_point(point, values, attributes);
+            }
+        }
+    }
+
     #[test]
     fn test_distribution_otlp() {
         let dist = Distribution::new(4);
@@ -1155,8 +1383,11 @@ mod tests {
                 // positive buckets should be set
                 assert!(dp.positive.is_some());
                 let positive = dp.positive.as_ref().expect("positive buckets");
-                // 100 -> bucket 6, 200 -> bucket 7, 300 -> bucket 8
-                assert!(!positive.bucket_counts.is_empty());
+                // Wire indices 6, 7, 8 cover (64,128], (128,256], (256,512].
+                assert_eq!(positive.offset, 6);
+                assert_eq!(positive.bucket_counts, vec![1, 1, 1]);
+                assert_eq!(dp.min, None);
+                assert_eq!(dp.max, None);
             }
             other => panic!("expected ExponentialHistogram, got {:?}", other),
         }
