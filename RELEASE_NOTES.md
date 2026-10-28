@@ -1,5 +1,27 @@
 # Release Notes
 
+## 0.11.0 proposal — not released or runtime-qualified
+
+EDEN-3278 (2026-10-28) corrects distribution membership at OTLP scale zero:
+positive integer storage uses 65 upper-inclusive slots, and OTLP/ClickHouse
+offsets and structured visitor indices are the storage slot minus one.
+OTLP omits optional observed min/max because only bucket bounds are retained.
+
+This changes the public positive snapshot array from 64 to 65 elements and
+generated DogStatsD delta arrays from 65 to 66. Core and macros must advance
+together. Export and tracing retain the existing coordinated four-crate release
+line and consume the same core identity; their versions and workspace dependency
+requirements advance to 0.11.0 without unrelated dependency upgrades.
+Rebuild downstream derive output and custom snapshot/state users.
+
+Recording still performs three relaxed atomic updates without CAS, allocation
+or floating-point logarithms. Added source regressions cover raw integer
+boundaries, protobuf field presence, cumulative and labeled populations, the
+full unsigned range, and DogStatsD zero/final-slot isolation. No tests,
+benchmarks, package verification, publication or Eden adoption have run for
+this external proposal. See `docs/metrics-and-spans.md` for the contract and
+the retained direct-ClickHouse extrema limitation.
+
 ## 0.10.0 - 2026-10-20
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`,

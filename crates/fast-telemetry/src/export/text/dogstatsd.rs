@@ -1,8 +1,10 @@
+// Modified for EDEN-3278 (2026-10-28): upper-inclusive distribution buckets.
 use crate::{
     Counter, Distribution, DynamicCounter, DynamicDistribution, DynamicGauge, DynamicGaugeI64,
     DynamicHistogram, DynamicLabelSet, Gauge, GaugeF64, Histogram, LabelEnum, LabeledCounter,
     LabeledGauge, LabeledHistogram, LabeledSampledTimer, MaxGauge, MaxGaugeF64, MinGauge,
-    MinGaugeF64, SampledTimer, exp_buckets::ExpBucketsSnapshot,
+    MinGaugeF64, SampledTimer,
+    exp_buckets::{ExpBucketsSnapshot, POSITIVE_BUCKETS},
 };
 
 use super::fast_format::{FastFormat, push_f64_compact};
@@ -261,14 +263,15 @@ fn write_dogstatsd_distribution_dynamic_pairs(
 /// Write DogStatsD `|d` distribution lines for the **delta** between the current
 /// snapshot and previously-stored bucket counts.
 ///
-/// `previous` is a `[u64; 65]` array: indices 0..64 are positive buckets,
-/// index 64 is the zero-count.  Updated in-place to the current values.
+/// `previous` has 66 cells: positive slots 0 through 64 and zero at index 65.
+/// Updated in-place to the current values; the final positive slot and zero
+/// have distinct state even for recordings near `u64::MAX`.
 #[doc(hidden)]
 pub fn __write_dogstatsd_distribution_delta(
     output: &mut String,
     name: &str,
     current: &ExpBucketsSnapshot,
-    previous: &mut [u64; 65],
+    previous: &mut [u64; POSITIVE_BUCKETS + 1],
     tags: &[(&str, &str)],
 ) {
     for (i, &cur) in current.positive.iter().enumerate() {
@@ -281,8 +284,10 @@ pub fn __write_dogstatsd_distribution_delta(
             output.push('\n');
         }
     }
-    let zero_delta = current.zero_count.saturating_sub(previous[64]);
-    previous[64] = current.zero_count;
+    let zero_delta = current
+        .zero_count
+        .saturating_sub(previous[POSITIVE_BUCKETS]);
+    previous[POSITIVE_BUCKETS] = current.zero_count;
     if zero_delta > 0 {
         write_distribution_sample(output, name, 0, zero_delta);
         append_tags(output, tags);
@@ -290,13 +295,13 @@ pub fn __write_dogstatsd_distribution_delta(
     }
 }
 
-/// Write DogStatsD `|d` distribution delta lines with dynamic labels.
+/// Write dynamic-label deltas using 65 positive state cells followed by zero.
 #[doc(hidden)]
 pub fn __write_dogstatsd_distribution_delta_dynamic(
     output: &mut String,
     name: &str,
     current: &ExpBucketsSnapshot,
-    previous: &mut [u64; 65],
+    previous: &mut [u64; POSITIVE_BUCKETS + 1],
     labels: &DynamicLabelSet,
     tags: &[(&str, &str)],
 ) {
@@ -310,8 +315,10 @@ pub fn __write_dogstatsd_distribution_delta_dynamic(
             output.push('\n');
         }
     }
-    let zero_delta = current.zero_count.saturating_sub(previous[64]);
-    previous[64] = current.zero_count;
+    let zero_delta = current
+        .zero_count
+        .saturating_sub(previous[POSITIVE_BUCKETS]);
+    previous[POSITIVE_BUCKETS] = current.zero_count;
     if zero_delta > 0 {
         write_distribution_sample(output, name, 0, zero_delta);
         append_tags_with_dynamic_labels(output, labels, tags);
@@ -319,13 +326,13 @@ pub fn __write_dogstatsd_distribution_delta_dynamic(
     }
 }
 
-/// Write DogStatsD `|d` distribution delta lines with dynamic labels as borrowed pairs.
+/// Write borrowed-label deltas using 65 positive state cells followed by zero.
 #[doc(hidden)]
 pub fn __write_dogstatsd_distribution_delta_dynamic_pairs(
     output: &mut String,
     name: &str,
     current: &ExpBucketsSnapshot,
-    previous: &mut [u64; 65],
+    previous: &mut [u64; POSITIVE_BUCKETS + 1],
     labels: &[(String, String)],
     tags: &[(&str, &str)],
 ) {
@@ -339,8 +346,10 @@ pub fn __write_dogstatsd_distribution_delta_dynamic_pairs(
             output.push('\n');
         }
     }
-    let zero_delta = current.zero_count.saturating_sub(previous[64]);
-    previous[64] = current.zero_count;
+    let zero_delta = current
+        .zero_count
+        .saturating_sub(previous[POSITIVE_BUCKETS]);
+    previous[POSITIVE_BUCKETS] = current.zero_count;
     if zero_delta > 0 {
         write_distribution_sample(output, name, 0, zero_delta);
         append_tags_with_dynamic_label_pairs(output, labels, tags);
