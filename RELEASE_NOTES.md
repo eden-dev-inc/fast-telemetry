@@ -1,6 +1,9 @@
 # Release Notes
 
-## 0.11.0 — Unreleased
+## 0.11.0 - 2026-11-06
+
+Published crates: `fast-telemetry`, `fast-telemetry-macros`,
+`fast-telemetry-export`, `fast-telemetry-tracing`.
 
 EDEN-3278 (2026-10-28) corrects distribution membership at OTLP scale zero:
 positive integer storage uses 65 upper-inclusive slots, and OTLP/ClickHouse
@@ -25,7 +28,7 @@ benchmark rounds against 0.10.0 measured median candidate/baseline ratios of
 lookup. Two-thread contention measured 1.226 (range 1.005–1.334); these shared-host
 measurements do not establish a production capacity claim. See
 `docs/metrics-and-spans.md` for the contract and the retained direct-ClickHouse
-extrema limitation. The 0.11.0 crates remain unpublished.
+extrema limitation.
 
 `OtlpConfig` and `SpanExportConfig` accept additional CA certificates and an
 mTLS client identity through `with_ca_certificate_pem` and
