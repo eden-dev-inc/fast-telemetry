@@ -48,6 +48,9 @@ pub struct OtlpConfig {
     /// - `("Authorization", "Bearer <token>")`
     /// - `("x-api-key", "<key>")`
     pub headers: Vec<(String, String)>,
+    /// Additional trust roots and an optional mTLS identity for `https://`
+    /// collectors. The monoio exporter does not support TLS.
+    pub tls: OtlpTlsConfig,
 }
 
 impl Default for OtlpConfig {
@@ -60,6 +63,7 @@ impl Default for OtlpConfig {
             resource_attributes: Vec::new(),
             timeout: Duration::from_secs(10),
             headers: Vec::new(),
+            tls: OtlpTlsConfig::default(),
         }
     }
 }
@@ -100,6 +104,30 @@ impl OtlpConfig {
     pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
+    }
+
+    /// Trust the CA certificates in a PEM bundle, in addition to the built-in
+    /// roots, for a collector behind a private CA.
+    pub fn with_ca_certificate_pem(mut self, pem: impl Into<Vec<u8>>) -> Self {
+        self.tls.ca_certificates_pem.push(pem.into());
+        self
+    }
+
+    /// Present a client certificate chain and private key, in one PEM, to a
+    /// collector that requires mTLS.
+    pub fn with_client_identity_pem(mut self, pem: impl Into<Vec<u8>>) -> Self {
+        self.tls.client_identity_pem = Some(pem.into());
+        self
+    }
+
+    /// The shared HTTP client settings this exporter uses.
+    fn http_config(&self) -> OtlpHttpConfig {
+        let mut http = OtlpHttpConfig::new(&self.endpoint).with_timeout(self.timeout);
+        for (name, value) in &self.headers {
+            http = http.with_header(name, value);
+        }
+        http.tls = self.tls.clone();
+        http
     }
 }
 
@@ -184,11 +212,7 @@ where
         .collect();
     let resource = build_resource(&config.service_name, &attr_refs);
 
-    let mut http_config = OtlpHttpConfig::new(&config.endpoint).with_timeout(config.timeout);
-    for (name, value) in &config.headers {
-        http_config = http_config.with_header(name, value);
-    }
-    let client = match OtlpHttpClient::new(http_config) {
+    let client = match OtlpHttpClient::new(config.http_config()) {
         Ok(c) => c,
         Err(e) => {
             crate::logging::log_error!("Failed to build HTTP client for OTLP exporter: {e}");
@@ -820,5 +844,28 @@ mod monoio_tests {
         .unwrap();
         assert_eq!(response.status, 204);
         assert!(response.body.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn http_client_receives_timeout_headers_and_tls() {
+        let config = OtlpConfig::new("https://collector:4318")
+            .with_timeout(Duration::from_secs(3))
+            .with_header("authorization", "Basic abc")
+            .with_ca_certificate_pem(b"ca".to_vec())
+            .with_client_identity_pem(b"identity".to_vec());
+        let http = config.http_config();
+        assert_eq!(http.endpoint, "https://collector:4318");
+        assert_eq!(http.timeout, Duration::from_secs(3));
+        assert_eq!(
+            http.headers,
+            vec![("authorization".to_string(), "Basic abc".to_string())]
+        );
+        assert_eq!(http.tls.ca_certificates_pem, vec![b"ca".to_vec()]);
+        assert_eq!(http.tls.client_identity_pem, Some(b"identity".to_vec()));
     }
 }

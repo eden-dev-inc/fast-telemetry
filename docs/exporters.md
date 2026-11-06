@@ -59,6 +59,13 @@ tokio::spawn(run(config, cancel, move | out| {
 The OTLP metrics exporter gzip-compresses larger payloads automatically and
 applies exponential backoff on transport failures.
 
+For a collector behind a private CA, add its roots with
+`with_ca_certificate_pem`, in addition to the built-in roots. A collector that
+requires mTLS takes a client certificate chain and key in one PEM through
+`with_client_identity_pem`. `SpanExportConfig` has the same two methods. Invalid
+material stops the exporter before its first export and logs why when
+`logging` is enabled.
+
 ### OTLP Spans
 
 ```rust

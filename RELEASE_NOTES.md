@@ -1,5 +1,14 @@
 # Release Notes
 
+## Unreleased
+
+- `OtlpConfig` and `SpanExportConfig` accept additional CA certificates and an
+  mTLS client identity through `with_ca_certificate_pem` and
+  `with_client_identity_pem`, and pass them to the shared HTTP client. The
+  Tokio metric and span exporters can now reach a collector behind a private CA.
+  Both structs gain a public `tls` field, so code that builds them with struct
+  literals must add it or use `..Default::default()`.
+
 ## 0.10.0 - 2026-10-20
 
 Published crates: `fast-telemetry`, `fast-telemetry-macros`,
