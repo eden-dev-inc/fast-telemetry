@@ -15,6 +15,8 @@ use fast_telemetry::span::{SpanBatch, SpanCollector};
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
+use crate::otlp::{OtlpHttpConfig, OtlpTlsConfig};
+
 /// Configuration for the OTLP span exporter.
 #[derive(Clone)]
 pub struct SpanExportConfig {
@@ -36,6 +38,9 @@ pub struct SpanExportConfig {
     /// Maximum spans per HTTP request (default: 512, must be positive).
     /// Larger drains are split into multiple requests without truncation.
     pub max_batch_size: usize,
+    /// Additional trust roots and an optional mTLS identity for `https://`
+    /// collectors.
+    pub tls: OtlpTlsConfig,
 }
 
 impl Default for SpanExportConfig {
@@ -49,6 +54,7 @@ impl Default for SpanExportConfig {
             timeout: Duration::from_secs(10),
             headers: Vec::new(),
             max_batch_size: 512,
+            tls: OtlpTlsConfig::default(),
         }
     }
 }
@@ -107,6 +113,30 @@ impl SpanExportConfig {
         assert!(size > 0, "span request limit must be positive");
         self.max_batch_size = size;
         self
+    }
+
+    /// Trust the CA certificates in a PEM bundle, in addition to the built-in
+    /// roots, for a collector behind a private CA.
+    pub fn with_ca_certificate_pem(mut self, pem: impl Into<Vec<u8>>) -> Self {
+        self.tls.ca_certificates_pem.push(pem.into());
+        self
+    }
+
+    /// Present a client certificate chain and private key, in one PEM, to a
+    /// collector that requires mTLS.
+    pub fn with_client_identity_pem(mut self, pem: impl Into<Vec<u8>>) -> Self {
+        self.tls.client_identity_pem = Some(pem.into());
+        self
+    }
+
+    /// The shared HTTP client settings this exporter uses.
+    fn http_config(&self) -> OtlpHttpConfig {
+        let mut http = OtlpHttpConfig::new(&self.endpoint).with_timeout(self.timeout);
+        for (name, value) in &self.headers {
+            http = http.with_header(name, value);
+        }
+        http.tls = self.tls.clone();
+        http
     }
 }
 
@@ -299,12 +329,7 @@ pub async fn run(
         .collect();
     let resource = build_resource(&config.service_name, &attr_refs);
 
-    let mut http_config =
-        crate::otlp::OtlpHttpConfig::new(&config.endpoint).with_timeout(config.timeout);
-    for (name, value) in &config.headers {
-        http_config = http_config.with_header(name, value);
-    }
-    let client = match crate::otlp::OtlpHttpClient::new(http_config) {
+    let client = match crate::otlp::OtlpHttpClient::new(config.http_config()) {
         Ok(c) => c,
         Err(e) => {
             crate::logging::log_error!("Failed to build HTTP client for span exporter: {e}");
@@ -462,6 +487,24 @@ mod tests {
     use fast_telemetry::CompletedSpan;
     use fast_telemetry::otlp::build_trace_export_request;
     use prost::Message;
+
+    #[test]
+    fn http_client_receives_timeout_headers_and_tls() {
+        let config = SpanExportConfig::new("https://collector:4318")
+            .with_timeout(Duration::from_secs(3))
+            .with_header("authorization", "Basic abc")
+            .with_ca_certificate_pem(b"ca".to_vec())
+            .with_client_identity_pem(b"identity".to_vec());
+        let http = config.http_config();
+        assert_eq!(http.endpoint, "https://collector:4318");
+        assert_eq!(http.timeout, Duration::from_secs(3));
+        assert_eq!(
+            http.headers,
+            vec![("authorization".to_string(), "Basic abc".to_string())]
+        );
+        assert_eq!(http.tls.ca_certificates_pem, vec![b"ca".to_vec()]);
+        assert_eq!(http.tls.client_identity_pem, Some(b"identity".to_vec()));
+    }
 
     #[test]
     #[should_panic(expected = "span request limit must be positive")]
