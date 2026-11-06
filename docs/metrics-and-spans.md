@@ -1,5 +1,40 @@
 # Metrics and Spans
 
+<!-- Modified for EDEN-3278 (2026-10-28): distribution bucket contract. -->
+
+### Distribution bucket contract (0.11)
+
+`Distribution` and `DynamicDistribution` retain unsigned integer measurements in
+65 positive slots plus a separate zero count. Positive slot `s` is
+`ceil(log2(value))`: slot 0 contains 1, and slots 1 through 64 contain integers
+in `(2^(s-1), 2^s]`, with the final slot clipped to `u64::MAX`.
+The corresponding OTLP scale-zero index is `s - 1`, ranging from -1 to 63.
+Thus 1 maps to index -1, 2 to 0, 3 and 4 to 1, and 200 to 7.
+
+The public bucket snapshot array changes from 64 to 65 elements in 0.11.
+Structured `DistributionSnapshot` visitors receive OTLP indices, not storage
+slots. Generated DogStatsD delta state changes from 65 to 66 elements so that
+the highest positive slot and the zero count have distinct state. Regenerate
+derive output using the matching 0.11 macros; do not reuse old serialized or
+manually constructed state. DogStatsD still exports approximate midpoint
+samples, not original measurements.
+
+Recording retains one bucket-or-zero increment, one sum addition and one count
+addition, all relaxed atomic operations. The extra positive slot adds one
+`u64` to raw per-cell storage and snapshots. Actual padded size, allocator usage
+and CPU cost depend on the target and require measurement. Snapshots use
+independent reads and are not atomic cuts during concurrent recording. Existing
+`u64` counter/sum overflow and integer-to-`f64` rounding behavior is unchanged.
+
+`min()` and `max()` remain integer bucket bounds, not observed extrema. OTLP
+omits optional min/max rather than reporting these bounds as actual observations.
+Count, sum, zero count, attributes, cumulative temporality, timestamp and the
+unknown start time (zero) retain their existing behavior. Negative buckets remain
+absent because recordings are unsigned. The direct ClickHouse adapter uses the
+same corrected bucket indices; its existing nonoptional Min/Max columns remain
+approximate bounds and must not be interpreted as measured extrema. This change
+does not migrate that schema.
+
 ### Extrema Gauges
 
 Use extrema gauges when you want peak/trough tracking without putting a single

@@ -1,3 +1,4 @@
+// Modified for EDEN-3278 (2026-10-28): upper-inclusive distribution buckets.
 //! Derive macros for fast-telemetry.
 //!
 //! Provides:
@@ -155,6 +156,10 @@ fn visitor_label(label: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
 /// (`LabeledCounter<L>`, `LabeledGauge<L>`, `LabeledHistogram<L>`,
 /// `LabeledSampledTimer<L>`), and runtime-labeled metrics (`DynamicCounter`,
 /// `DynamicGauge`, `DynamicGaugeI64`, `DynamicHistogram`, `DynamicDistribution`).
+///
+/// Distribution delta state has 66 counters: 65 positive slots and zero.
+/// Generated code requires the matching 0.11 core helper signatures; regenerate
+/// state rather than reusing arrays produced by earlier macro versions.
 ///
 /// # Example
 ///
@@ -440,8 +445,8 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 });
                 let buckets_state_field = format_ident!("{}_buckets", field_name);
                 state_label_count_exprs.push(quote! { 0usize });
-                state_fields.push(quote! { #buckets_state_field: [u64; 65], });
-                state_inits.push(quote! { #buckets_state_field: [0u64; 65], });
+                state_fields.push(quote! { #buckets_state_field: [u64; 66], });
+                state_inits.push(quote! { #buckets_state_field: [0u64; 66], });
                 delta_exports.push(quote! {
                     let snap = self.#field_name.buckets_snapshot();
                     fast_telemetry::__macro_support::__write_dogstatsd_distribution_delta(
@@ -565,7 +570,7 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                 state_label_count_exprs.push(quote! {
                     self.#buckets_state_field.len()
                 });
-                state_fields.push(quote! { #buckets_state_field: std::collections::HashMap<fast_telemetry::DynamicLabelSet, [u64; 65]>, });
+                state_fields.push(quote! { #buckets_state_field: std::collections::HashMap<fast_telemetry::DynamicLabelSet, [u64; 66]>, });
                 state_inits
                     .push(quote! { #buckets_state_field: std::collections::HashMap::new(), });
                 delta_exports.push(quote! {
@@ -573,7 +578,7 @@ fn derive_export_metrics_impl(input: DeriveInput) -> syn::Result<TokenStream> {
                     self.#field_name.visit_series(|labels, _count, _sum, snap| {
                         let key = fast_telemetry::DynamicLabelSet::from_canonical_pairs(labels);
                         current_keys.insert(key.clone());
-                        let prev = state.#buckets_state_field.entry(key).or_insert([0u64; 65]);
+                        let prev = state.#buckets_state_field.entry(key).or_insert([0u64; 66]);
                         fast_telemetry::__macro_support::__write_dogstatsd_distribution_delta_dynamic_pairs(
                             output, #statsd_metric_name, &snap, prev, labels, tags
                         );

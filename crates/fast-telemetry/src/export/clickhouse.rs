@@ -1,3 +1,4 @@
+// Modified for EDEN-3278 (2026-10-28): upper-inclusive distribution buckets.
 //! First-party ClickHouse row export for metric primitives.
 //!
 //! This feature builds ClickHouse-native row batches directly from
@@ -356,7 +357,9 @@ pub struct ExpHistogramRow {
     pub NegativeOffset: i32,
     pub NegativeBucketCounts: Vec<u64>,
     pub Flags: u32,
+    /// Bucket lower bound, or zero if empty; not an observed minimum.
     pub Min: f64,
+    /// Bucket upper bound, or zero if empty; not an observed maximum.
     pub Max: f64,
     pub AggregationTemporality: i32,
 }
@@ -391,11 +394,12 @@ fn cumulative_to_delta_buckets(
     (bucket_counts, explicit_bounds)
 }
 
+/// Compact positive slots into the same scale-zero indices used by OTLP.
 fn compact_positive_buckets(snap: &ExpBucketsSnapshot) -> (i32, Vec<u64>) {
     let first = snap.positive.iter().position(|&count| count > 0);
     let last = snap.positive.iter().rposition(|&count| count > 0);
     match (first, last) {
-        (Some(first), Some(last)) => (first as i32, snap.positive[first..=last].to_vec()),
+        (Some(first), Some(last)) => (first as i32 - 1, snap.positive[first..=last].to_vec()),
         _ => (0, Vec::new()),
     }
 }
@@ -785,6 +789,34 @@ mod tests {
         assert_eq!(batch.total_rows(), 1);
         assert_eq!(batch.sums[0].MetricName, "requests");
         assert_eq!(batch.sums[0].Value, 42.0);
+    }
+
+    #[test]
+    fn clickhouse_distribution_indices_cover_one_and_u64_max() {
+        for (values, offset, counts) in [
+            (vec![0, 1, 2, 3, 200], -1, vec![1, 1, 1, 0, 0, 0, 0, 0, 1]),
+            (vec![u64::MAX], 63, vec![1]),
+            (vec![0, 0], 0, Vec::new()),
+        ] {
+            let distribution = Distribution::new(4);
+            for &value in &values {
+                distribution.record(value);
+            }
+            let mut batch = ClickHouseMetricBatch::new("test");
+            distribution.export_clickhouse(&mut batch, "boundaries", "", 123);
+            assert_eq!(batch.exp_histograms.len(), 1);
+            let row = &batch.exp_histograms[0];
+            assert_eq!(row.PositiveOffset, offset);
+            assert_eq!(row.PositiveBucketCounts, counts);
+            assert_eq!(row.Count, values.len() as u64);
+            assert_eq!(
+                row.ZeroCount,
+                values.iter().filter(|&&v| v == 0).count() as u64
+            );
+            assert_eq!(row.Sum, values.iter().sum::<u64>() as f64);
+            assert_eq!(row.Scale, 0);
+            assert!(row.NegativeBucketCounts.is_empty());
+        }
     }
 
     #[test]

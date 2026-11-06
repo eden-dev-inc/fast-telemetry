@@ -1,13 +1,39 @@
 # Release Notes
 
-## Unreleased
+## 0.11.0 — Unreleased
 
-- `OtlpConfig` and `SpanExportConfig` accept additional CA certificates and an
-  mTLS client identity through `with_ca_certificate_pem` and
-  `with_client_identity_pem`, and pass them to the shared HTTP client. The
-  Tokio metric and span exporters can now reach a collector behind a private CA.
-  Both structs gain a public `tls` field, so code that builds them with struct
-  literals must add it or use `..Default::default()`.
+EDEN-3278 (2026-10-28) corrects distribution membership at OTLP scale zero:
+positive integer storage uses 65 upper-inclusive slots, and OTLP/ClickHouse
+offsets and structured visitor indices are the storage slot minus one.
+OTLP omits optional observed min/max because only bucket bounds are retained.
+
+This changes the public positive snapshot array from 64 to 65 elements and
+generated DogStatsD delta arrays from 65 to 66. Core and macros must advance
+together. Export and tracing retain the existing coordinated four-crate release
+line and consume the same core identity; their versions and workspace dependency
+requirements advance to 0.11.0 without unrelated dependency upgrades.
+Rebuild downstream derive output and custom snapshot/state users.
+
+Recording still performs three relaxed atomic updates without CAS, allocation
+or floating-point logarithms. Added source regressions cover raw integer
+boundaries, protobuf field presence, cumulative and labeled populations, the
+full unsigned range, and DogStatsD zero/final-slot isolation. Canonical SDK
+tests, doctests, ClickHouse integration, tracing pipeline and four-crate package
+verification passed for the histogram correction. Five paired recording
+benchmark rounds against 0.10.0 measured median candidate/baseline ratios of
+0.995 for static distributions, 0.995 for dynamic handles and 0.996 for label
+lookup. Two-thread contention measured 1.226 (range 1.005–1.334); these shared-host
+measurements do not establish a production capacity claim. See
+`docs/metrics-and-spans.md` for the contract and the retained direct-ClickHouse
+extrema limitation. The 0.11.0 crates remain unpublished.
+
+`OtlpConfig` and `SpanExportConfig` accept additional CA certificates and an
+mTLS client identity through `with_ca_certificate_pem` and
+`with_client_identity_pem`, and pass them to the shared HTTP client. The
+Tokio metric and span exporters can now reach a collector behind a private CA.
+Both structs gain a public `tls` field, so code that builds them with struct
+literals must add it or use `..Default::default()`. The monoio metrics exporter
+continues to support plain HTTP only.
 
 ## 0.10.0 - 2026-10-20
 

@@ -1,13 +1,14 @@
+// Modified for EDEN-3278 (2026-10-28): upper-inclusive distribution buckets.
 //! Distribution: exponential histogram storage for high-performance recording.
 //!
 //! Uses base-2 exponential buckets with pre-allocated, thread-sharded cells.
 //! The hot path is a TLS read + bitmask index + 3 relaxed atomics (bucket
-//! increment, sum add, count add) — identical cost to a sharded counter.
+//! increment, sum add, count add), with integer upper-inclusive bucket mapping.
 //!
-//! OTLP export produces a native `ExponentialHistogram`.
-//! DogStatsD export produces count + sum counters (same as `Histogram`).
+//! OTLP export produces a native `ExponentialHistogram` without observed extrema.
+//! DogStatsD export produces representative `|d` samples from bucket midpoints.
 
-use crate::exp_buckets::{ExpBuckets, ExpBucketsSnapshot};
+use crate::exp_buckets::{ExpBuckets, ExpBucketsSnapshot, POSITIVE_BUCKETS};
 use crate::thread_id::thread_id;
 use crossbeam_utils::CachePadded;
 
@@ -73,12 +74,12 @@ impl Distribution {
         (sum, count)
     }
 
-    /// Approximate minimum from bucket boundaries.
+    /// Lower integer bound of the lowest occupied bucket, not an observed minimum.
     pub fn min(&self) -> Option<u64> {
         self.buckets_snapshot().min()
     }
 
-    /// Approximate maximum from bucket boundaries.
+    /// Upper integer bound of the highest occupied bucket, not an observed maximum.
     pub fn max(&self) -> Option<u64> {
         self.buckets_snapshot().max()
     }
@@ -92,9 +93,11 @@ impl Distribution {
         Some(self.sum() as f64 / count as f64)
     }
 
-    /// Merge bucket counts from all shards into a single snapshot.
+    /// Merge all 65 positive slots and zero/count/sum across shards.
+    ///
+    /// Independent relaxed reads do not provide an atomic cut during recording.
     pub fn buckets_snapshot(&self) -> ExpBucketsSnapshot {
-        let mut positive = [0u64; 64];
+        let mut positive = [0u64; POSITIVE_BUCKETS];
         let mut zero_count = 0u64;
         let mut sum = 0u64;
         let mut count = 0u64;
@@ -216,7 +219,7 @@ mod tests {
             .map(|_| {
                 let d = Arc::clone(&dist);
                 std::thread::spawn(move || {
-                    d.record(100); // bucket 6 (64..128)
+                    d.record(100); // slot 7: (64, 128]
                 })
             })
             .collect();
@@ -228,7 +231,7 @@ mod tests {
         let snap = dist.buckets_snapshot();
         assert_eq!(snap.count, 4);
         assert_eq!(snap.sum, 400);
-        assert_eq!(snap.positive[6], 4); // value 100 → bucket 6
+        assert_eq!(snap.positive[7], 4); // value 100 → slot 7
     }
 
     #[test]
@@ -249,11 +252,11 @@ mod tests {
     #[test]
     fn min_max_approximate() {
         let dist = Distribution::new(4);
-        dist.record(100); // bucket 6: [64, 128)
+        dist.record(100); // slot 7: (64, 128]
 
         // min returns lower bound of lowest non-zero bucket
-        assert_eq!(dist.min(), Some(64));
+        assert_eq!(dist.min(), Some(65));
         // max returns upper bound of highest non-zero bucket
-        assert_eq!(dist.max(), Some(127));
+        assert_eq!(dist.max(), Some(128));
     }
 }
